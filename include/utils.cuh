@@ -1,3 +1,4 @@
+#pragma once
 #include <mutex>
 #include <cassert>
 #include <atomic>

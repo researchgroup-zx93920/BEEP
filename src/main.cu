@@ -10,6 +10,7 @@
 
 #include "../include/Logger.cuh"
 #include "../include/FIleReader.cuh"
+#include "../include/CGArray.cuh"
 
 using namespace std;
 
@@ -135,14 +136,14 @@ void ReadTsv(char* filename, int* nr, int* nc, int* nnz, int** cooRows, int** co
 }
 
 
-void EdgesToCSRCOO(std::vector<EdgeTy<uint>> edges, int oneIndex, int* nr, int* nc, int* nnz, int** cooRows, int** cooColumns, int** rowPointer)
+void EdgesToCSRCOO(std::vector<EdgeTy<uint>> edges, int oneIndex, int* nr, int* nc, int* nnz, uint** cooRows, uint** cooColumns, uint** rowPointer)
 {
 	std::sort(edges.begin(), edges.end(), compareInterval);
 
 	*nnz = edges.size();
 	// alloc space for COO matrix
-	*cooRows = (int*)malloc(*nnz * sizeof(int));
-	*cooColumns = (int*)malloc(*nnz * sizeof(int));
+	*cooRows = (uint*)malloc(*nnz * sizeof(uint));
+	*cooColumns = (uint*)malloc(*nnz * sizeof(uint));
 	printf("Done reading edge list %d \n", *nnz);
 
 	*nr = 0;
@@ -170,7 +171,7 @@ void EdgesToCSRCOO(std::vector<EdgeTy<uint>> edges, int oneIndex, int* nr, int* 
 
 
 	// alloc space for CSR matrix
-	*rowPointer = (int*)malloc((*nr + 1) * sizeof(int));
+	*rowPointer = (uint*)malloc((*nr + 1) * sizeof(uint));
 
 	//Override the coo source
 	(*rowPointer)[0] = 0;
@@ -251,8 +252,8 @@ int main(int argc, char **argv){
 
 	int nnz, nr, nc;
 
-	int* source, * destination;
-	int* neighborlist;
+	//int* source, * destination;
+	//int* neighborlist;
 
 	char matr[] = "D:\\graphs\\as20000102_adj.tsv";
 
@@ -263,7 +264,20 @@ int main(int argc, char **argv){
 	while (f.get_edges(fileEdges, 10)) {
 		edges.insert(edges.end(), fileEdges.begin(), fileEdges.end());
 	}
+
+	GPUArray<uint> sl, dl, neil;
+
+	uint*& source = sl.cdata();
+	uint*& destination = dl.cdata();
+	uint*& neighborlist = neil.cdata();
+
+
 	EdgesToCSRCOO(edges, 1, &nr, &nc, &nnz, &source, &destination, &neighborlist);
+
+	sl.switch_to_gpu(0, nnz);
+	dl.switch_to_gpu(0, nnz);
+	neil.switch_to_gpu(0, nr+1);
+
 
 	//For weighted edges
 	//std::vector<WEdgeTy<uint, wtype>> wedges;
@@ -280,8 +294,8 @@ int main(int argc, char **argv){
 	
 	int h_A[] = {1,2,3,4,5,6,7,8,9,10};
 	
-	cuda_err_chk(cudaMalloc((void**) &d_A, count * sizeof(int)));
-	cuda_err_chk(cudaMemcpy(d_A, h_A, count * sizeof(int), cudaMemcpyHostToDevice));
+	CUDA_RUNTIME(cudaMalloc((void**) &d_A, count * sizeof(int)));
+	CUDA_RUNTIME(cudaMemcpy(d_A, h_A, count * sizeof(int), cudaMemcpyHostToDevice));
 	
 	add<<<1, count>>> (d_A, count);
 	

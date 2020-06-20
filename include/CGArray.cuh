@@ -31,6 +31,34 @@ public:
 		}
 	}
 
+	GPUArray() {}
+
+	~GPUArray()
+	{
+		if (_at == AllocationType::gpu)
+		{
+			free(cpu_data);
+		}
+		CUDA_RUNTIME(cudaFree(gpu_data));
+	}
+
+	void cpu(int size)
+	{
+		N = size;
+		cpu_data = (T*)malloc(size * sizeof(T));
+	}
+	void switch_to_gpu(int devId, int size)
+	{
+		N = size;
+		_at = AllocationType::gpu;
+		_deviceId = devId;
+		CUDA_RUNTIME(cudaSetDevice(_deviceId));
+		CUDA_RUNTIME(cudaStreamCreate(&_stream));
+		CUDA_RUNTIME(cudaMalloc(&gpu_data, N * sizeof(T)));
+		CUDA_RUNTIME(cudaMemcpy(gpu_data, cpu_data, N, cudaMemcpyKind::cudaMemcpyHostToDevice));
+	}
+
+
 	void zero(bool sync)
 	{
 		CUDA_RUNTIME(cudaSetDevice(_deviceId));
@@ -39,7 +67,7 @@ public:
 			CUDA_RUNTIME(cudaStreamSynchronize(stream_));
 	}
 
-	T* copytocpu(int startIndex, int count)
+	T*& copytocpu(int startIndex, int count)
 	{
 		if (unified)
 			return &(gpu_data[startIndex]);
@@ -49,13 +77,16 @@ public:
 		return cpu_data;
 	}
 
-	T* gdata()
+	T*& gdata()
 	{
 		return gpu_data;
 	}
 
-	T* cdata()
+	T*& cdata(AllocationType at)
 	{
+		if (at == AllocationType::unified)
+			return gpu_data;
+
 		return cpu_data;
 	}
 
