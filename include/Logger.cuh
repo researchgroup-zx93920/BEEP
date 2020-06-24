@@ -1,7 +1,9 @@
+#pragma once
 #include <stdio.h>
-enum logPriority{critical, warn, error, info, none};
+#include <stdarg.h>
+#include "utils.cuh"
 
-void prc(logPriority l)
+void prc(LogPriorityEnum l)
 {
 	switch (l)
 	{
@@ -20,6 +22,5 @@ void prc(logPriority l)
 	}
 }
 
+#define Log(l_, f_, ...) prc(l_); printf((f_), __VA_ARGS__); printf("\033[0m")
 
-
-#define Log(l_, f_, ...) prc(l_); printf((f_), __VA_ARGS__); prc(logPriority::none)

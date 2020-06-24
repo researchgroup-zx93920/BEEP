@@ -20,6 +20,12 @@
 #include <cuda_runtime_api.h>
 
 
+//Enums
+enum ProcessingElementEnum { Thread, Warp, Bolck, Grid };
+enum AllocationTypeEnum { cpuonly, gpu, unified, zerocopy };
+enum LogPriorityEnum { critical, warn, error, info, none };
+
+
 #define CUDA_RUNTIME(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=false) {
 
