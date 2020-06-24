@@ -11,9 +11,9 @@
 #include "../include/FIleReader.cuh"
 #include "../include/CGArray.cuh"
 #include "../include/TriCountPrim.cuh"
-#include "../include/TcBase.cuh"
-#include "../include/TcSerial.cuh"
-#include "../include/TcBinary.cuh"
+#include "../triangle_counting/TcBase.cuh"
+#include "../triangle_counting/TcSerial.cuh"
+#include "../triangle_counting/TcBinary.cuh"
 #include "../include/CSRCOO.cuh"
 
 using namespace std;
