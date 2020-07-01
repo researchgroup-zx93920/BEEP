@@ -1,6 +1,6 @@
 #pragma once
 
-
+typedef std::chrono::system_clock::time_point timepoint;
 typedef unsigned int uint;
 typedef uint wtype;
 typedef std::pair<uint, uint> Edge;
