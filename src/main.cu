@@ -15,6 +15,7 @@
 #include "../triangle_counting/TcSerial.cuh"
 #include "../triangle_counting/TcBinary.cuh"
 #include "../include/CSRCOO.cuh"
+#include "../triangle_counting/testHashing.cuh"
 
 using namespace std;
 
@@ -103,18 +104,19 @@ void ConstructTriList(graph::GPUArray<T>& triIndex, graph::GPUArray<T>& triPoint
 }
 
 
- timepoint stime()
+ 
+struct Node
 {
-	 return std::chrono::system_clock::now();
-}
+	uint val;
+	int i;
+	int r;
+	int l;
+	int p;
+};
 
- double elapsedSec(timepoint start)
- {
-	 return (std::chrono::system_clock::now() - start).count() / 1e9;
- }
 int main(int argc, char **argv){
 
-	CUDA_RUNTIME(cudaDeviceReset());
+	//CUDA_RUNTIME(cudaDeviceReset());
 
 	printf("\033[0m");
 
@@ -143,11 +145,13 @@ int main(int argc, char **argv){
 	dl.cdata() = csrcoo.col_ind();
 	neil.cdata() = csrcoo.row_ptr();
 
+	cudaDeviceSynchronize();
+
 	//2.b GPU
 	sl.switch_to_gpu(0, csrcoo.nnz());
 	dl.switch_to_gpu(0, csrcoo.nnz());
 	neil.switch_to_gpu(0, csrcoo.num_rows()+1);
-
+	cudaDeviceSynchronize();
 
 	for (int i = 10; i < csrcoo.num_rows(); i++)
 	{
@@ -173,7 +177,6 @@ int main(int argc, char **argv){
 	CountTriangles<uint>(tc, neil, sl, dl, csrcoo.nnz(), csrcoo.num_rows(), 0, ProcessingElementEnum::Thread, 0);
 
 
-
 	//Count traingles binary-search: Thread or Warp
 	int ee = csrcoo.nnz();
 	graph::TcBase<uint> *tcb = new graph::TcBinary<uint>(0, ee, csrcoo.num_rows());
@@ -185,123 +188,124 @@ int main(int argc, char **argv){
 	ConstructTriList(triIndex, triPointer, tcb, neil, sl, dl, csrcoo.nnz(), csrcoo.num_rows(), 0, ProcessingElementEnum::Warp);
 
 
-
 	//Hashing tests
 	//More tests on GPUArray
-
 	graph::GPUArray<uint> A("Test A: In", AllocationTypeEnum::cpuonly);
 	graph::GPUArray<uint> B("Test B: In", AllocationTypeEnum::cpuonly);
 
 
 
-	const uint inputSize = 1000000;
+	const uint inputSize = pow<int,int>(2, 18) - 1;
+	
+	
 	A.cdata() = new uint[inputSize];
 	B.cdata() = new uint[inputSize];
-
-	srand(20);
-	
-	A.cdata()[0] = 1;
-	B.cdata()[0] = 1;
-	for (uint i = 1; i < inputSize; i++)
-	{
-		A.cdata()[i] = A.cdata()[i - 1] + (rand() % 15) + 1;
-		B.cdata()[i] = B.cdata()[i - 1] + (rand() % 15) + 1;
-	}
-
-	//Sanity check
-	uint ap = 0;
-	uint bp = 0;
-	uint a, b;
-	int count = 0;
-	while (ap < inputSize && bp < inputSize)
-	{
-		a = A.cdata()[ap];
-		b = B.cdata()[bp];
-		if (a == b) {
-			++count;
-			//printf("%u, ", a);
-			++ap;
-			++bp;
-		}
-		else if (a < b) {
-			++ap;
-
-		}
-		else {
-			++bp;
-		}
-	}
-	printf("\nTrue Count = %d\n", count);
-
-
-	A.switch_to_gpu(0, inputSize);
-	B.switch_to_gpu(0, inputSize);
-
-
-	graph::GPUArray<uint> BH("Hashing test B", gpu, inputSize + inputSize / 2, 0);
-	const int binSize = 4;
-	const uint numBins = (inputSize + binSize-1) / binSize;
-	const uint stashStart = binSize * numBins;
-	const uint stashLimit = inputSize / 2;
-	int binOcc[numBins];
-	int stashSize = 0;
-	for (int i = 0; i < numBins; i++)
-	{
-		binOcc[i] = 0;
-		BH.cdata()[i * binSize] = 0xFFFFFFFF;
-	}
-
-	for (int i = 0; i < inputSize; i++)
-	{
-		uint v = B.cdata()[i];
-		uint b = v % numBins;
-
-		if (binOcc[b] < binSize)
-		{
-			BH.cdata()[b * binSize + binOcc[b]] = v;
-			binOcc[b]++;
-			if (binOcc[b] < binSize)
-				BH.cdata()[b * binSize + binOcc[b]] = 0xFFFFFFFF;
-		}
-		else if (stashSize < stashLimit)
-		{
-			BH.cdata()[stashStart + stashSize] = v;
-			stashSize++;
-		}
-		else
-		{
-			printf("Shit\n");
-		}
-	}
-
-	BH.switch_to_gpu(0);
 
 	const int dimBlock = 512;
 	const int dimGrid = (inputSize + (dimBlock)-1) / (dimBlock);
 
-	const auto startHash = stime();
-	graph::GPUArray<uint> countHash("Test hash search: Out", AllocationTypeEnum::unified, 1, 0);
-	graph::hash_search_g<uint, dimBlock> << <dimGrid, dimBlock >> > (countHash.gdata(), A.gdata(), inputSize, BH.gdata(), inputSize, binSize, stashSize);
+	srand(220);
+
+	A.cdata()[0] = 1;
+	B.cdata()[0] = 1;
+	for (uint i = 1; i < inputSize; i++)
+	{
+		A.cdata()[i] = A.cdata()[i - 1] + (rand() % 13) + 1;
+		B.cdata()[i] = B.cdata()[i - 1] + (rand() % 13) + 1;
+	}
+
+	graph::Hashing::goldenSerialIntersectionCPU<uint>(A, B, inputSize);
+
+	A.switch_to_gpu(0, inputSize);
+	B.switch_to_gpu(0, inputSize);
+
+	graph::Hashing::goldenBinaryGPU<uint>(A, B, inputSize);
+
+	//1-level hash with binary search for stash
+	graph::Hashing::test1levelHashing<uint>(A, B, inputSize, 4);
+
+	//Non-stash hashing
+	graph::Hashing::testHashNosStash<uint>(A, B, inputSize, 5);
+
+
+	//Store binary tree traversal: Now assume full binary tree
+	vector<uint> treeSizes;
+	
+	int maxInputSize;
+	int levels = 1;
+	for (int i = 1; i < 19; i++)
+	{
+		int v = pow<int, int>(2, i) - 1;
+
+		if (inputSize >= v)
+		{
+			maxInputSize = v;
+			levels = i;
+		}
+		else
+			break;
+	}
+
+	graph::GPUArray<Node> BT("Binary Traverasl", gpu, maxInputSize, 0);
+	graph::GPUArray<uint> BTV("Binary Traverasl", gpu, maxInputSize, 0);
+	
+	int cl = 0;
+	int totalElements = 1;
+
+	int element0 = maxInputSize / 2;
+	BT.cdata()[0].i = element0;
+	BTV.cdata()[0] = B.cdata()[element0];
+	BT.cdata()[0].l = 0;
+	BT.cdata()[0].r = maxInputSize;
+
+	while (totalElements < maxInputSize)
+	{
+		int num_elem_lev = pow<int, int>(2, cl);
+		int levelStartIndex = pow<int, int>(2, cl) - 1;
+		for (int i = levelStartIndex; i < num_elem_lev + levelStartIndex; i++)
+		{
+			Node parent = BT.cdata()[i];
+			
+			//left 
+			int leftIndex = 2 * i + 1; //New Index
+			int leftVal = (parent.l + parent.i) / 2; //PrevIndex
+
+			BT.cdata()[leftIndex].i = leftVal;
+			BT.cdata()[leftIndex].l = parent.l;
+			BT.cdata()[leftIndex].r = parent.i;
+			BTV.cdata()[leftIndex] = B.cdata()[leftVal];
+			BT.cdata()[leftIndex].p = i;
+
+
+			//right
+			int rightIndex = 2 * i + 2; //New Index
+			int rightVal = (parent.i + 1 + parent.r) / 2; //PrevIndex
+
+			BT.cdata()[rightIndex].i = rightVal;
+			BT.cdata()[rightIndex].l = parent.i + 1;
+			BT.cdata()[rightIndex].r = parent.r;
+			BTV.cdata()[rightIndex] = B.cdata()[rightVal];
+			BT.cdata()[rightIndex].p = i;
+
+			totalElements += 2;
+		}
+		cl++;
+	}
+
+	BTV.switch_to_gpu(0);
+
+	const auto startBST = stime();
+	graph::GPUArray<uint> countBST("Test Binary Search Tree search: Out", AllocationTypeEnum::unified, 1, 0);
+	graph::binary_search_bst_g<uint, 32> << <1, 32 >> > (countBST.gdata(), A.gdata(), inputSize, BTV.gdata(), inputSize);
 	cudaDeviceSynchronize();
-	double elapsedHash = elapsedSec(startHash);
-	printf("Hash Elapsed time = %f, Count = %u Stash Size=%d\n", elapsedHash, countHash.cdata()[0], stashSize);
+	double elapsedBST = elapsedSec(startBST);
+	printf("BST Elapsed time = %f, Count = %u \n", elapsedBST, countBST.cdata()[0]);
 
+	BTV.freeCPU();
+	BTV.freeGPU();
 
-	const auto start = stime();
-	graph::GPUArray<uint> countBinary("Test binary search: Out", AllocationTypeEnum::unified, 1, 0);
-	graph::binary_search_2arr_g<uint, dimBlock> << <dimGrid, dimBlock >> > (countBinary.gdata(), A.gdata(), inputSize, B.gdata(), inputSize);
-	cudaDeviceSynchronize();
-	double elapsed = elapsedSec(start);
-	printf("Binary Elapsed time = %f, Count = %u\n", elapsed, countBinary.cdata()[0]);
-
-
-	//Binary tree as array
-	//1: Restructure
-
-
-
-
-
+	BT.freeCPU();
+	BT.freeGPU();
 
 
 	//For weighted edges
@@ -313,12 +317,11 @@ int main(int argc, char **argv){
 
 
     printf("Done ....\n");
-	//sl.free();
-	//dl.free();
-	////neil.free();
-	A.free();
-	B.free();
-	BH.free();
+	sl.freeGPU();
+	dl.freeGPU();
+	neil.freeGPU();
+	A.freeGPU();
+	B.freeGPU();
     return 0;
 }
 

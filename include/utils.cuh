@@ -16,6 +16,7 @@
 #include <string>
 //freestanding specific
 
+#include "defs.cuh"
 #include "cuda.h" 
 #include <cuda_runtime_api.h>
 
@@ -45,6 +46,16 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=f
 
 static std::chrono::time_point<std::chrono::high_resolution_clock> now() {
     return std::chrono::high_resolution_clock::now();
+}
+
+static timepoint stime()
+{
+    return std::chrono::system_clock::now();
+}
+
+static double elapsedSec(timepoint start)
+{
+    return (std::chrono::system_clock::now() - start).count() / 1e9;
 }
 
 /*Device function that returns how many SMs are there in the device/arch - it can be more than the maximum readable SMs*/

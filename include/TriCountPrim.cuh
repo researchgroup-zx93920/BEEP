@@ -18,6 +18,8 @@ namespace graph
         while (left < right) {
             const T mid = (left + right) / 2;
             T val = arr[mid];
+            if (val == searchVal)
+                return mid;
             bool pred = val < searchVal;
             if (pred) {
                 left = mid + 1;
@@ -27,6 +29,26 @@ namespace graph
             }
         }
         return left;
+    }
+
+    template <typename T>
+    __host__ __device__ T binary_search_full_bst(const T* arr,         //!< [in] array to search
+        const T lt,
+        const T rt, //!< [in] size of array
+        const T searchVal   //!< [in] value to search for
+    ) {
+        T n = lt;
+        while (n < rt)
+        {
+            if (arr[n] == searchVal)
+                break;
+            else if (arr[n] > searchVal)
+                n = 2 * n + 1;
+            else n = 2 * n + 2;
+        }
+
+        return n;
+
     }
 
     template <typename T>
@@ -64,14 +86,14 @@ namespace graph
     ) {
         const int numBins = (size + binSize - 1)/binSize;
         const int stashStart = binSize * numBins;
-        T b = searchVal % numBins;
+        T b = (searchVal/11) % numBins;
 
+        
        for (int i = 0; i < binSize; i++)
        {
            T val = arr[b * binSize + i];
            if (searchVal == arr[b * binSize + i])
            {
-               //printf("Hash - Bin: %u\n", searchVal);
                return true;
            }
            if (val == 0xFFFFFFFF)
@@ -79,7 +101,6 @@ namespace graph
                return false;
            }
        }
-
         //for (int i = 0; i < stashSize; i++)
         //{
         //    if (arr[i + stashStart] == searchVal)
@@ -89,15 +110,20 @@ namespace graph
         //    }
         //}
 
+
+       /*T left = graph::binary_search<T>(&arr[b*binSize], 0, binSize, searchVal);
+       if (arr[b*binSize + left] == searchVal)
+       {
+           return true;
+       }*/
+
         T left = graph::binary_search<T>(&arr[stashStart], 0, stashSize, searchVal);
         if (arr[stashStart + left] == searchVal)
         {
-            //printf("Found Stash");
             return true;
         }
 
         return false;
-        
     }
 
     template<typename T, size_t BLOCK_DIM_X>
@@ -109,10 +135,7 @@ namespace graph
         for (int i = tid; i < sizeA; i += blockDim.x * gridDim.x)
         {
             T searchVal = A[i];
-            bool found = graph::hash_search<T>(B, binSize, sizeB, stashSize, searchVal);
-            /*if (found)
-                printf("%u, ", searchVal);*/
-            threadCount +=  found ? 1 : 0;
+            threadCount += graph::hash_search<T>(B, binSize, sizeB, stashSize, searchVal) ? 1 : 0;
         }
 
         typedef cub::BlockReduce<uint64_t, BLOCK_DIM_X> BlockReduce;
@@ -125,6 +148,66 @@ namespace graph
         }
 
     }
+
+    template <typename T>
+    __device__ bool hash_nostash_search(
+        const T*arrPointer,
+        const T* arr,         //!< [in] array to search
+        const T numBins,
+        const T searchVal   //!< [in] value to search for
+    ) {
+        T b = (searchVal / 11) % numBins;
+        T start = arrPointer[b];
+        T end = arrPointer[b + 1];
+        //printf("%u, %u,%u\n", b, start, end);
+
+       if (end - start < 16)
+
+        {
+            for (int i = start; i < end; i++)
+            {
+                if (searchVal == arr[i])
+                {
+                    return true;
+                }
+            }
+        }
+        else
+        {
+            T left = graph::binary_search<T>(&arr[start], 0, end-start, searchVal);
+            if (arr[start + left] == searchVal)
+            {
+                return true;
+            }
+
+        }
+        return false;
+    }
+
+
+    template<typename T, size_t BLOCK_DIM_X>
+    __global__ void hash_search_nostash_g(T* count,
+        T* A, T sizeA, T* BP, T* BD, T numBins)
+    {
+        int tid = threadIdx.x + blockIdx.x * blockDim.x;
+        int threadCount = 0;
+        for (int i = tid; i < sizeA; i += blockDim.x * gridDim.x)
+        {
+            T searchVal = A[i];
+            threadCount += graph::hash_nostash_search<T>(BP, BD, numBins, searchVal) ? 1 : 0;
+        }
+
+        typedef cub::BlockReduce<uint64_t, BLOCK_DIM_X> BlockReduce;
+        __shared__ typename BlockReduce::TempStorage tempStorage;
+        uint64_t aggregate = BlockReduce(tempStorage).Sum(threadCount);
+
+        // Add to total count
+        if (0 == threadIdx.x) {
+            atomicAdd(count, aggregate);
+        }
+
+    }
+
 
     template<typename T, size_t BLOCK_DIM_X>
     __global__ void binary_search_2arr_g(T* count,
@@ -140,9 +223,34 @@ namespace graph
             if (lb < sizeB)
             {
                 threadCount += (B[lb] == searchVal ? 1 : 0);
+            }
 
-                /*if(B[lb] == searchVal)
-                    printf("%u, ", searchVal);*/
+        }
+
+        typedef cub::BlockReduce<uint64_t, BLOCK_DIM_X> BlockReduce;
+        __shared__ typename BlockReduce::TempStorage tempStorage;
+        uint64_t aggregate = BlockReduce(tempStorage).Sum(threadCount);
+
+        // Add to total count
+        if (0 == threadIdx.x) {
+            atomicAdd(count, aggregate);
+        }
+    }
+
+    template<typename T, size_t BLOCK_DIM_X>
+    __global__ void binary_search_bst_g(T* count,
+        T* A, T sizeA, T* B, T sizeB)
+    {
+        size_t gx = blockDim.x * blockIdx.x + threadIdx.x;
+        uint64_t threadCount = 0;
+
+        for (size_t i = gx; i < sizeA; i += blockDim.x * gridDim.x)
+        {
+            T searchVal = A[i];
+            const T lb = graph::binary_search_full_bst<T>(B, 0, sizeB, searchVal);
+            if (lb < sizeB)
+            {
+                threadCount += (B[lb] == searchVal ? 1 : 0);
             }
 
         }
@@ -158,6 +266,7 @@ namespace graph
     }
 
 
+    
 
     /*! \brief return the number of common elements between sorted lists A and B
  */

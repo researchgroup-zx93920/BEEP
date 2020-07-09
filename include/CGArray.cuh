@@ -51,17 +51,19 @@ namespace graph
 			_at = at;
 		}
 
-		void free()
+		void freeGPU()
 		{
 			if (!freed)
 			{
 				freed = true;
-				if (_at == AllocationTypeEnum::gpu)
-				{
-					std::free(cpu_data);
-				}
+				CUDA_RUNTIME(cudaSetDevice(_deviceId));
 				CUDA_RUNTIME(cudaFree(gpu_data));
+				CUDA_RUNTIME(cudaStreamDestroy(_stream));
 			}
+		}
+		void freeCPU()
+		{
+			delete cpu_data;
 		}
 
 		void allocate_cpu(uint size)
@@ -102,8 +104,6 @@ namespace graph
 				}
 
 				N = (size == 0) ? N : size;
-				CUDA_RUNTIME(cudaSetDevice(_deviceId));
-				CUDA_RUNTIME(cudaStreamCreate(&_stream));
 				CUDA_RUNTIME(cudaMemcpy(gpu_data, cpu_data, N * sizeof(T), cudaMemcpyKind::cudaMemcpyHostToDevice));
 			}
 		}
