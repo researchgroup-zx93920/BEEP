@@ -14,7 +14,7 @@ kernel_serial_arrays(uint64_t* count, //!< [inout] the count, caller should zero
         const T src = rowInd[i];
         const T dst = colInd[i];
 
-        assert(src < dst);
+        //assert(src < dst);
 
         const T* srcBegin = &colInd[rowPtr[src]];
         const T* srcEnd = &colInd[rowPtr[src + 1]];

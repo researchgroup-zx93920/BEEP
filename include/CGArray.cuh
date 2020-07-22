@@ -21,7 +21,15 @@ namespace graph
 	class GPUArray 
 	{
 	public:
-		GPUArray(std::string s, AllocationTypeEnum at, uint size, int devId)
+
+
+		GPUArray()
+		{
+			N = 0;
+			name = "Unknown";
+		}
+
+		void initialize(std::string s, AllocationTypeEnum at, uint size, int devId)
 		{
 			N = size;
 			name = s;
@@ -44,6 +52,11 @@ namespace graph
 			default:
 				break;
 			}
+		}
+
+		GPUArray(std::string s, AllocationTypeEnum at, uint size, int devId)
+		{
+			initialize(s, at, size, devId);
 		}
 
 		GPUArray(std::string s, AllocationTypeEnum at) {
@@ -180,6 +193,18 @@ namespace graph
 
 			CUDA_RUNTIME(cudaMemcpy(cpu_data, &(gpu_data[startIndex]), c *sizeof(T), cudaMemcpyKind::cudaMemcpyDeviceToHost));
 			return cpu_data;
+		}
+
+
+		void advicePrefetch(bool sync)
+		{
+			if (_at == AllocationTypeEnum::unified)
+			{
+				CUDA_RUNTIME(cudaSetDevice(_deviceId));
+				//CUDA_RUNTIME(cudaMemPrefetchAsync (gpu_data, N*sizeof(T), _deviceId, _stream));
+				if (sync)
+					CUDA_RUNTIME(cudaStreamSynchronize(_stream));
+			}
 		}
 
 		T*& gdata()

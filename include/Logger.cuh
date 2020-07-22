@@ -22,5 +22,5 @@ void prc(LogPriorityEnum l)
 	}
 }
 
-#define Log(l_, f_, ...) prc(l_); printf((f_), __VA_ARGS__); printf("\033[0m")
+#define Log(l_, f_, ...) prc(l_); printf((f_), __VA_ARGS__); printf("\n\033[0m")
 

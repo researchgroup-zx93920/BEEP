@@ -78,6 +78,9 @@ namespace graph {
         virtual void count_async(GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {}
 
+        virtual void count_hash_async(const int divideConstant, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, GPUArray<T> hp, GPUArray<T> hps, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+        {}
+
         virtual void count_per_edge_async(GPUArray<T>& tcpt, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {}
 

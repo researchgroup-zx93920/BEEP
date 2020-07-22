@@ -21,6 +21,8 @@
 #include <cuda_runtime_api.h>
 
 
+#define __VERBOSE__
+
 //Enums
 enum ProcessingElementEnum { Thread, Warp, Bolck, Grid };
 enum AllocationTypeEnum { cpuonly, gpu, unified, zerocopy };

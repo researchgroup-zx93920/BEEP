@@ -159,10 +159,11 @@ namespace graph
         T b = (searchVal / 11) % numBins;
         T start = arrPointer[b];
         T end = arrPointer[b + 1];
-        //printf("%u, %u,%u\n", b, start, end);
 
-       if (end - start < 16)
+        if (end - start == 0)//empty bin
+            return false;
 
+        if (end - start < 128)
         {
             for (int i = start; i < end; i++)
             {
@@ -172,7 +173,7 @@ namespace graph
                 }
             }
         }
-        else
+       else
         {
             T left = graph::binary_search<T>(&arr[start], 0, end-start, searchVal);
             if (arr[start + left] == searchVal)
@@ -182,6 +183,52 @@ namespace graph
 
         }
         return false;
+    }
+
+
+    template<typename T, size_t BLOCK_DIM_X>
+    __device__ int hash_search_nostash_thread_d(T* A, T sizeA, T* BP, T* BD, T numBins)
+    {
+        int tid = threadIdx.x + blockIdx.x * blockDim.x;
+        int threadCount = 0;
+        for (int i = 0; i < sizeA; i++)
+        {
+            T searchVal = A[i];
+
+            //printf("%d, %u\n", i, searchVal);
+            threadCount += graph::hash_nostash_search<T>(BP, BD, numBins, searchVal) ? 1 : 0;
+        }
+        return threadCount;
+    }
+
+    template <size_t WARPS_PER_BLOCK, typename T, bool reduce = true>
+    __device__ int hash_search_nostash_warp_d(T* A, T sizeA, T* BP, T* BD, T numBins)
+    {
+        const int warpIdx = threadIdx.x / 32; // which warp in thread block
+        const int laneIdx = threadIdx.x % 32; // which thread in warp
+
+        uint64_t threadCount = 0;
+        T lastIndex = 0;
+
+        // cover entirety of A with warp
+        for (size_t i = laneIdx; i < sizeA; i += 32)
+        {
+            // one element of A per thread, just search for A into B
+            const T searchVal = A[i];
+            threadCount += graph::hash_nostash_search<T>(BP, BD, numBins, searchVal) ? 1 : 0;
+         }
+
+        if (reduce) {
+            // give lane 0 the total count discovered by the warp
+            typedef cub::WarpReduce<uint64_t> WarpReduce;
+            __shared__ typename WarpReduce::TempStorage tempStorage[WARPS_PER_BLOCK];
+            uint64_t aggregate = WarpReduce(tempStorage[warpIdx]).Sum(threadCount);
+            return aggregate;
+        }
+        else
+        {
+            return threadCount;
+        }
     }
 
 
@@ -207,6 +254,7 @@ namespace graph
         }
 
     }
+
 
 
     template<typename T, size_t BLOCK_DIM_X>
@@ -265,8 +313,6 @@ namespace graph
         }
     }
 
-
-    
 
     /*! \brief return the number of common elements between sorted lists A and B
  */
@@ -454,7 +500,7 @@ namespace graph
             if (searchVal >= leftValue)
             {
 
-                const T lb = graph::binary_search<T>(B, 0, bSz, searchVal);
+                const T lb = graph::binary_search<T>(B, lastIndex, bSz, searchVal);
                 if (lb < bSz)
                 {
                     threadCount += (B[lb] == searchVal ? 1 : 0);
