@@ -121,35 +121,60 @@ namespace graph
 			}
 		}
 
+		void switch_to_unified(int devId, uint size = 0)
+		{
+			if (_at == AllocationTypeEnum::cpuonly)
+			{
+				N = (size == 0) ? N : size;
+				_at = AllocationTypeEnum::unified;
+				_deviceId = devId;
+				CUDA_RUNTIME(cudaSetDevice(_deviceId));
+				CUDA_RUNTIME(cudaStreamCreate(&_stream));
+				CUDA_RUNTIME(cudaMallocManaged(&gpu_data, N * sizeof(T)));
+				CUDA_RUNTIME(cudaMemcpy(gpu_data, cpu_data, N * sizeof(T), cudaMemcpyKind::cudaMemcpyHostToDevice));
+			}
+			else if (_at == AllocationTypeEnum::gpu) //memory is already allocated
+			{
+				if (size > N)
+				{
+					Log(LogPriorityEnum::critical, "Memory needed is more than allocated-Nothing is done\n");
+					return;
+				}
 
-		void zero(bool sync)
+				N = (size == 0) ? N : size;
+				CUDA_RUNTIME(cudaMemcpy(gpu_data, cpu_data, N * sizeof(T), cudaMemcpyKind::cudaMemcpyHostToDevice));
+			}
+		}
+
+
+		void setAll(T val, bool sync)
 		{
 			if (N < 1)
 				return;
 
 			if (_at == AllocationTypeEnum::cpuonly)
 			{
-				memset(cpu_data, 0, N * sizeof(T));
+				memset(cpu_data, val, N * sizeof(T));
 			}
 			else if (_at == AllocationTypeEnum::gpu)
 			{
 				
-				memset(cpu_data, 0, N * sizeof(T));
+				memset(cpu_data, val, N * sizeof(T));
 				CUDA_RUNTIME(cudaSetDevice(_deviceId));
-				CUDA_RUNTIME(cudaMemset(gpu_data, 0, N * sizeof(T)));
+				CUDA_RUNTIME(cudaMemset(gpu_data, val, N * sizeof(T)));
 				if (sync)
 					CUDA_RUNTIME(cudaStreamSynchronize(_stream));
 			}
 			else if (_at == AllocationTypeEnum::unified)
 			{
 				CUDA_RUNTIME(cudaSetDevice(_deviceId));
-				CUDA_RUNTIME(cudaMemset(gpu_data, 0, N * sizeof(T)));
+				CUDA_RUNTIME(cudaMemset(gpu_data, val, N * sizeof(T)));
 				if (sync)
 					CUDA_RUNTIME(cudaStreamSynchronize(_stream));
 			}
 		}
 
-		void set(T index, T val, bool sync)
+		void setSingle(int index, T val, bool sync)
 		{
 			if (N < 1)
 				return;

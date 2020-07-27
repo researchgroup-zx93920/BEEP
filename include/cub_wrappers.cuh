@@ -1,3 +1,4 @@
+#pragma once
 #include "utils.cuh"
 #include "utils_cuda.cuh"
 #include <cub/cub.cuh>
@@ -138,7 +139,7 @@ uint32_t CUBSelect(
 
     CHECK_KERNEL("CUB 1st select");
 
-    CUDA_RUNTIME(cudaMallocManaged(&d_temp_storage, temp_storage_bytes, mem_stat));
+    CUDA_RUNTIME(cudaMallocManaged(&d_temp_storage, temp_storage_bytes));
 
     CUDA_RUNTIME(cudaEventRecord(start));
     cub::DeviceSelect::Flagged(d_temp_storage, temp_storage_bytes, input, flags, output, countOutput, countInput);
@@ -150,7 +151,9 @@ uint32_t CUBSelect(
     CUDA_RUNTIME(cudaEventElapsedTime(&singleKernelTime, start, end));
     elaspedTime += singleKernelTime;
 
-    CHECK_KERNEL("CUB 2nd select");
+    CHECK_KERNEL("CUB 2nd select"); 
+    
+    uint32_t res = *countOutput;
 
 #ifdef __VERBOSE__
     Log(LogPriorityEnum::info, "Kernel: %s, count: %d, time: %.2f ms.", "CUB select", res, elaspedTime);
@@ -158,7 +161,7 @@ uint32_t CUBSelect(
 
     CUDA_RUNTIME(cudaFree(d_temp_storage));
 
-    uint32_t res = *countOutput;
+   
     CUDA_RUNTIME(cudaFree(countOutput));
 
     return res;

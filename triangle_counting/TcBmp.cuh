@@ -1,3 +1,5 @@
+#pragma once
+
 #include <cstdint>
 #include <driver_types.h>
 #include <cuda_runtime_api.h>
@@ -236,7 +238,7 @@ __global__ void bmp_bsr_kernel(uint32_t* d_offsets, /*card: |V|+1*/
 
         /*each warp processes an edge (u, v), v: v */
         auto dv = d_offsets[v + 1] - d_offsets[v];
-        //if (dv > du || ((du == dv) && u > v))continue;
+        if (dv > du || ((du == dv) && u > v))continue; //for full graph
 
         uint32_t private_count = 0;
         auto size_nv = bmp_offs[v + 1] - bmp_offs[v];
@@ -261,7 +263,7 @@ __global__ void bmp_bsr_kernel(uint32_t* d_offsets, /*card: |V|+1*/
         WARP_REDUCE(private_count);
         if (threadIdx.x == 0)
         {
-            //d_intersection_count_GPU[eid[idx]] = private_count;
+            d_intersection_count_GPU[eid[idx]] = private_count;
             atomicAdd(count, private_count);
         }
     }
@@ -286,9 +288,6 @@ __global__ void bmp_bsr_kernel(uint32_t* d_offsets, /*card: |V|+1*/
         atomicCAS(&d_bitmap_states[sm_id * conc_blocks_per_SM + bitmap_ptr], 1, 0);
 
 }
-
-
-
 
 
 template<typename T>
@@ -424,21 +423,24 @@ namespace graph {
     class BmpGpu
     {
 
-        GPUArray<T> d_bitmaps;
-        GPUArray<T> d_bitmap_states;
-        GPUArray<T> d_vertex_count;
-        GPUArray<T> eid;
-        GPUArray<Edge> idToEdge;
-
-        GPUArray<T> bmp_offs;
-        int* edge_sup_gpu;
-        T* bmp_word_indices;
-        T* bmp_words;
+       
 
 
     public:
 
+        GPUArray<T> d_bitmaps;
+        GPUArray<T> d_bitmap_states;
+        GPUArray<T> d_vertex_count;
+        GPUArray<T> bmp_offs;
 
+        uint conc_blocks_per_SM;
+
+        T* bmp_word_indices;
+        T* bmp_words;
+
+        GPUArray<int> edge_sup_gpu;
+        GPUArray<Edge> idToEdge;
+        GPUArray<T> eid;
 
         void getEidAndEdgeList(int n,int m,graph::GPUArray<T> rowPtr, graph::GPUArray<T> colInd) 
         {
@@ -521,15 +523,15 @@ namespace graph {
 
             /*initialize the bitmaps*/
             d_bitmaps.initialize("bmp bitmap", AllocationTypeEnum::gpu, conc_blocks_per_SM * num_SMs * num_words_bmp, 0);
-            d_bitmaps.zero(true);
+            d_bitmaps.setAll(0,true);
 
             ///*initialize the bitmap states*/
             d_bitmap_states.initialize("bmp bitmap stats", AllocationTypeEnum::gpu, num_SMs * conc_blocks_per_SM, 0);
-            d_bitmap_states.zero(true);
+            d_bitmap_states.setAll(0, true);
 
                 ///vertex count for sequential block execution
             d_vertex_count.initialize("d_vertex count", AllocationTypeEnum::gpu, 1, 0);
-            d_vertex_count.zero(true);
+            d_vertex_count.setAll(0, true);
  
         }
   
@@ -542,7 +544,7 @@ namespace graph {
         {
             
             bmp_offs.initialize("bmp offset", AllocationTypeEnum::unified, n + 1, 0);
-            cudaMallocManaged(&edge_sup_gpu, sizeof(int) * m / 2);
+            edge_sup_gpu.initialize("Edge Support", AllocationTypeEnum::unified, m/2, 0);
 
 
            execKernel(construct_bsr_row_ptr_per_thread, 
@@ -555,7 +557,7 @@ namespace graph {
             auto word_num = CUBScanExclusive<T, T>(bmp_offs.gdata(), bmp_offs.gdata(), n);
             if (word_num > 0)
             {
-                bmp_offs.set(n, word_num,true); //unified !!
+                bmp_offs.setSingle(n, word_num,true); //unified !!
                 Log(LogPriorityEnum::info, "Word Num: %d", word_num);
 
                 cudaMalloc(&bmp_word_indices, sizeof(T) * word_num);
@@ -575,7 +577,7 @@ namespace graph {
         }
 
 
-        void Count(int n,
+        double Count(int n,
             int m,
             graph::GPUArray<T> rowPtr,
             graph::GPUArray<T> colInd)
@@ -592,7 +594,7 @@ namespace graph {
             uint32_t block_size = 512; // maximally reduce the number of bitmaps
             dim3 t_dimension(32, block_size / 32); /*2-D*/
             CUDAContext context;
-            auto conc_blocks_per_SM = context.GetConCBlocks(block_size);
+            conc_blocks_per_SM = context.GetConCBlocks(block_size);
 
             uint* count;
             CUDA_RUNTIME(cudaMallocManaged(&count, sizeof(*count)));
@@ -601,7 +603,7 @@ namespace graph {
             execKernelDynamicAllocation(bmp_bsr_kernel, n, t_dimension,
                 num_word_bmp_idx * sizeof(uint32_t), true,
                 rowPtr.gdata(), colInd.gdata(), d_bitmaps.gdata(), d_bitmap_states.gdata(),
-                d_vertex_count.gdata(), conc_blocks_per_SM, eid.gdata(), edge_sup_gpu,
+                d_vertex_count.gdata(), conc_blocks_per_SM, eid.gdata(), edge_sup_gpu.gdata(),
                 bmp_offs.gdata(), bmp_word_indices, bmp_words, count);
             CUDA_RUNTIME(cudaDeviceSynchronize());    // ensure the kernel execution finished
 
@@ -616,6 +618,8 @@ namespace graph {
 
           
             Log(LogPriorityEnum::info, "Count = %d, End-To-End Time: %.9lfs", *count, t.elapsed());
+
+            return t.elapsed();
 
         }
       };
