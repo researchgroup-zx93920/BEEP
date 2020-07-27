@@ -14,6 +14,10 @@
 #include "../include/CGArray.cuh"
 
 
+
+#include "omp.h"
+
+
 #define BITMAP_SCALE_LOG (9)
 #define BITMAP_SCALE (1<<BITMAP_SCALE_LOG)  /*#bits in the first-level bitmap indexed by 1 bit in the second-level bitmap*/
 
@@ -444,7 +448,7 @@ namespace graph {
 
         void getEidAndEdgeList(int n,int m,graph::GPUArray<T> rowPtr, graph::GPUArray<T> colInd) 
         {
-            omp_set_num_threads(1);
+            Timer t;
 
             //Allocate space for eid -- size g->m
             idToEdge.initialize("id2edge", AllocationTypeEnum::unified, m / 2, 0);
@@ -480,16 +484,19 @@ namespace graph {
                 // Transform.
                 auto u = 0;
                 #pragma omp for schedule(dynamic, 6000)
-                for (int j = 0; j < m; j++) {
+                for (int j = 0; j < m; j++) 
+                {
                     u = FindSrc(n,m,rowPtr,colInd, u, j);
-                    if (j < upper_tri_start[u]) {
+                    if (j < upper_tri_start[u]) 
+                    {
                         auto v = colInd.cdata()[j];
                         auto offset = BranchFreeBinarySearch<T>(colInd.cdata(), rowPtr.cdata()[v], rowPtr.cdata()[v + 1], u);
                         auto eids = num_edges_copy[v] + (offset - upper_tri_start[v]);
                         eid.cdata()[j] = eids;
                         idToEdge.cdata()[eids] = std::make_pair(v, u);
                     }
-                    else {
+                    else 
+                    {
                         eid.cdata()[j] = num_edges_copy[u] + (j - upper_tri_start[u]);
                     }
                 }
@@ -501,6 +508,9 @@ namespace graph {
             free(upper_tri_start);
 
             free(num_edges_copy);
+
+            #pragma omp single
+            Log(LogPriorityEnum::info, "EID and Edge list: %.9lfs", t.elapsed());
         }
         BmpGpu()
         {
@@ -514,6 +524,8 @@ namespace graph {
             graph::GPUArray<T> colInd
         )
         {
+            Timer t;
+
             CUDAContext context;
             const uint32_t elem_bits = sizeof(uint32_t) * 8; /*#bits in a bitmap element*/
             const uint32_t num_words_bmp = (n + elem_bits - 1) / elem_bits;
@@ -532,6 +544,8 @@ namespace graph {
                 ///vertex count for sequential block execution
             d_vertex_count.initialize("d_vertex count", AllocationTypeEnum::gpu, 1, 0);
             d_vertex_count.setAll(0, true);
+
+            Log(LogPriorityEnum::info, "BMP Inialization: %.9lfs", t.elapsed());
  
         }
   
@@ -543,6 +557,8 @@ namespace graph {
             graph::GPUArray<T> colInd)
         {
             
+            Timer t;
+
             bmp_offs.initialize("bmp offset", AllocationTypeEnum::unified, n + 1, 0);
             edge_sup_gpu.initialize("Edge Support", AllocationTypeEnum::unified, m/2, 0);
 
@@ -566,7 +582,7 @@ namespace graph {
                     true, rowPtr.gdata(), colInd.gdata(), n, bmp_offs.gdata(), bmp_word_indices, bmp_words);
 
 
-                Log(LogPriorityEnum::info, "Finish BSR construction");
+                //Log(LogPriorityEnum::info, "Finish BSR construction");
             }
             else
                 Log(LogPriorityEnum::warn, "No BSR blocks");
@@ -574,6 +590,8 @@ namespace graph {
 
 
             bmp_offs.advicePrefetch(true);
+
+            Log(LogPriorityEnum::info, "BMP Construction: %.9lfs", t.elapsed());
         }
 
 
@@ -583,7 +601,7 @@ namespace graph {
             graph::GPUArray<T> colInd)
         {
             
-
+            Timer t;
             const T elem_bits = sizeof(T) * 8; /*#bits in a bitmap element*/
             const T num_words_bmp = (n + elem_bits - 1) / elem_bits;
             const T num_word_bmp_idx = (num_words_bmp + BITMAP_SCALE - 1) / BITMAP_SCALE;
@@ -599,7 +617,7 @@ namespace graph {
             uint* count;
             CUDA_RUNTIME(cudaMallocManaged(&count, sizeof(*count)));
 
-            Timer t;
+            
             execKernelDynamicAllocation(bmp_bsr_kernel, n, t_dimension,
                 num_word_bmp_idx * sizeof(uint32_t), true,
                 rowPtr.gdata(), colInd.gdata(), d_bitmaps.gdata(), d_bitmap_states.gdata(),

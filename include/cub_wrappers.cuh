@@ -46,7 +46,7 @@ OutputType CUBScanExclusive(
     CHECK_KERNEL("CUB 2nd scan");
 
 #ifdef __VERBOSE__
-    Log(LogPriorityEnum::info ,"Kernel: %s, count: %d, time: %.2f ms.", "CUB scan", count, elaspedTime);
+   // Log(LogPriorityEnum::info ,"Kernel: %s, count: %d, time: %.2f ms.", "CUB scan", count, elaspedTime);
 #endif // __VERBOSE__
 
     CUDA_RUNTIME(cudaFree(d_temp_storage));
@@ -99,7 +99,7 @@ SumType CUBSum(
 
 
 #ifdef __VERBOSE__
-    Log(LogPriorityEnum::info, "Kernel: %s, count: %d, time: %.2f ms.", "CUB Sum", count, elaspedTime);
+    //Log(LogPriorityEnum::info, "Kernel: %s, count: %d, time: %.2f ms.", "CUB Sum", count, elaspedTime);
 #endif // __VERBOSE__
 
     SumType res = *sum_value;
@@ -156,7 +156,7 @@ uint32_t CUBSelect(
     uint32_t res = *countOutput;
 
 #ifdef __VERBOSE__
-    Log(LogPriorityEnum::info, "Kernel: %s, count: %d, time: %.2f ms.", "CUB select", res, elaspedTime);
+    //Log(LogPriorityEnum::info, "Kernel: %s, count: %d, time: %.2f ms.", "CUB select", res, elaspedTime);
 #endif // __VERBOSE__
 
     CUDA_RUNTIME(cudaFree(d_temp_storage));

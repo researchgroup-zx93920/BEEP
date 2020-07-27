@@ -44,12 +44,11 @@
     CUDA_RUNTIME(cudaDeviceSynchronize()); \
     CUDA_RUNTIME(cudaEventElapsedTime(&singleKernelTime, start, end)); \
     \
-    if (true)\
     {\
-        if(verbose) Log(LogPriorityEnum::info,"Kernel: %s, time: %.2f ms.",#kernel, singleKernelTime); \
     }\
 }
 
+//if (false) Log(LogPriorityEnum::info, "Kernel: %s, time: %.2f ms.", #kernel, singleKernelTime); \
 /*execution with dynamic shared memory allocation*/
 #define execKernelDynamicAllocation(kernel, gridSize, blockSize, sharedSize, verbose, ...) \
 { \
@@ -71,11 +70,11 @@
     CUDA_RUNTIME(cudaDeviceSynchronize()); \
     CUDA_RUNTIME(cudaEventElapsedTime(&singleKernelTime, start, end)); \
     \
-    if (true)\
     {\
-        if(verbose) Log(LogPriorityEnum::info ,"Kernel: %s, time: %.2f ms.",#kernel, singleKernelTime); \
     }\
 }
+
+//if (false) Log(LogPriorityEnum::info, "Kernel: %s, time: %.2f ms.", #kernel, singleKernelTime); \
 /*---- 2. CUDA kernel execution wrapper end ----*/
 
 /*---- 3. CUDA function macros ---- */

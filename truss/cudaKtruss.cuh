@@ -353,7 +353,7 @@ namespace graph
         execKernelDynamicAllocation(
             bmp_bsr_update_next,
             n, t_dimension,
-            num_words_bmp_idx * sizeof(uint32_t), true,
+            num_words_bmp_idx * sizeof(uint32_t), false,
             rowPtr.gdata(), colInd.gdata(), bmp.d_bitmaps.gdata(), bmp.d_bitmap_states.gdata(),
             bmp.d_vertex_count.gdata(), bmp.conc_blocks_per_SM, bmp.eid.gdata(), bmp.edge_sup_gpu.gdata(),
             num_words_bmp, num_words_bmp_idx,
