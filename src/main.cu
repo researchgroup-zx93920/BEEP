@@ -233,6 +233,8 @@ struct Node
 	int p;
 };
 
+#define __DEBUG__
+
 int main(int argc, char **argv){
 
 	//CUDA_RUNTIME(cudaDeviceReset());
@@ -241,7 +243,13 @@ int main(int argc, char **argv){
 
 
 	//1) Read File to EdgeList
-	char matr[] = "D:\\graphs\\as20000102_adj.bel";
+	
+	char* matr;
+	matr = "D:\\graphs\\cit-Patents_adj.bel";
+	#ifndef __DEBUG__
+	if(argc > 1)
+		matr = argv[1];
+	#endif
 
 	graph::EdgeListFile f(matr);
 
