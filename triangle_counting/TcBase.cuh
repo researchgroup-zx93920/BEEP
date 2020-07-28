@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cuda_runtime.h"
-#include <cub/cub.cuh>
+//#include "../cub/cub.cuh"
 #include "../include/TriCountPrim.cuh"
 #include "../include/CGArray.cuh"
 
@@ -14,12 +14,12 @@ struct Edge1
 namespace graph {
     template<typename T>
     class TcBase {
-    protected:
+    public:
         int dev_;
         cudaStream_t stream_;
-        uint64_t* count_;
-        uint64_t numEdges;
-        uint64_t numNodes;
+        uint64* count_;
+        uint64 numEdges;
+        uint64 numNodes;
 
         // events for measuring time
         cudaEvent_t kernelStart_;
@@ -30,10 +30,10 @@ namespace graph {
 
             Create a counter on device dev
         */
-        TcBase(int dev, uint64_t ne, uint64_t nn, cudaStream_t stream = 0) : dev_(dev), numEdges(ne), numNodes(nn), stream_(stream), count_(nullptr) {
+        TcBase(int dev, uint64 ne, uint64 nn, cudaStream_t stream = 0) : dev_(dev), numEdges(ne), numNodes(nn), stream_(stream), count_(nullptr) {
             CUDA_RUNTIME(cudaSetDevice(dev_));
             CUDA_RUNTIME(cudaMallocManaged(&count_, sizeof(*count_)));
-            CUDA_RUNTIME(cudaMemset(count_, 0, 1*sizeof(uint64_t)));
+            CUDA_RUNTIME(cudaMemset(count_, 0, 1 * sizeof(uint64)));
             CUDA_RUNTIME(cudaGetLastError());
 
             CUDA_RUNTIME(cudaEventCreate(&kernelStart_));
@@ -87,12 +87,12 @@ namespace graph {
 
         virtual void set_per_edge_async(GPUArray<T>& tcs, GPUArray<T> triPointer, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {}
-       
+
 
 
         void sync() { CUDA_RUNTIME(cudaStreamSynchronize(stream_)); }
 
-        uint64_t count() const { return *count_; }
+        uint64 count() const { return *count_; }
         int device() const { return dev_; }
 
 

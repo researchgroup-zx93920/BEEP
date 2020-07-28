@@ -23,6 +23,8 @@
 
 #define __VERBOSE__
 
+typedef unsigned long long int uint64;
+
 //Enums
 enum ProcessingElementEnum { Thread, Warp, Bolck, Grid };
 enum AllocationTypeEnum { cpuonly, gpu, unified, zerocopy };

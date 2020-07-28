@@ -4,11 +4,11 @@
 
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
-kernel_serial_arrays(uint64_t* count, //!< [inout] the count, caller should zero
-    T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, const size_t edgeStart, int increasing=0) {
+kernel_serial_arrays(uint64* count, //!< [inout] the count, caller should zero
+    T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, const size_t edgeStart, int increasing = 0) {
 
     size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
-    uint64_t threadCount = 0;
+    uint64 threadCount = 0;
 
     for (size_t i = gx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x) {
         const T src = rowInd[i];
@@ -27,9 +27,9 @@ kernel_serial_arrays(uint64_t* count, //!< [inout] the count, caller should zero
     }
 
     // Block-wide reduction of threadCount
-    typedef cub::BlockReduce<uint64_t, BLOCK_DIM_X> BlockReduce;
+    typedef cub::BlockReduce<uint64, BLOCK_DIM_X> BlockReduce;
     __shared__ typename BlockReduce::TempStorage tempStorage;
-    uint64_t aggregate = BlockReduce(tempStorage).Sum(threadCount);
+    uint64 aggregate = BlockReduce(tempStorage).Sum(threadCount);
 
     // Add to total count
     if (0 == threadIdx.x) {
@@ -43,7 +43,7 @@ kernel_serial_pe_arrays(T* count, //!< [inout] the count, caller should zero
     T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, const size_t edgeStart, int increasing = 0) {
 
     size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
-    uint64_t threadCount = 0;
+    uint64 threadCount = 0;
 
     for (size_t i = gx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x) {
         const T src = rowInd[i];
@@ -57,7 +57,7 @@ kernel_serial_pe_arrays(T* count, //!< [inout] the count, caller should zero
         T min = increasing == 0 ? 0 : dst;
         threadCount += graph::serial_sorted_count_linear(min, srcBegin, srcEnd, dstBegin, dstEnd);
     }
-    
+
     count[gx] = threadCount;
 }
 
@@ -68,7 +68,7 @@ kernel_serial_set_arrays(T* count, //!< [inout] the count, caller should zero
     T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, const size_t edgeStart, int increasing = 0) {
 
     size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
-    uint64_t threadCount = 0;
+    uint64 threadCount = 0;
 
     for (size_t i = gx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x) {
         const T src = rowInd[i];
@@ -88,11 +88,11 @@ kernel_serial_set_arrays(T* count, //!< [inout] the count, caller should zero
 namespace graph {
 
     template<typename T>
-	class TcSerial : public TcBase<T>
-	{
-	public:
+    class TcSerial : public TcBase<T>
+    {
+    public:
 
-        TcSerial(int dev, uint64_t ne, uint64_t nn, cudaStream_t stream = 0) :TcBase(dev, ne, nn, stream)
+        TcSerial(int dev, uint64 ne, uint64 nn, cudaStream_t stream = 0) :TcBase<T>(dev, ne, nn, stream)
         {}
 
         void count_async(GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
@@ -103,21 +103,21 @@ namespace graph {
             T* ri = rowInd.gdata();
             T* ci = colInd.gdata();
 
-            CUDA_RUNTIME(cudaMemset(count_, 0, sizeof(*count_)));
+            CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
 
             // create one warp per edge
-            const int dimGrid = (numEdges-edgeOffset + (dimBlock) - 1) / (dimBlock);
-            const int dimGridWarp = (32 * numEdges + (dimBlock) - 1) / (dimBlock);
-            const int dimGridBlock = (dimBlock * numEdges + (dimBlock) - 1) / (dimBlock);
+            const int dimGrid = (numEdges - edgeOffset + (dimBlock)-1) / (dimBlock);
+            const int dimGridWarp = (32 * numEdges + (dimBlock)-1) / (dimBlock);
+            const int dimGridBlock = (dimBlock * numEdges + (dimBlock)-1) / (dimBlock);
 
-            assert(count_);
-            Log(LogPriorityEnum::info, "device = %d, blocks = %d, threads = %d\n", dev_, dimGrid, dimBlock);
-            CUDA_RUNTIME(cudaSetDevice(dev_));
+            assert(TcBase<T>::count_);
+            Log(LogPriorityEnum::info, "device = %d, blocks = %d, threads = %d", TcBase<T>::dev_, dimGrid, dimBlock);
+            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
 
 
-            CUDA_RUNTIME(cudaEventRecord(kernelStart_, stream_));
-            kernel_serial_arrays<T, dimBlock><<<dimGrid, dimBlock, 0, stream_>>>(count_, rp, ri, ci, ne, edgeOffset);
-            CUDA_RUNTIME(cudaEventRecord(kernelStop_, stream_));
+            CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
+            kernel_serial_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, rp, ri, ci, ne, edgeOffset);
+            CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
         }
 
 
@@ -129,21 +129,21 @@ namespace graph {
             T* ri = rowInd.gdata();
             T* ci = colInd.gdata();
 
-            CUDA_RUNTIME(cudaMemset(count_, 0, sizeof(*count_)));
+            CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
 
             // create one warp per edge
             const int dimGrid = (numEdges - edgeOffset + (dimBlock)-1) / (dimBlock);
             const int dimGridWarp = (32 * numEdges + (dimBlock)-1) / (dimBlock);
             const int dimGridBlock = (dimBlock * numEdges + (dimBlock)-1) / (dimBlock);
 
-            assert(count_);
-            Log(LogPriorityEnum::info, "device = %d, blocks = %d, threads = %d\n", dev_, dimGrid, dimBlock);
-            CUDA_RUNTIME(cudaSetDevice(dev_));
+            assert(TcBase<T>::count_);
+            Log(LogPriorityEnum::info, "device = %d, blocks = %d, threads = %d\n", TcBase<T>::dev_, dimGrid, dimBlock);
+            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
 
 
-            CUDA_RUNTIME(cudaEventRecord(kernelStart_, stream_));
-            kernel_serial_pe_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, stream_ >> > (tcpt.gdata(), rp, ri, ci, ne, edgeOffset, increasing);
-            CUDA_RUNTIME(cudaEventRecord(kernelStop_, stream_));
+            CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
+            kernel_serial_pe_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (tcpt.gdata(), rp, ri, ci, ne, edgeOffset, increasing);
+            CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
         }
 
 
@@ -156,33 +156,33 @@ namespace graph {
             T* ri = rowInd.gdata();
             T* ci = colInd.gdata();
 
-            CUDA_RUNTIME(cudaMemset(count_, 0, sizeof(*count_)));
+            CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
 
             // create one warp per edge
             const int dimGrid = (numEdges - edgeOffset + (dimBlock)-1) / (dimBlock);
             const int dimGridWarp = (32 * numEdges + (dimBlock)-1) / (dimBlock);
             const int dimGridBlock = (dimBlock * numEdges + (dimBlock)-1) / (dimBlock);
 
-            assert(count_);
-            Log(LogPriorityEnum::info, "device = %d, blocks = %d, threads = %d\n", dev_, dimGrid, dimBlock);
-            CUDA_RUNTIME(cudaSetDevice(dev_));
+            assert(TcBase<T>::count_);
+            Log(LogPriorityEnum::info, "device = %d, blocks = %d, threads = %d", TcBase<T>::dev_, dimGrid, dimBlock);
+            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
 
 
-            CUDA_RUNTIME(cudaEventRecord(kernelStart_, stream_));
-            kernel_serial_set_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, stream_ >> > (tcs.gdata(), triPointer.gdata(),rp, ri, ci, ne, edgeOffset, increasing);
-            CUDA_RUNTIME(cudaEventRecord(kernelStop_, stream_));
-        
+            CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
+            kernel_serial_set_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (tcs.gdata(), triPointer.gdata(), rp, ri, ci, ne, edgeOffset, increasing);
+            CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
+
         }
 
 
-        uint64_t count_sync(uint32_t* rowPtr, uint32_t* rowInd, uint32_t* colInd, const size_t edgeOffset, const size_t n) {
+        uint64 count_sync(uint32_t* rowPtr, uint32_t* rowInd, uint32_t* colInd, const size_t edgeOffset, const size_t n) {
             count_async(rowPtr, rowInd, colInd, edgeOffset, n);
-            sync();
-            return count();
+            TcBase<T>::sync();
+            return TcBase<T>::count();
         }
-		
 
-	};
+
+    };
 
 
 }
