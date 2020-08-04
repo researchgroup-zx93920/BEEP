@@ -13,7 +13,6 @@
 #include <climits>
 #include <numeric>
 #include <vector>
-#include <crt\host_defines.h>
 #include <cuda_runtime.h>
 
 #include "../include/Timer.h"
@@ -474,7 +473,7 @@ namespace graph
         GPUArray <InBucketWinType> in_bucket_window_;
         GPUArray <uint> bucket_buf_;
         GPUArray <uint> new_bucket_buf_;
-        GPUArray<uint> window_bucket_buf_size_;
+        GPUArray<uint> window_bucket_buf_size_; //should be uint* only
 
         #ifndef LEGACY_SCAN
         PrepareBucket(in_bucket_window_, bucket_buf_, window_bucket_buf_size_, edge_num);

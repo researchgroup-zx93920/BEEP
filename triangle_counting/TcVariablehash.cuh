@@ -4,7 +4,7 @@
 
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
-kernel_hash_thread_arrays(uint64* count, //!< [inout] the count, caller should zero
+kernel_hash_thread_arrays(int* count, //!< [inout] the count, caller should zero
     T* rowPtr, T* rowInd, T* colInd,
     T* hp, T* hbs, const size_t hashConstant,
     const size_t numEdges, const size_t edgeStart, int increasing = 0) {
@@ -87,7 +87,7 @@ kernel_hash_thread_arrays(uint64* count, //!< [inout] the count, caller should z
 
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
-kernel_hash_warp_arrays(uint64* count, //!< [inout] the count, caller should zero
+kernel_hash_warp_arrays(int* count, //!< [inout] the count, caller should zero
     T* rowPtr, T* rowInd, T* colInd,
     T* hp, T* hbs, const size_t hashConstant,
     const size_t numEdges, const size_t edgeStart, int increasing = 0) {

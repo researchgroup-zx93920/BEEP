@@ -15,17 +15,19 @@
 #include "../triangle_counting/TcBase.cuh"
 #include "../triangle_counting/TcSerial.cuh"
 #include "../triangle_counting/TcBinary.cuh"
-#include "../triangle_counting/TcVariableHash.cuh"
+#include "../triangle_counting/TcVariablehash.cuh"
 #include "../include/CSRCOO.cuh"
 #include "../triangle_counting/testHashing.cuh"
 #include "../triangle_counting/TcBmp.cuh"
 #include "../truss/cudaKtruss.cuh"
+#include "../truss19/ourtruss19.cuh"
+#include "../truss19/newTruss.cuh"
 
 using namespace std;
 
 
 template<typename T>
-void CountTriangles(graph::TcBase<T> *tc, graph::GPUArray<T> rowPtr, graph::GPUArray<T> rowInd, graph::GPUArray<T> colInd,
+int CountTriangles(graph::TcBase<T> *tc, graph::GPUArray<T> rowPtr, graph::GPUArray<T> rowInd, graph::GPUArray<T> colInd,
 	const size_t numEdges, const size_t numRows, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
 {
 	tc->count_async(rowPtr, rowInd, colInd, numEdges, edgeOffset, kernelType, increasing);
@@ -36,6 +38,9 @@ void CountTriangles(graph::TcBase<T> *tc, graph::GPUArray<T> rowPtr, graph::GPUA
 	int dev = tc->device();
 	Log(LogPriorityEnum::info, "gpu %d kernel time %f (%f teps) \n", dev, secs, numEdges / secs);
 	cudaDeviceSynchronize();
+
+
+	return tc->count();
 }
 
 template<typename T>
@@ -245,7 +250,7 @@ int main(int argc, char **argv){
 	//1) Read File to EdgeList
 	
 	char* matr;
-	matr = "D:\\graphs\\cit-Patents_adj.bel";
+	matr = "D:\\graphs\\graph500-scale21-ef16_adj.bel";
 	#ifndef __DEBUG__
 	if(argc > 1)
 		matr = argv[1];
@@ -262,79 +267,104 @@ int main(int argc, char **argv){
 	{
 		edges.insert(edges.end(), fileEdges.begin(), fileEdges.end());
 	}
-	//graph::CSRCOO<uint> csrcoo = graph::CSRCOO<uint>::from_edgelist(edges, upperTriangular);
-	graph::CSRCOO<uint> csrcooFull = graph::CSRCOO<uint>::from_edgelist(edges, full);
+	graph::CSRCOO<uint> csrcoo = graph::CSRCOO<uint>::from_edgelist(edges, full/*upperTriangular*/);
+	//graph::CSRCOO<uint> csrcooFull = graph::CSRCOO<uint>::from_edgelist(edges, full);
 
 #pragma region TCTEST
 	//2) Move to GPU
-	//graph::GPUArray<uint> sl("source", AllocationTypeEnum::cpuonly), 
-	//	dl("destination", AllocationTypeEnum::cpuonly), 
-	//	rowPtr("row pointer", AllocationTypeEnum::cpuonly);
+	graph::GPUArray<uint> sl("source", AllocationTypeEnum::cpuonly), 
+		dl("destination", AllocationTypeEnum::cpuonly), 
+		rowPtr("row pointer", AllocationTypeEnum::cpuonly);
 
-	////2.a CPU
-	//sl.cdata() = csrcoo.row_ind();
-	//dl.cdata() = csrcoo.col_ind();
-	//rowPtr.cdata() = csrcoo.row_ptr();
+	//2.a CPU
+	sl.cdata() = csrcoo.row_ind();
+	dl.cdata() = csrcoo.col_ind();
+	rowPtr.cdata() = csrcoo.row_ptr();
 
-	//cudaDeviceSynchronize();
+	cudaDeviceSynchronize();
 
-	////2.b GPU
-	//sl.switch_to_gpu(0, csrcoo.nnz());
-	//dl.switch_to_gpu(0, csrcoo.nnz());
-	//rowPtr.switch_to_gpu(0, csrcoo.num_rows()+1);
-	//cudaDeviceSynchronize();
+	//2.b GPU
+	sl.switch_to_gpu(0, csrcoo.nnz());
+	dl.switch_to_gpu(0, csrcoo.nnz());
+	rowPtr.switch_to_gpu(0, csrcoo.num_rows()+1);
+	cudaDeviceSynchronize();
 
+	
+	//Count triangle serially
+	/*graph::TcBase<uint> *tc = new graph::TcSerial<uint>(0, csrcoo.nnz(), csrcoo.num_rows());
+	CountTriangles<uint>(tc, rowPtr, sl, dl, csrcoo.nnz(), csrcoo.num_rows(), 0, ProcessingElementEnum::Thread, 0);*/
+
+
+	////Count traingles binary-search: Thread or Warp
+	int st = 0;
+	int ee = csrcoo.nnz();
+	graph::TcBase<uint> *tcb = new graph::TcBinary<uint>(0, ee, csrcoo.num_rows());
+
+
+	//while (true)
+	//{
+
+	//	printf("Edge = %d\n", st);
+		int trueVal = CountTriangles<uint>(tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
+		int testVal = CountTriangles<uint>(tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Test, 0);
+
+	//	if (trueVal != testVal)
+	//		break;
+	//	st++;
+	//	ee++;
+
+	//	printf("------------------------------\n");
+	//}
+
+	////Takes either serial or binary triangle Counter
+	//graph::GPUArray<uint> triPointer("tri Pointer", cpuonly);
+	//graph::GPUArray<uint> triIndex("tri Index", cpuonly);
+	//ConstructTriList(triIndex, triPointer, tcb, rowPtr, sl, dl, csrcoo.nnz(), csrcoo.num_rows(), 0, ProcessingElementEnum::Warp);
+
+
+	////Now I will start TC with hash
 	//
-	////Count triangle serially
-	//graph::TcBase<uint> *tc = new graph::TcSerial<uint>(0, csrcoo.nnz(), csrcoo.num_rows());
-	//CountTriangles<uint>(tc, rowPtr, sl, dl, csrcoo.nnz(), csrcoo.num_rows(), 0, ProcessingElementEnum::Thread, 0);
-
-
-	//////Count traingles binary-search: Thread or Warp
-	//int ee = csrcoo.nnz();
-	//graph::TcBase<uint> *tcb = new graph::TcBinary<uint>(0, ee, csrcoo.num_rows());
-	//CountTriangles<uint>(tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), 0, ProcessingElementEnum::Warp, 0);
-
-	//////Takes either serial or binary triangle Counter
-	////graph::GPUArray<uint> triPointer("tri Pointer", cpuonly);
-	////graph::GPUArray<uint> triIndex("tri Index", cpuonly);
-	////ConstructTriList(triIndex, triPointer, tcb, rowPtr, sl, dl, csrcoo.nnz(), csrcoo.num_rows(), 0, ProcessingElementEnum::Warp);
-
-
-	//////Now I will start TC with hash
-	////
 	//const int divideConstant = 1;
 	//graph::TcBase<uint>* tchash = new graph::TcVariableHash<uint>(0, ee, csrcoo.num_rows());
 	//CountTrianglesHash<uint>(divideConstant,tchash, rowPtr, sl, dl, ee, csrcoo.num_rows(), 0, ProcessingElementEnum::Warp, 0);
+
+	//int n = csrcoo.num_rows();
+	//int m = csrcoo.nnz();
+	//graph::BmpGpu<uint> bmp;
+	//bmp.InitBMP(n, m, rowPtr, dl);
+	//bmp.bmpConstruct(n, m, rowPtr, dl);
+	//double tc_time = bmp.Count(n, rowPtr, dl);
+
+
 #pragma endregion
 
 
 	//Now bmp (binary packing)
 	//Here we need the full graph --> Ktruss
-	graph::GPUArray<uint> slFull("source Full ", AllocationTypeEnum::cpuonly),
-		dlFull("destination Full ", AllocationTypeEnum::cpuonly),
-		rowPtrFull("row pointer Full ", AllocationTypeEnum::cpuonly);
+	//graph::GPUArray<uint> slFull("source Full ", AllocationTypeEnum::cpuonly),
+	//	dlFull("destination Full ", AllocationTypeEnum::cpuonly),
+	//	rowPtrFull("row pointer Full ", AllocationTypeEnum::cpuonly);
 
-	//2.a CPU
-	slFull.cdata() = csrcooFull.row_ind();
-	dlFull.cdata() = csrcooFull.col_ind();
-	rowPtrFull.cdata() = csrcooFull.row_ptr();
+	////2.a CPU
+	//slFull.cdata() = csrcooFull.row_ind();
+	//dlFull.cdata() = csrcooFull.col_ind();
+	//rowPtrFull.cdata() = csrcooFull.row_ptr();
 
-	////2.b GPU
-	slFull.switch_to_gpu(0, csrcooFull.nnz());
-	dlFull.switch_to_gpu(0, csrcooFull.nnz());
-	rowPtrFull.switch_to_unified(0, csrcooFull.num_rows() + 1);
-	cudaDeviceSynchronize();
-	
-	
-	graph::BmpGpu<uint> bmp;
-	int n = csrcooFull.num_rows();
-	int m = csrcooFull.nnz();
+	//////2.b GPU
+	//slFull.switch_to_gpu(0, csrcooFull.nnz());
+	//dlFull.switch_to_gpu(0, csrcooFull.nnz());
+	//rowPtrFull.switch_to_unified(0, csrcooFull.num_rows() + 1);
+	//cudaDeviceSynchronize();
+	//
+	//
+	//graph::BmpGpu<uint> bmp;
+	//int n = csrcooFull.num_rows();
+	//int m = csrcooFull.nnz();
 
-	bmp.InitBMP(n, m, rowPtrFull, dlFull);
-	bmp.getEidAndEdgeList(n, m, rowPtrFull, dlFull);
-	bmp.bmpConstruct(n, m, rowPtrFull, dlFull);
-	double tc_time = bmp.Count(n, m, rowPtrFull, dlFull);
+	//bmp.InitBMP(n, m, rowPtrFull, dlFull);
+	////bmp.getEidAndEdgeList(n, m, rowPtrFull, dlFull);
+	//bmp.bmpConstruct(n, m, rowPtrFull, dlFull);
+	//double tc_time = bmp.Count(n, rowPtrFull, dlFull);
 
 
 
@@ -352,18 +382,50 @@ int main(int argc, char **argv){
 	//graph::AbstractBKT(n, m, rowPtrFull, dlFull, bmp, &h, process_functor);
 
 
-	//GPU Ktruss
-	graph::GPUArray<int> output("KT Output", AllocationTypeEnum::gpu, m / 2, 0);
+	//GPU Ktruss BMP
+	//graph::GPUArray<int> output("KT Output", AllocationTypeEnum::gpu, m / 2, 0);
 
 
-	#define MAX_LEVEL  (20000)
-	auto level_start_pos = (uint*)calloc(MAX_LEVEL, sizeof(uint));
-	
-	graph::PKT_cuda(
-		n, m,
-		rowPtrFull, dlFull, bmp,
-		nullptr,
-		100, output, level_start_pos, 0, tc_time);
+	//#define MAX_LEVEL  (20000)
+	//auto level_start_pos = (uint*)calloc(MAX_LEVEL, sizeof(uint));
+	//
+	//graph::PKT_cuda(
+	//	n, m,
+	//	rowPtrFull, dlFull, bmp,
+	//	nullptr,
+	//	100, output, level_start_pos, 0, tc_time);
+
+
+
+	//graph::SingleGPU_Ktruss<uint> mohatruss(0);
+
+	//Timer t;
+	//mohatruss.findKtrussIncremental_sync(3, 1000, rowPtrFull, slFull, dlFull,
+	//	n, m, nullptr, nullptr, 0, 0);
+	//mohatruss.sync();
+	//double time = t.elapsed();
+	//
+
+	//Log(info, "count time %.f s", time);
+	//Log(info, "MOHA %d ktruss (%f teps)", mohatruss.count(), m / time);
+	//
+
+
+
+
+	//graph::SingleGPU_KtrussMod<uint> mohatrussM(0);
+
+	//Timer t;
+	//graph::TcBase<uint>* tcb = new graph::TcSerial<uint>(0, csrcooFull.nnz(), csrcooFull.num_rows(), mohatrussM.stream());
+	//mohatrussM.findKtrussIncremental_sync(3, 1000, tcb, rowPtrFull, slFull, dlFull,
+	//	n, m, nullptr, nullptr, 0, 0);
+	//mohatrussM.sync();
+	//double time = t.elapsed();
+
+
+	//Log(info, "count time %.f s", time);
+	//Log(info, "MOHA %d ktruss (%f teps)", mohatrussM.count(), m / time);
+
 
 
 #pragma region MyRegion
@@ -499,9 +561,9 @@ int main(int argc, char **argv){
 
 
     printf("Done ....\n");
-	slFull.freeGPU();
+	/*slFull.freeGPU();
 	dlFull.freeGPU();
-	rowPtrFull.freeGPU();
+	rowPtrFull.freeGPU();*/
 	//A.freeGPU();
 	//B.freeGPU();
     return 0;

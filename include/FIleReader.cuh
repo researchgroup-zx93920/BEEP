@@ -64,8 +64,8 @@ namespace graph
             }
             for (size_t i = 0; i < numRead; ++i) {
                 uint64_t src, dst;
-                std::memcpy(&src, &belBuf_[i * 24 + 8], 8);
-                std::memcpy(&dst, &belBuf_[i * 24 + 0], 8);
+                memcpy(&src, &belBuf_[i * 24 + 8], 8);
+                memcpy(&dst, &belBuf_[i * 24 + 0], 8);
                 ptr[i].first = src;
                 ptr[i].second = dst;
                 //SPDLOG_TRACE(logger::console(), "read {} -> {}", ptr[i].first, ptr[i].second);

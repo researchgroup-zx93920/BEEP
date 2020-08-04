@@ -18,12 +18,11 @@
 #include "omp.h"
 
 
-#define BITMAP_SCALE_LOG (9)
-#define BITMAP_SCALE (1<<BITMAP_SCALE_LOG)  /*#bits in the first-level bitmap indexed by 1 bit in the second-level bitmap*/
 
 __global__ void construct_bsr_row_ptr_per_thread(uint32_t* d_offsets, uint32_t* d_dsts,
     uint32_t num_vertices, uint32_t* bmp_offs) {
     uint32_t u = blockIdx.x * blockDim.x + threadIdx.x;
+    
     if (u >= num_vertices) return;
 
     constexpr int word_in_bits = sizeof(uint32_t) * 8;
@@ -177,14 +176,13 @@ __global__ void bmp_kernel(uint32_t* d_offsets, /*card: |V|+1*/
         atomicCAS(&d_bitmap_states[sm_id * conc_blocks_per_SM + bitmap_ptr], 1, 0);
 }
 
-__global__ void bmp_bsr_kernel(uint32_t* d_offsets, /*card: |V|+1*/
+__global__ void bmp_bsr_count_kernel(uint32_t* d_offsets, /*card: |V|+1*/
     uint32_t* d_dsts, /*card: 2*|E|*/
     uint32_t* d_bitmaps, /*the global bitmaps*/
     uint32_t* d_bitmap_states, /*recording the usage of the bitmaps on the SM*/
     uint32_t* vertex_count, /*for sequential block execution*/
     uint32_t conc_blocks_per_SM, /*#concurrent blocks per SM*/
     uint* eid, /*card: 2*|E|*/
-    int32_t* d_intersection_count_GPU, /*card: |E|*/
     uint32_t* bmp_offs,
     uint* bmp_word_indices,
     uint* bmp_words,
@@ -242,7 +240,7 @@ __global__ void bmp_bsr_kernel(uint32_t* d_offsets, /*card: |V|+1*/
 
         /*each warp processes an edge (u, v), v: v */
         auto dv = d_offsets[v + 1] - d_offsets[v];
-        if (dv > du || ((du == dv) && u > v))continue; //for full graph
+        //if (dv > du || ((du == dv) && u > v))continue; //for full graph
 
         uint32_t private_count = 0;
         auto size_nv = bmp_offs[v + 1] - bmp_offs[v];
@@ -267,7 +265,6 @@ __global__ void bmp_bsr_kernel(uint32_t* d_offsets, /*card: |V|+1*/
         WARP_REDUCE(private_count);
         if (threadIdx.x == 0)
         {
-            d_intersection_count_GPU[eid[idx]] = private_count;
             atomicAdd(count, private_count);
         }
     }
@@ -595,7 +592,7 @@ namespace graph {
         }
 
 
-        double Count(int n,
+        double Count_Set(int n,
             int m,
             graph::GPUArray<T> rowPtr,
             graph::GPUArray<T> colInd)
@@ -640,5 +637,51 @@ namespace graph {
             return t.elapsed();
 
         }
+
+
+        double Count(int n,
+            graph::GPUArray<T> rowPtr,
+            graph::GPUArray<T> colInd)
+        {
+
+            uint* count;
+            CUDA_RUNTIME(cudaMallocManaged(&count, sizeof(*count)));
+
+            Timer t;
+            const T elem_bits = sizeof(T) * 8; /*#bits in a bitmap element*/
+            const T num_words_bmp = (n + elem_bits - 1) / elem_bits;
+            const T num_word_bmp_idx = (num_words_bmp + BITMAP_SCALE - 1) / BITMAP_SCALE;
+
+
+            //printf("%d, %u, %u, %u\n", n, elem_bits, num_words_bmp, num_word_bmp_idx);
+
+            uint32_t block_size = 512; // maximally reduce the number of bitmaps
+            dim3 t_dimension(32, block_size / 32); /*2-D*/
+            CUDAContext context;
+            conc_blocks_per_SM = context.GetConCBlocks(block_size);
+
+            execKernelDynamicAllocation(bmp_bsr_count_kernel, n, t_dimension,
+                num_word_bmp_idx * sizeof(uint32_t), true,
+                rowPtr.gdata(), colInd.gdata(), d_bitmaps.gdata(), d_bitmap_states.gdata(),
+                d_vertex_count.gdata(), conc_blocks_per_SM, eid.gdata(),
+                bmp_offs.gdata(), bmp_word_indices, bmp_words, count);
+            CUDA_RUNTIME(cudaDeviceSynchronize());    // ensure the kernel execution finished
+
+
+            Log(LogPriorityEnum::info, "End-To-End Time: %.9lfs", t.elapsed());
+            Log(LogPriorityEnum::info, "Finish Support Initialization");
+
+            // // 4th: Free Memory.
+            d_bitmaps.freeGPU();
+            d_bitmap_states.freeGPU();
+            d_vertex_count.freeGPU();
+
+
+            Log(LogPriorityEnum::info, "Count = %d, End-To-End Time: %.9lfs", *count, t.elapsed());
+
+            return t.elapsed();
+
+        }
+
       };
 }

@@ -11,3 +11,9 @@ typedef std::vector<WEdge> WEdgeList;
 
 template <typename NodeTy> using EdgeTy = std::pair<NodeTy, NodeTy>;
 template <typename NodeTy, typename WeightTy> using WEdgeTy = std::tuple<NodeTy, NodeTy, WeightTy>;
+
+
+#define  BCTYPE bool
+
+#define BITMAP_SCALE_LOG (9)
+#define BITMAP_SCALE (1<<BITMAP_SCALE_LOG)  /*#bits in the first-level bitmap indexed by 1 bit in the second-level bitmap*/

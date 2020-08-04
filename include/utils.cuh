@@ -11,6 +11,8 @@
 #include <iostream>
 #include <numeric>
 #include <tuple>
+#include <stdio.h>
+#include <stdarg.h>
 
 #include <cstdio>
 #include <string>
@@ -26,9 +28,9 @@
 typedef unsigned long long int uint64;
 
 //Enums
-enum ProcessingElementEnum { Thread, Warp, Bolck, Grid };
+enum ProcessingElementEnum { Thread, Warp, Block, Grid, Test };
 enum AllocationTypeEnum { cpuonly, gpu, unified, zerocopy };
-enum LogPriorityEnum { critical, warn, error, info, none };
+enum LogPriorityEnum { critical, warn, error, info, debug, none };
 
 
 #define CUDA_RUNTIME(ans) { gpuAssert((ans), __FILE__, __LINE__); }
@@ -89,3 +91,13 @@ __device__ __forceinline__ unsigned int getlaneid(){
     asm("mov.u32 %0, %%laneid;" : "=r"(r));
     return r;
 }
+
+
+template<typename T>
+__host__ __device__
+void swap_ele(T& a, T& b) {
+    T temp = a;
+    a = b;
+    b = temp;
+}
+

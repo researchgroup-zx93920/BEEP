@@ -1,5 +1,7 @@
 #pragma once
 #include <cuda_runtime.h>
+#include "../include/utils_cuda.cuh"
+#include "../include/defs.cuh"
 
 #define INT_INVALID  (INT32_MAX)
 #define LEVEL_SKIP_SIZE (16)
@@ -22,15 +24,8 @@ void init_asc(DataType* data, CntType count) {
     if (gtid < count) data[gtid] = (DataType)gtid;
 }
 
-template<typename T>
-__host__ __device__
-void swap_ele(T& a, T& b) {
-    T temp = a;
-    a = b;
-    b = temp;
-}
 
-static __inline__ __device__ bool atomicCAS(bool* address, bool compare, bool val) {
+static __inline__ __device__ bool atomicCASBool(bool* address, bool compare, bool val) {
     unsigned long long addr = (unsigned long long) address;
     unsigned pos = addr & 3;  // byte position within the int
     int* int_addr = (int*)(addr - pos);  // int-aligned address
@@ -57,7 +52,8 @@ void process_support(
     uint32_t edge_idx, int level, int* EdgeSupport,
     int* next, int* next_cnt, bool* inNext,
     InBucketWinType* in_bucket_window_, uint* bucket_buf_, uint32_t* window_bucket_buf_size_,
-    int bucket_level_end_) {
+    int bucket_level_end_) 
+{
     auto cur = atomicSub(&EdgeSupport[edge_idx], 1);
     if (cur == (level + 1)) {
         auto insert_idx = atomicAdd(next_cnt, 1);
@@ -72,7 +68,7 @@ void process_support(
     // Update the Bucket.
     auto latest = cur - 1;
     if (latest > level && latest < bucket_level_end_) {
-        auto old_token = atomicCAS(in_bucket_window_ + edge_idx, InBucketFalse, InBucketTrue);
+        auto old_token = atomicCASBool(in_bucket_window_ + edge_idx, InBucketFalse, InBucketTrue);
         if (!old_token) {
             auto insert_idx = atomicAdd(window_bucket_buf_size_, 1);
             bucket_buf_[insert_idx] = edge_idx;
@@ -330,6 +326,9 @@ void update_processed(int* curr, uint32_t curr_cnt, bool* inCurr, bool* processe
     }
 }
 
+
+
+
 __global__
 void output_edge_support(
     int* output, int* curr, uint32_t curr_cnt,
@@ -509,7 +508,7 @@ __global__ void bmp_bsr_update_next(uint32_t* d_offsets, uint32_t* d_dsts,
                 // Update the Bucket.
                 auto latest = private_count;
                 if (latest > level && latest < bucket_level_end_) {
-                    auto old_token = atomicCAS(in_bucket_window_ + edge_idx, InBucketFalse, InBucketTrue);
+                    auto old_token = atomicCASBool(in_bucket_window_ + edge_idx, InBucketFalse, InBucketTrue);
                     if (!old_token) {
                         auto insert_idx = atomicAdd(window_bucket_buf_size_, 1);
                         bucket_buf_[insert_idx] = edge_idx;

@@ -17,7 +17,7 @@ namespace graph {
     public:
         int dev_;
         cudaStream_t stream_;
-        uint64* count_;
+        int* count_;
         uint64 numEdges;
         uint64 numNodes;
 
@@ -33,7 +33,7 @@ namespace graph {
         TcBase(int dev, uint64 ne, uint64 nn, cudaStream_t stream = 0) : dev_(dev), numEdges(ne), numNodes(nn), stream_(stream), count_(nullptr) {
             CUDA_RUNTIME(cudaSetDevice(dev_));
             CUDA_RUNTIME(cudaMallocManaged(&count_, sizeof(*count_)));
-            CUDA_RUNTIME(cudaMemset(count_, 0, 1 * sizeof(uint64)));
+            CUDA_RUNTIME(cudaMemset(count_, 0, 1 * sizeof(int)));
             CUDA_RUNTIME(cudaGetLastError());
 
             CUDA_RUNTIME(cudaEventCreate(&kernelStart_));
@@ -81,7 +81,31 @@ namespace graph {
         virtual void count_hash_async(const int divideConstant, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, GPUArray<T> hp, GPUArray<T> hps, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {}
 
-        virtual void count_per_edge_async(GPUArray<T>& tcpt, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+        virtual void count_per_edge_async(GPUArray<int>& tcpt, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+        {}
+
+        virtual void count_per_edge_upto_async(int upto, GPUArray<bool> mask, GPUArray<int>& tcpt, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+        {}
+
+
+        virtual void affect_per_edge_level_q_async(
+            GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges,
+            int level, GPUArray<bool> processed,
+            GPUArray<int>& curr, GPUArray<bool> inCurr, int curr_cnt,
+            GPUArray<int>& affected, GPUArray<bool>& inAffected, GPUArray<int>& affected_cnt, //next queue
+            GPUArray<uint> reversed,
+            const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+        {}
+
+
+        virtual void count_per_edge_level_q_async(
+            GPUArray<int>& tcpt, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges,
+            int level, GPUArray<bool> processed,
+            GPUArray<int>& curr, int curr_cnt,
+            GPUArray<int>& affected, GPUArray<bool>& inAffected, GPUArray<int>& affected_cnt, //next queue
+            GPUArray<int>& next, GPUArray<bool>& inNext, GPUArray<int> next_cnt, //next queue
+            GPUArray<bool>& in_bucket_window_, GPUArray<uint>& bucket_buf_, uint*& window_bucket_buf_size_, int bucket_level_end_,
+            const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {}
 
 
