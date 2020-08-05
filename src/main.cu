@@ -297,24 +297,25 @@ int main(int argc, char **argv){
 
 	////Count traingles binary-search: Thread or Warp
 	int st = 0;
-	int ee = csrcoo.nnz();
+	int ee = csrcoo.nnz(); // st + 2;
 	graph::TcBase<uint> *tcb = new graph::TcBinary<uint>(0, ee, csrcoo.num_rows());
 
 
-	//while (true)
-	//{
+	while (true)
+	{
 
-	//	printf("Edge = %d\n", st);
+		printf("Edge = %d\n", st);
 		int trueVal = CountTriangles<uint>(tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
 		int testVal = CountTriangles<uint>(tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Test, 0);
 
-	//	if (trueVal != testVal)
-	//		break;
-	//	st++;
-	//	ee++;
+		if (trueVal != testVal)
+			break;
+		st += 2;
+		ee += 2;
 
-	//	printf("------------------------------\n");
-	//}
+		printf("------------------------------\n");
+		break;
+	}
 
 	////Takes either serial or binary triangle Counter
 	//graph::GPUArray<uint> triPointer("tri Pointer", cpuonly);

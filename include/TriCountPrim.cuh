@@ -497,7 +497,8 @@ namespace graph
         T bSz,  //!< [in] the number of elements in B
         T* first_level,
         T par,
-        int numElements
+        int numElements,
+        int pwMaxSize
     )
     {
         const int warpIdx = threadIdx.x / 32; // which warp in thread block
@@ -517,7 +518,7 @@ namespace graph
             lastIndex = par * fl;
             T right = 0;
 
-            if (bSz < 64)
+            if (bSz < pwMaxSize)
             {
                 if (searchVal == first_level[fl])
                 {

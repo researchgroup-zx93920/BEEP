@@ -397,10 +397,10 @@ kernel_binary_warp_shared_arrays(int* count,                //!< [inout] the cou
     const size_t wx = threadIdx.x / 32;
     const size_t gwx = (BLOCK_DIM_X * blockIdx.x + threadIdx.x) / 32;
 
-    
-    
-    __shared__ T comm[warpsPerBlock];
-    __shared__ T first[warpsPerBlock * 64];
+    const int num32perWarp = 4;
+    const int pwMaxSize = num32perWarp * 32;
+   
+    __shared__ T first[warpsPerBlock * pwMaxSize];
 
 
     uint64 warpCount = 0;
@@ -425,22 +425,22 @@ kernel_binary_warp_shared_arrays(int* count,                //!< [inout] the cou
             swap_ele(srcStop, dstStop);
             swap_ele(srcLen, dstLen);
         }
-
-
-        if (lx == 0)
-            comm[wx] = dst;
-        __syncthreads();
-
         
-        const T par = (dstLen + 64 - 1) / 64;
-        const T numElements = dstLen < 64 ? dstLen : (dstLen + par-1)/par;
+        int startIndex = wx * pwMaxSize;
+        const T par = (dstLen + pwMaxSize - 1) / (pwMaxSize);
+        const T numElements = dstLen < pwMaxSize ? dstLen : (dstLen + par - 1) / par;
 
-        first[wx*64 + lx] = lx <= numElements ? colInd[dstStart +  lx * par]: 0;
-        first[wx*64 + lx + 32] = lx+32 <= numElements ? colInd[dstStart + (lx+32) * par] : 0;
+        for (int i = 0; i < num32perWarp; i++)
+        {
+            int sharedIndex = startIndex + 32 * i + lx;
+            int realIndex = dstStart + (lx + i * 32 ) * par;
+
+            first[sharedIndex] = (lx + 32 * i) <= numElements ? colInd[realIndex] : 0;
+        }
 
       
         warpCount += graph::warp_sorted_count_binary_s<warpsPerBlock>(&colInd[srcStart], srcLen,
-                &colInd[dstStart], dstLen, &(first[wx * 64]), par, numElements);
+                &colInd[dstStart], dstLen, &(first[startIndex]), par, numElements, pwMaxSize);
 
     }
 
@@ -448,6 +448,112 @@ kernel_binary_warp_shared_arrays(int* count,                //!< [inout] the cou
         atomicAdd(count, warpCount);
 
 
+}
+
+template <typename T, size_t BLOCK_DIM_X>
+__global__ void __launch_bounds__(BLOCK_DIM_X)
+kernel_binary_warp_shared_colab_arrays(int* count,                //!< [inout] the count, caller should zero
+    T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, //!< the number of edges this kernel will count
+    const size_t edgeStart                       //!< the edge this kernel will start counting at
+) {
+    constexpr size_t warpsPerBlock = BLOCK_DIM_X / 32;
+    const unsigned int lx = threadIdx.x % 32;
+    const unsigned int wx = threadIdx.x / 32;
+    const size_t gwx = (BLOCK_DIM_X * blockIdx.x + threadIdx.x) / 32;
+
+
+    const int num32perWarp = 4;
+    const int pwMaxSize = num32perWarp * 32;
+    __shared__ T comm[warpsPerBlock];
+    __shared__ T first[warpsPerBlock * pwMaxSize];
+
+
+    uint64 warpCount = 0;
+
+    for (size_t i = gwx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x / 32) {
+        T src = rowInd[i];
+        T dst = colInd[i];
+
+        T srcStart = rowPtr[src];
+        T srcStop = rowPtr[src + 1];
+
+        T dstStart = rowPtr[dst];
+        T dstStop = rowPtr[dst + 1];
+
+        T dstLen = dstStop - dstStart;
+        T srcLen = srcStop - srcStart;
+
+
+        if (srcLen > dstLen)
+        {
+            swap_ele(src, dst);
+            swap_ele(srcStart, dstStart);
+            swap_ele(srcStop, dstStop);
+            swap_ele(srcLen, dstLen);
+        }
+
+
+        if (lx == 0)
+            comm[wx] = dst;
+        __syncthreads();
+
+        bool colab = false;
+        bool oddWarp = wx & 0x1 == 1;
+        if (!oddWarp  && comm[wx + 1] == dst)
+            colab = true;
+        else if (oddWarp && comm[wx - 1] == dst)
+            colab = true;
+
+        oddWarp = colab && oddWarp;
+
+        int colabFactor = 1;
+        int startIndex = wx * pwMaxSize;
+        int colabMaxSize = pwMaxSize;
+
+        if (colab && !oddWarp)
+        {
+            colabMaxSize = 2 * pwMaxSize;
+        }
+        else if (colab && oddWarp)
+        {
+            colabMaxSize = 2 * pwMaxSize;
+            startIndex = (wx-1) * pwMaxSize;
+        }
+
+
+        
+        const T par = (dstLen + colabMaxSize - 1) / (colabMaxSize);
+        const T numElements = dstLen < colabMaxSize ? dstLen : (dstLen + par - 1) / par;
+
+
+        //if (lx == 0)
+        /*{
+            int sharedIndex = startIndex + oddWarp * pwMaxSize +  lx;
+            int realIndex = dstStart + (lx + oddWarp * pwMaxSize) * par;
+
+
+            printf("th=%u, lx = %u, dst = %u, %u, isOdd = %d, is Colab = %d, startIndex = %u, %u, %u, %d\n", threadIdx.x, lx, dst, wx, oddWarp ? 1 : 0, colab ? 1 : 0, startIndex, par, numElements, sharedIndex);
+        }*/
+
+
+        for (int i = 0; i < num32perWarp; i++)
+        {
+            int sharedIndex = startIndex + oddWarp * pwMaxSize + 32 * i + lx;
+            int realIndex = dstStart + (lx + i * 32 + oddWarp * pwMaxSize) * par;
+
+            first[sharedIndex] = (lx + 32*i + oddWarp * pwMaxSize) <= numElements ? colInd[realIndex] : 0;
+        }
+     
+        __syncthreads();
+
+
+        warpCount += graph::warp_sorted_count_binary_s<warpsPerBlock>(&colInd[srcStart], srcLen,
+            &colInd[dstStart], dstLen, &(first[startIndex]), par, numElements, colabMaxSize);
+
+    }
+
+    if (lx == 0)
+        atomicAdd(count, warpCount);
 }
 
 
