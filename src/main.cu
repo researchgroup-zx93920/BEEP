@@ -16,6 +16,7 @@
 #include "../triangle_counting/TcSerial.cuh"
 #include "../triangle_counting/TcBinary.cuh"
 #include "../triangle_counting/TcVariablehash.cuh"
+#include "../triangle_counting/TcNvgraph.cuh"
 #include "../include/CSRCOO.cuh"
 #include "../triangle_counting/testHashing.cuh"
 #include "../triangle_counting/TcBmp.cuh"
@@ -249,14 +250,22 @@ int main(int argc, char **argv){
 
 	//1) Read File to EdgeList
 	
-	char* matr;
-	matr = "D:\\graphs\\graph500-scale21-ef16_adj.bel";
+	char* matr2, *matr1;
+	matr2 = "D:\\graphs\\amazon0601_new.bel";
+	matr1 = "D:\\graphs\\amazon0601_adj.bel";
+	//matr = "D:\\graphs\\cit-Patents\\cit-Patents.bel";
+
+
+
+
+
+
 	#ifndef __DEBUG__
 	if(argc > 1)
 		matr = argv[1];
 	#endif
 
-	graph::EdgeListFile f(matr);
+	graph::EdgeListFile f(matr1);
 
 	std::vector<EdgeTy<uint>> edges;
 	std::vector<EdgeTy<uint>> fileEdges;
@@ -267,12 +276,28 @@ int main(int argc, char **argv){
 	{
 		edges.insert(edges.end(), fileEdges.begin(), fileEdges.end());
 	}
-	graph::CSRCOO<uint> csrcoo = graph::CSRCOO<uint>::from_edgelist(edges, full/*upperTriangular*/);
+
+
+
+
+	graph::EdgeListFile f2(matr2);
+
+	std::vector<EdgeTy<uint>> edges2;
+	std::vector<EdgeTy<uint>> fileEdges2;
+	while (f2.get_edges(fileEdges2, 100))
+	{
+		edges2.insert(edges2.end(), fileEdges2.begin(), fileEdges2.end());
+	}
+
+	graph::MtB_Writer m;
+	m.write_market_bel<uint, int>("D:\\graphs\\amazon0601.mtx", "D:\\graphs\\amazon0601_new.bel", false);
+
+	graph::CSRCOO<int> csrcoo = graph::CSRCOO<int>::from_edgelist(edges, upperTriangular);
 	//graph::CSRCOO<uint> csrcooFull = graph::CSRCOO<uint>::from_edgelist(edges, full);
 
 #pragma region TCTEST
 	//2) Move to GPU
-	graph::GPUArray<uint> sl("source", AllocationTypeEnum::cpuonly), 
+	graph::GPUArray<int> sl("source", AllocationTypeEnum::cpuonly), 
 		dl("destination", AllocationTypeEnum::cpuonly), 
 		rowPtr("row pointer", AllocationTypeEnum::cpuonly);
 
@@ -298,15 +323,18 @@ int main(int argc, char **argv){
 	////Count traingles binary-search: Thread or Warp
 	int st = 0;
 	int ee = csrcoo.nnz(); // st + 2;
-	graph::TcBase<uint> *tcb = new graph::TcBinary<uint>(0, ee, csrcoo.num_rows());
+	graph::TcBase<int> *tcb = new graph::TcBinary<int>(0, ee, csrcoo.num_rows());
 
+	graph::TcBase<int>* tcNV = new graph::TcNvgraph<int>(0, ee, csrcoo.num_rows());
 
 	while (true)
 	{
 
 		printf("Edge = %d\n", st);
-		int trueVal = CountTriangles<uint>(tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
-		int testVal = CountTriangles<uint>(tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Test, 0);
+		int trueVal = CountTriangles<int>(tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
+		int testVal = CountTriangles<int>(tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Test, 0);
+
+		CountTriangles<int>(tcNV, rowPtr, sl, dl, ee, csrcoo.num_rows());
 
 		if (trueVal != testVal)
 			break;

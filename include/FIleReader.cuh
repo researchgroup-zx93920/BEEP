@@ -18,7 +18,7 @@ namespace graph
     class EdgeListFile {
 
     private:
-        enum class FileType { TSV, BEL };
+        enum class FileType { TSV, BEL, MTX};
         FILE* fp_;
         std::string path_;
         FileType type_;
@@ -75,6 +75,8 @@ namespace graph
             return numRead;
         }
 
+
+       
         template <typename T> size_t read_tsv(EdgeTy<T>* ptr, const size_t n) {
 
             assert(ptr != nullptr);
@@ -147,6 +149,14 @@ namespace graph
             else if (endswith(path, ".tsv")) {
                 type_ = FileType::TSV;
                 fp_ = fopen(path_.c_str(), "r");
+
+            }
+            else if (endswith(path, ".mtx"))
+            {
+
+                type_ = FileType::MTX;
+                Log(LogPriorityEnum::info, "Mtarix format : convert to bel before use\n");
+
             }
             else {
                 Log(LogPriorityEnum::critical, "no reader for file {}", path);
@@ -189,6 +199,8 @@ namespace graph
                 numRead = read_tsv(edges.data(), n);
                 break;
             }
+            case FileType::MTX:
+                break;
             default: {
                 Log(LogPriorityEnum::critical, "unexpected file type");
                 exit(-1);
@@ -221,8 +233,212 @@ namespace graph
             edges.resize(numRead);
             return numRead;
         }
+
+        template <typename T>
+        size_t write_tsv_bel(
+            const std::string path,
+            EdgeTy<T>* ptr, //<! buffer for edges (allocated by caller)
+            const size_t n  //<! number of edges to read
+        ) {
+
+            FILE* writer = fopen(path.c_str(), "wb");
+
+            if (writer == nullptr) {
+                
+                return 0;
+            }
+            if (ptr == nullptr) {
+                
+                return 0;
+            }
+
+            unsigned long long *l;
+            l = (unsigned long long*)malloc(3 * n * sizeof(unsigned long long));
+            int elementCounter=0;
+            for (int i = 0; i < n; i++)
+            {
+                EdgeTy<T> p = ptr[i];
+
+                //in TSV (d, s, w)
+                l[elementCounter++] = p.second;
+                l[elementCounter++] = p.first;
+                l[elementCounter++] = 0;
+            }
+
+
+            const size_t numWritten = fwrite(l, 8, 3 * n, writer);
+
+            fclose(writer);
+            free(l);
+        }
+
+       
     };
 
+
+
+
+    class MtB_Writer
+    {
+    public:
+        template <typename T, typename ValueT = int>
+        void write_market_bel(
+            const std::string path,
+            const std::string outputPath,
+            bool makeFull = true
+        ) {
+            //Read Market Matrix File
+            std::ifstream file;
+            file.open(path.c_str(), std::ios::in);
+            std::istream& input_stream = file;
+            T nodes = 0;
+            T edges = 0;
+            bool got_edge_values = false;
+            bool symmetric = false;  // whether the graph is undirected
+            bool skew = false;  // whether edge values are inverse for symmetric matrices
+            bool array = false;  // whether the mtx file is in dense array format
+
+            std::string line;
+            while (true) {
+                std::getline(input_stream, line);
+                if (line[0] != '%')
+                {
+                    break;
+                }
+                else
+                {
+                    if (strlen(line.c_str()) >= 2 && line[1] == '%') {
+                        symmetric = (strstr(line.c_str(), "symmetric") != NULL);
+                        skew = (strstr(line.c_str(), "skew") != NULL);
+                        array = (strstr(line.c_str(), "array") != NULL);
+                    }
+                }
+            }
+
+            long long ll_nodes_x, ll_nodes_y, ll_edges;
+            int items_scanned = sscanf(line.c_str(), "%lld %lld %lld", &ll_nodes_x, &ll_nodes_y, &ll_edges);
+
+            if (array && items_scanned == 2) {
+                ll_edges = ll_nodes_x * ll_nodes_y;
+            }
+            else if (!array && items_scanned == 3) {
+
+                if (ll_nodes_x != ll_nodes_y) {
+                    Log(LogPriorityEnum::critical, "Error parsing MARKET graph: not square %d, %d\n", ll_nodes_x, ll_nodes_y);
+                    return;
+                }
+            }
+            else
+            {
+                Log(LogPriorityEnum::critical, "Error parsing MARKET graph: invalid problem description\n");
+            }
+
+            nodes = ll_nodes_x;
+            edges = ll_edges;
+
+
+            Log(LogPriorityEnum::debug, "%d nodes, %d directed edges\n", ll_nodes_x, ll_edges);
+
+            std::vector<EdgeTy<T>> ptr;
+            for (int i = 0; i < edges; ++i) {
+                std::string line;
+                std::getline(input_stream, line);
+
+                long long ll_row, ll_col;
+                ValueT ll_value;  // used for parse float / double
+                double lf_value;  // used to sscanf value variable types
+                int num_input;
+                bool has_edge_val = true;
+
+                if (has_edge_val)
+                {
+                    num_input = sscanf(line.c_str(), "%lld %lld %lf", &ll_row, &ll_col, &lf_value);
+
+                    if (array && (num_input == 1))
+                    {
+                        ll_value = ll_row;
+                        ll_col = i / nodes;
+                        ll_row = i - nodes * ll_col;
+                    }
+                    else if (array || num_input < 2)
+                    {
+                        Log(LogPriorityEnum::error, "Error parsing MARKET graph : badly formed edge\n");
+                        return;
+                    }
+                    else if (num_input == 2)
+                    {
+                        ll_value = 1;
+                    }
+                    else if (num_input > 2)
+                    {
+                        if (typeid(ValueT) == typeid(float) ||
+                            typeid(ValueT) == typeid(double) ||
+                            typeid(ValueT) == typeid(long double))
+                            ll_value = (ValueT)lf_value;
+                        else
+                            ll_value = (ValueT)(lf_value + 1e-10);
+                        got_edge_values = true;
+                    }
+
+                }
+                else { // if (GraphT::FLAG & graph::HAS_EDGE_VALUES)
+                    num_input = sscanf(line.c_str(), "%lld %lld", &ll_row, &ll_col);
+
+                    if (array && (num_input == 1)) {
+                        ll_value = ll_row;
+                        ll_col = i / nodes;
+                        ll_row = i - nodes * ll_col;
+                    }
+                    else if (array || (num_input != 2)) {
+                        Log(LogPriorityEnum::error,
+                            "Error parsing MARKET graph: badly formed edge");
+                    }
+                }
+
+
+                ptr.push_back(std::make_pair(ll_row, ll_col));
+                if (symmetric || makeFull)
+                    ptr.push_back(std::make_pair(ll_col, ll_row));
+            } // endfor
+
+            if (symmetric || makeFull)
+                edges *= 2;
+
+            std::sort(ptr.begin(), ptr.end(), [](const EdgeTy<T>& a, const EdgeTy<T>& b) -> bool
+                {
+                    return a.first < b.first || (a.first == b.first && a.second < b.second);
+                });
+
+
+
+            FILE* writer = fopen(outputPath.c_str(), "wb");
+
+            if (writer == nullptr) {
+
+                return;
+            }
+
+            unsigned long long* l;
+            l = (unsigned long long*)malloc(3 * edges * sizeof(unsigned long long));
+            int elementCounter = 0;
+            for (int i = 0; i < edges; i++)
+            {
+                EdgeTy<T> p = ptr[i];
+
+                //in TSV (d, s, w)
+                l[elementCounter++] = p.second;
+                l[elementCounter++] = p.first;
+                l[elementCounter++] = 0;
+            }
+
+
+            const size_t numWritten = fwrite(l, 8, 3 * edges, writer);
+
+            fclose(writer);
+            free(l);
+        }
+
+    };
 
 
 }
