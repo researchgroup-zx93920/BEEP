@@ -1,7 +1,7 @@
 #pragma once
 #include "utils.cuh"
 #include "utils_cuda.cuh"
-#include <cub/cub.cuh>
+
 using namespace std;
 
 template<typename InputType, typename OutputType>

@@ -20,6 +20,8 @@
 #include "../include/CSRCOO.cuh"
 #include "../triangle_counting/testHashing.cuh"
 #include "../triangle_counting/TcBmp.cuh"
+#include "../triangle_counting/TcBinaryEncoding.cuh"
+
 #include "../truss/cudaKtruss.cuh"
 #include "../truss19/ourtruss19.cuh"
 #include "../truss19/newTruss.cuh"
@@ -250,10 +252,9 @@ int main(int argc, char **argv){
 
 	//1) Read File to EdgeList
 	
-	char* matr2, *matr1;
-	matr2 = "D:\\graphs\\amazon0601_new.bel";
-	matr1 = "D:\\graphs\\amazon0601_adj.bel";
-	//matr = "D:\\graphs\\cit-Patents\\cit-Patents.bel";
+	char* matr;
+	
+	matr = "D:\\graphs\\graph500-scale18-ef16_adj.bel";
 
 
 
@@ -265,7 +266,7 @@ int main(int argc, char **argv){
 		matr = argv[1];
 	#endif
 
-	graph::EdgeListFile f(matr1);
+	graph::EdgeListFile f(matr);
 
 	std::vector<EdgeTy<uint>> edges;
 	std::vector<EdgeTy<uint>> fileEdges;
@@ -275,18 +276,6 @@ int main(int argc, char **argv){
 	while (f.get_edges(fileEdges, 100)) 
 	{
 		edges.insert(edges.end(), fileEdges.begin(), fileEdges.end());
-	}
-
-
-
-
-	graph::EdgeListFile f2(matr2);
-
-	std::vector<EdgeTy<uint>> edges2;
-	std::vector<EdgeTy<uint>> fileEdges2;
-	while (f2.get_edges(fileEdges2, 100))
-	{
-		edges2.insert(edges2.end(), fileEdges2.begin(), fileEdges2.end());
 	}
 
 	graph::MtB_Writer m;
@@ -324,17 +313,22 @@ int main(int argc, char **argv){
 	int st = 0;
 	int ee = csrcoo.nnz(); // st + 2;
 	graph::TcBase<int> *tcb = new graph::TcBinary<int>(0, ee, csrcoo.num_rows());
-
 	graph::TcBase<int>* tcNV = new graph::TcNvgraph<int>(0, ee, csrcoo.num_rows());
+
+
+	graph::TcBase<int> *tcBE = new graph::TcBinaryEncoding<int>(0, ee, csrcoo.num_rows());
+
 
 	while (true)
 	{
 
 		printf("Edge = %d\n", st);
-		int trueVal = CountTriangles<int>(tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
+		int trueVal = CountTriangles<int>(tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Thread, 0);
 		int testVal = CountTriangles<int>(tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Test, 0);
 
-		CountTriangles<int>(tcNV, rowPtr, sl, dl, ee, csrcoo.num_rows());
+		CountTriangles<int>(tcBE, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Thread, 0);
+
+		//CountTriangles<int>(tcNV, rowPtr, sl, dl, ee, csrcoo.num_rows());
 
 		if (trueVal != testVal)
 			break;

@@ -1,5 +1,7 @@
 #pragma once
 
+typedef uint64_t EncodeDataType;
+
 typedef std::chrono::system_clock::time_point timepoint;
 typedef unsigned int uint;
 typedef uint wtype;
@@ -17,3 +19,14 @@ template <typename NodeTy, typename WeightTy> using WEdgeTy = std::tuple<NodeTy,
 
 #define BITMAP_SCALE_LOG (9)
 #define BITMAP_SCALE (1<<BITMAP_SCALE_LOG)  /*#bits in the first-level bitmap indexed by 1 bit in the second-level bitmap*/
+
+
+#define __VERBOSE__
+
+typedef unsigned long long int uint64;
+
+//Enums
+enum ProcessingElementEnum { Thread, Warp, Block, Grid, Test };
+enum AllocationTypeEnum { cpuonly, gpu, unified, zerocopy };
+enum LogPriorityEnum { critical, warn, error, info, debug, none };
+

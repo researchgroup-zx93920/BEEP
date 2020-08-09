@@ -21,16 +21,8 @@
 #include "defs.cuh"
 #include "cuda.h" 
 #include <cuda_runtime_api.h>
+#include <cub/cub.cuh>
 
-
-#define __VERBOSE__
-
-typedef unsigned long long int uint64;
-
-//Enums
-enum ProcessingElementEnum { Thread, Warp, Block, Grid, Test };
-enum AllocationTypeEnum { cpuonly, gpu, unified, zerocopy };
-enum LogPriorityEnum { critical, warn, error, info, debug, none };
 
 
 #define CUDA_RUNTIME(ans) { gpuAssert((ans), __FILE__, __LINE__); }
