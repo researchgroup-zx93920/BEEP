@@ -7,7 +7,7 @@
 
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
-kernel_serial_arrays(int* count, //!< [inout] the count, caller should zero
+kernel_serial_arrays(uint64* count, //!< [inout] the count, caller should zero
     T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, const size_t edgeStart, int increasing = 0) {
 
     size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
@@ -92,7 +92,7 @@ kernel_serial_pe_upto_arrays(int upto, bool *mask,
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_serial_pe_level_q_arrays(
-    int* count,
+    uint64* count,
     T* rowPtr, T* rowInd, T* colInd, const size_t numEdges,
     int level, bool* processed,
     int* affected, int& affected_cnt,
@@ -393,12 +393,12 @@ namespace graph {
 
 
             //process affetced
-            kernel_serial_pe_level_q_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (
+           /* kernel_serial_pe_level_q_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (
                 tcpt.gdata(), rp, ri, ci, ne,
                 level, processed.gdata(),
                 affected.gdata(), *affected_cnt.gdata(),
                 next.gdata(), inNext.gdata(), *next_cnt.gdata(),
-                in_bucket_window_.gdata(), bucket_buf_.gdata(), *window_bucket_buf_size_, bucket_level_end_);
+                in_bucket_window_.gdata(), bucket_buf_.gdata(), *window_bucket_buf_size_, bucket_level_end_);*/
 
         }
 

@@ -5,7 +5,8 @@
 
 using namespace std;
 
-EncodeDataType* encodeLargeRows(int nr, int* csrRowPointers, int* csrColumns, unsigned short* reverseIndex, int* numberOfLongRows)
+template<typename T>
+EncodeDataType* encodeLargeRows(int nr, T* csrRowPointers, T* csrColumns, unsigned short* reverseIndex, int* numberOfLongRows)
 {
     const int bitArraySize = sizeof(EncodeDataType) * 8;
     const int numEntries = nr / bitArraySize + 1;
@@ -60,7 +61,7 @@ EncodeDataType* encodeLargeRows(int nr, int* csrRowPointers, int* csrColumns, un
 
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
-kernel_binaryEncoding_thread_arrays(int* count, //!< [inout] the count, caller should zero
+kernel_binaryEncoding_thread_arrays(uint64* count, //!< [inout] the count, caller should zero
     T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, const size_t edgeStart, 
     unsigned short* reverseIndex, EncodeDataType* bitMap, int numNodes) {
 
@@ -127,6 +128,78 @@ kernel_binaryEncoding_thread_arrays(int* count, //!< [inout] the count, caller s
     }
 }
 
+template <typename T, size_t BLOCK_DIM_X>
+__global__ void __launch_bounds__(BLOCK_DIM_X)
+kernel_binaryEncoding_warp_arrays(uint64* count,                //!< [inout] the count, caller should zero
+    T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, //!< the number of edges this kernel will count
+    const size_t edgeStart,                       //!< the edge this kernel will start counting at
+    unsigned short* reverseIndex, EncodeDataType* bitMap, int numNodes
+) {
+    constexpr size_t warpsPerBlock = BLOCK_DIM_X / 32;
+    const EncodeDataType bitLength = sizeof(EncodeDataType) * 8;
+    const int numEntries = numNodes / bitLength + 1;
+
+    const size_t lx = threadIdx.x % 32;
+    const int warpIdx = threadIdx.x / 32; // which warp in thread block
+    const size_t gwx = (BLOCK_DIM_X * blockIdx.x + threadIdx.x) / 32;
+    uint64 warpCount = 0;
+
+    for (size_t i = gwx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x / 32) {
+        T src = rowInd[i];
+        T dst = colInd[i];
+
+        T srcStart = rowPtr[src];
+        T srcStop = rowPtr[src + 1];
+
+        T dstStart = rowPtr[dst];
+        T dstStop = rowPtr[dst + 1];
+
+        T dstLen = dstStop - dstStart;
+        T srcLen = srcStop - srcStart;
+
+        if (srcLen > dstLen)
+        {
+            swap_ele(src, dst);
+            swap_ele(srcStart, dstStart);
+            swap_ele(srcStop, dstStop);
+            swap_ele(srcLen, dstLen);
+        }
+        bool sn_lr = (srcLen) > numNodes / (bitLength);
+        bool dn_lr = (dstLen) > numNodes / (bitLength);
+
+         if (dn_lr)
+        {
+            int index = reverseIndex[dst];
+            uint64_t threadCount = 0;
+            for (size_t a = lx; a < srcLen; a += 32)
+            {
+                // one element of A per thread, just search for A into B
+                const T val = colInd[srcStart + a];
+                int base = val / bitLength;
+                int rem = val % bitLength; // val & 0x3F;
+                EncodeDataType bm = bitMap[index * numEntries + base];
+                if (bm & (1ULL << rem))
+                    threadCount++;
+            }
+
+
+            // give lane 0 the total count discovered by the warp
+            typedef cub::WarpReduce<uint64_t> WarpReduce;
+            __shared__ typename WarpReduce::TempStorage tempStorage[WARPS_PER_BLOCK];
+            warpCount += WarpReduce(tempStorage[warpIdx]).Sum(threadCount);
+        }
+        else
+           warpCount += graph::warp_sorted_count_binary<warpsPerBlock>(&colInd[srcStart], srcLen,
+                &colInd[dstStart], dstLen);
+            
+    }
+
+    if (lx == 0)
+        atomicAdd(count, warpCount);
+
+
+}
+
 
 namespace graph {
 
@@ -171,7 +244,7 @@ namespace graph {
             if (kernelType == ProcessingElementEnum::Thread)
                 kernel_binaryEncoding_thread_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, rp, ri, ci, ne, edgeOffset, reversed, bitMap, TcBase<T>::numNodes);
             else if (kernelType == ProcessingElementEnum::Warp)
-                kernel_binary_warp_arrays<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, rp, ri, ci, ne, edgeOffset);
+                kernel_binaryEncoding_warp_arrays<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, rp, ri, ci, ne, edgeOffset, reversed, bitMap, TcBase<T>::numNodes);
            
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
         }

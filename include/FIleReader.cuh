@@ -297,6 +297,7 @@ namespace graph
             bool symmetric = false;  // whether the graph is undirected
             bool skew = false;  // whether edge values are inverse for symmetric matrices
             bool array = false;  // whether the mtx file is in dense array format
+            bool pattern = false;
 
             std::string line;
             while (true) {
@@ -311,6 +312,7 @@ namespace graph
                         symmetric = (strstr(line.c_str(), "symmetric") != NULL);
                         skew = (strstr(line.c_str(), "skew") != NULL);
                         array = (strstr(line.c_str(), "array") != NULL);
+                        pattern = (strstr(line.c_str(), "pattern") != NULL);
                     }
                 }
             }
@@ -340,7 +342,10 @@ namespace graph
             Log(LogPriorityEnum::debug, "%d nodes, %d directed edges\n", ll_nodes_x, ll_edges);
 
             std::vector<EdgeTy<T>> ptr;
-            for (int i = 0; i < edges; ++i) {
+            bool succeed = true;
+            for (int i = 0; i < edges; ++i) 
+            {
+                succeed = true;
                 std::string line;
                 std::getline(input_stream, line);
 
@@ -348,7 +353,7 @@ namespace graph
                 ValueT ll_value;  // used for parse float / double
                 double lf_value;  // used to sscanf value variable types
                 int num_input;
-                bool has_edge_val = true;
+                bool has_edge_val = !pattern;
 
                 if (has_edge_val)
                 {
@@ -362,8 +367,9 @@ namespace graph
                     }
                     else if (array || num_input < 2)
                     {
-                        Log(LogPriorityEnum::error, "Error parsing MARKET graph : badly formed edge\n");
-                        return;
+                        Log(LogPriorityEnum::error, "Error parsing MARKET graph : badly formed edge: LINE %d\n", i);
+                        succeed = false;
+                        break;
                     }
                     else if (num_input == 2)
                     {
@@ -391,18 +397,26 @@ namespace graph
                     }
                     else if (array || (num_input != 2)) {
                         Log(LogPriorityEnum::error,
-                            "Error parsing MARKET graph: badly formed edge");
+                            "Error parsing MARKET graph: badly formed edge: Line %d", i);
+                        succeed = false;
+                        break;
                     }
                 }
 
-
-                ptr.push_back(std::make_pair(ll_row, ll_col));
-                if (symmetric || makeFull)
-                    ptr.push_back(std::make_pair(ll_col, ll_row));
+                if (succeed)
+                {
+                    ptr.push_back(std::make_pair(ll_row, ll_col));
+                    if (symmetric || makeFull)
+                        if (ll_col != ll_row)
+                        {
+                            ptr.push_back(std::make_pair(ll_col, ll_row));
+                        }
+                }
             } // endfor
 
-            if (symmetric || makeFull)
-                edges *= 2;
+            printf("File Edges = %d, Edges found = %d\n", edges, ptr.size());
+            edges = ptr.size();
+            
 
             std::sort(ptr.begin(), ptr.end(), [](const EdgeTy<T>& a, const EdgeTy<T>& b) -> bool
                 {

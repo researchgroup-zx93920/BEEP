@@ -17,7 +17,7 @@ namespace graph {
     public:
         int dev_;
         cudaStream_t stream_;
-        int* count_;
+        uint64* count_;
         uint64 numEdges;
         uint64 numNodes;
 

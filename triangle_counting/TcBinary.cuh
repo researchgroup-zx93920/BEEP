@@ -4,7 +4,7 @@
 
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
-kernel_binary_thread_arrays(int* count, //!< [inout] the count, caller should zero
+kernel_binary_thread_arrays(uint64* count, //!< [inout] the count, caller should zero
     T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, const size_t edgeStart) {
 
     size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
@@ -160,7 +160,7 @@ kernel_binary_thread_set_arrays(int* count, //!< [inout] the count, caller shoul
 
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
-kernel_binary_warp_arrays(int* count,                //!< [inout] the count, caller should zero
+kernel_binary_warp_arrays(uint64* count,                //!< [inout] the count, caller should zero
     T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, //!< the number of edges this kernel will count
     const size_t edgeStart                       //!< the edge this kernel will start counting at
 ) {
@@ -345,7 +345,7 @@ kernel_binary_warp_set_arrays(T* count,
 
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
-kernel_binary_block_arrays(int* count,                //!< [inout] the count, caller should zero
+kernel_binary_block_arrays(uint64* count,                //!< [inout] the count, caller should zero
     T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, //!< the number of edges this kernel will count
     const size_t edgeStart                       //!< the edge this kernel will start counting at
 ) {
@@ -388,7 +388,7 @@ kernel_binary_block_arrays(int* count,                //!< [inout] the count, ca
 
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
-kernel_binary_warp_shared_arrays(int* count,                //!< [inout] the count, caller should zero
+kernel_binary_warp_shared_arrays(uint64* count,                //!< [inout] the count, caller should zero
     T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, //!< the number of edges this kernel will count
     const size_t edgeStart                       //!< the edge this kernel will start counting at
 ) {
@@ -452,7 +452,7 @@ kernel_binary_warp_shared_arrays(int* count,                //!< [inout] the cou
 
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
-kernel_binary_warp_shared_colab_arrays(int* count,                //!< [inout] the count, caller should zero
+kernel_binary_warp_shared_colab_arrays(uint64* count,                //!< [inout] the count, caller should zero
     T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, //!< the number of edges this kernel will count
     const size_t edgeStart                       //!< the edge this kernel will start counting at
 ) {
