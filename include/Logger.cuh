@@ -3,7 +3,7 @@
 
 
 
-template<typename... Args>
+template<bool NEWLINE = true,typename... Args>
 void Log(LogPriorityEnum l, const char* f, Args... args)
 {
 
@@ -50,7 +50,11 @@ void Log(LogPriorityEnum l, const char* f, Args... args)
 
 
 		printf(f, args...);
-		printf("\n\033[0m");
+
+		if (NEWLINE)
+			printf("\n");
+
+		printf("\033[0m");
 	}
 }
 

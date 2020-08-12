@@ -646,20 +646,17 @@ namespace graph {
 
             uint* count;
             CUDA_RUNTIME(cudaMallocManaged(&count, sizeof(*count)));
+            uint32_t block_size = 512; // maximally reduce the number of bitmaps
+            dim3 t_dimension(32, block_size / 32); /*2-D*/
+            CUDAContext context;
+            conc_blocks_per_SM = context.GetConCBlocks(block_size);
 
             Timer t;
             const T elem_bits = sizeof(T) * 8; /*#bits in a bitmap element*/
             const T num_words_bmp = (n + elem_bits - 1) / elem_bits;
             const T num_word_bmp_idx = (num_words_bmp + BITMAP_SCALE - 1) / BITMAP_SCALE;
 
-
-            //printf("%d, %u, %u, %u\n", n, elem_bits, num_words_bmp, num_word_bmp_idx);
-
-            uint32_t block_size = 512; // maximally reduce the number of bitmaps
-            dim3 t_dimension(32, block_size / 32); /*2-D*/
-            CUDAContext context;
-            conc_blocks_per_SM = context.GetConCBlocks(block_size);
-
+            Log<false>(LogPriorityEnum::info, "Kernel Time= ");
             execKernelDynamicAllocation(bmp_bsr_count_kernel, n, t_dimension,
                 num_word_bmp_idx * sizeof(uint32_t), true,
                 rowPtr.gdata(), colInd.gdata(), d_bitmaps.gdata(), d_bitmap_states.gdata(),
@@ -667,17 +664,13 @@ namespace graph {
                 bmp_offs.gdata(), bmp_word_indices, bmp_words, count);
             CUDA_RUNTIME(cudaDeviceSynchronize());    // ensure the kernel execution finished
 
-
-            Log(LogPriorityEnum::info, "End-To-End Time: %.9lfs", t.elapsed());
-            Log(LogPriorityEnum::info, "Finish Support Initialization");
-
             // // 4th: Free Memory.
             d_bitmaps.freeGPU();
             d_bitmap_states.freeGPU();
             d_vertex_count.freeGPU();
 
 
-            Log(LogPriorityEnum::info, "Count = %d, End-To-End Time: %.9lfs", *count, t.elapsed());
+           printf("s Count = %d\n", *count);
 
             return t.elapsed();
 

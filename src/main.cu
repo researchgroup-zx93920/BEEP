@@ -32,7 +32,7 @@ using namespace std;
 
 
 template<typename T>
-uint64 CountTriangles(graph::TcBase<T> *tc, graph::GPUArray<T> rowPtr, graph::GPUArray<T> rowInd, graph::GPUArray<T> colInd,
+uint64 CountTriangles(std::string message, graph::TcBase<T> *tc, graph::GPUArray<T> rowPtr, graph::GPUArray<T> rowInd, graph::GPUArray<T> colInd,
 	const size_t numEdges, const size_t numRows, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
 {
 	tc->count_async(rowPtr, rowInd, colInd, numEdges, edgeOffset, kernelType, increasing);
@@ -41,7 +41,7 @@ uint64 CountTriangles(graph::TcBase<T> *tc, graph::GPUArray<T> rowPtr, graph::GP
 	printf("TC = %u\n", tc->count());
 	double secs = tc->kernel_time();
 	int dev = tc->device();
-	Log(LogPriorityEnum::info, "gpu %d kernel time %f (%f teps) \n", dev, secs, numEdges / secs);
+	Log(LogPriorityEnum::info, "Kernel [%s]: gpu %d kernel time %f (%f teps) \n",message, dev, secs, numEdges / secs);
 	cudaDeviceSynchronize();
 
 
@@ -244,18 +244,44 @@ struct Node
 
 #define __DEBUG__
 
+#define NORMAL
+#define TC
+#define KTRUSS
+//#define TSV_MARKET
+//#define MARKET_BEL
+//#define TSV_BEL
+
 int main(int argc, char **argv){
 
 	//CUDA_RUNTIME(cudaDeviceReset());
 
 	printf("\033[0m");
+	graph::MtB_Writer m;
+	auto fileSrc = "";
+	auto fileDst = "";
+
+#ifdef MARKET_BEL
+	m.write_market_bel<uint, int>(fileSource, fileDst, false);
+#endif
+
+#ifdef TSV_BEL
+	m.write_tsv_bel<uint, uint>(fileSource, fileDst);
+#endif
+
+#ifdef TSV_MARKET
+	m.write_tsv_market<uint, int>(fileSource, fileDst);
+#endif
+
+#ifndef NORMAL
+	return;
+#else
 
 
 	//1) Read File to EdgeList
 	
 	char* matr;
 	
-	matr = "D:\\graphs\\hollywood-2009-2.bel";
+	matr = "D:\\graphs\\amazon0601_adj_2.mtx";
 
 	#ifndef __DEBUG__
 	if(argc > 1)
@@ -263,7 +289,6 @@ int main(int argc, char **argv){
 	#endif
 
 	graph::EdgeListFile f(matr);
-
 	std::vector<EdgeTy<uint>> edges;
 	std::vector<EdgeTy<uint>> fileEdges;
 	auto lowerTriangular = [](const Edge& e) { return e.first > e.second; };
@@ -273,6 +298,13 @@ int main(int argc, char **argv){
 	{
 		edges.insert(edges.end(), fileEdges.begin(), fileEdges.end());
 	}
+
+	bool sort = true;
+	if (sort)
+	{
+		f.sort_edges(edges);
+	}
+
 
 	/*graph::MtB_Writer m;
 	m.write_market_bel<uint, int>("D:\\graphs\\hollywood-2009.mtx", "D:\\graphs\\hollywood-2009-2.bel", false);*/
@@ -308,13 +340,21 @@ int main(int argc, char **argv){
 
 
 	//Count traingles binary-search: Thread or Warp
-	uint step = csrcoo.nnz();
+	uint step =csrcoo.nnz();
 	uint st = 0;
 	uint ee = st + step; // st + 2;
 	graph::TcBase<uint> *tcb = new graph::TcBinary<uint>(0, ee, csrcoo.num_rows());
 	graph::TcBase<uint>* tcNV = new graph::TcNvgraph<uint>(0, ee, csrcoo.num_rows());
 	graph::TcBase<uint> *tcBE = new graph::TcBinaryEncoding<uint>(0, ee, csrcoo.num_rows());
 	graph::TcBase<uint>* tc = new graph::TcSerial<uint>(0, ee, csrcoo.num_rows());
+
+	const int divideConstant = 1;
+	graph::TcBase<uint>* tchash = new graph::TcVariableHash<uint>(0, ee, csrcoo.num_rows());
+
+
+	graph::BmpGpu<uint> bmp;
+	bmp.InitBMP(csrcoo.num_rows(), csrcoo.nnz(), rowPtr, dl);
+	bmp.bmpConstruct(csrcoo.num_rows(), csrcoo.nnz(), rowPtr, dl);
 
 	while (st < csrcoo.nnz())
 	{
@@ -346,19 +386,25 @@ int main(int argc, char **argv){
 			printf("}\n");
 		}
 
-		uint64  serialTc = CountTriangles<uint>(tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Thread, 0);
-		uint64  binaryTc = CountTriangles<uint>(tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
-		uint64  binarySharedTc = CountTriangles<uint>(tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Test, 0);
-		uint64 binaryEncodingTc = CountTriangles<uint>(tcBE, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
+		//uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Thread, 0);
 
-		//CountTriangles<int>(tcNV, rowPtr, sl, dl, ee, csrcoo.num_rows());
+		//CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
+		uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
+		uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Test, 0);
+		uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", tcBE, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
+		CountTrianglesHash<uint>(divideConstant, tchash, rowPtr, sl, dl, ee, csrcoo.num_rows(), 0, ProcessingElementEnum::Warp, 0);
+		bmp.Count(csrcoo.num_rows(), rowPtr, dl);
 
-		if (serialTc != binaryTc)
-			break;
+		//CountTriangles<uint>(tcNV, rowPtr, sl, dl, ee, csrcoo.num_rows());
+
+		/*if (serialTc != binaryTc)
+			break;*/
 		st += step;
 		ee += step;
 
 		printf("------------------------------\n");
+
+		break;
 	}
 
 	////Takes either serial or binary triangle Counter
@@ -369,15 +415,14 @@ int main(int argc, char **argv){
 
 	////Now I will start TC with hash
 	//
-	//const int divideConstant = 1;
-	//graph::TcBase<uint>* tchash = new graph::TcVariableHash<uint>(0, ee, csrcoo.num_rows());
-	//CountTrianglesHash<uint>(divideConstant,tchash, rowPtr, sl, dl, ee, csrcoo.num_rows(), 0, ProcessingElementEnum::Warp, 0);
+	//
+	
+	//
 
 	//int n = csrcoo.num_rows();
 	//int m = csrcoo.nnz();
-	//graph::BmpGpu<uint> bmp;
-	//bmp.InitBMP(n, m, rowPtr, dl);
-	//bmp.bmpConstruct(n, m, rowPtr, dl);
+	//
+	//
 	//double tc_time = bmp.Count(n, rowPtr, dl);
 
 
@@ -607,7 +652,7 @@ int main(int argc, char **argv){
 #pragma endregion
 
 
-
+#endif
     printf("Done ....\n");
 	/*slFull.freeGPU();
 	dlFull.freeGPU();

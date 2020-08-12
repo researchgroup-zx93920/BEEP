@@ -4,6 +4,21 @@
 
 namespace graph
 {
+    struct MatrixFileProp
+    {
+        bool symmetric = false;  // whether the graph is undirected
+        bool skew = false;  // whether edge values are inverse for symmetric matrices
+        bool array = false;  // whether the mtx file is in dense array format
+        bool pattern = false;
+
+        void Set(bool sy, bool sk, bool ar, bool pa)
+        {
+            symmetric = sy;
+            skew = sk;
+            array = ar;
+            pattern = pa;
+        }
+    };
 
     bool endswith(const std::string& base,  //!< [in] the base string
         const std::string& suffix //!< [in] the suffix to check for
@@ -23,6 +38,10 @@ namespace graph
         std::string path_;
         FileType type_;
         std::vector<char> belBuf_; // a buffer used by read_bel
+
+        //For market format
+        std::ifstream market_file;
+        MatrixFileProp mfp;
 
         /*! read n edges into ptr
 
@@ -75,6 +94,8 @@ namespace graph
             return numRead;
         }
 
+      
+        
 
        
         template <typename T> size_t read_tsv(EdgeTy<T>* ptr, const size_t n) {
@@ -104,6 +125,92 @@ namespace graph
             }
             return i;
         }
+
+
+        template <typename T, typename ValueT> 
+        size_t read_market(EdgeTy<T>* ptr, const size_t n, bool has_edge_val=true)
+        {
+
+            assert(ptr != nullptr);
+            assert(fp_ != nullptr);
+            std::istream& input_stream = market_file;
+            size_t i = 0;
+            bool succeed = true;
+            for (; i < n; ++i) 
+            {
+                succeed = true;
+                std::string line;
+                std::getline(input_stream, line);
+
+                long long ll_row, ll_col;
+                ValueT ll_value;  // used for parse float / double
+                double lf_value;  // used to sscanf value variable types
+                int num_input;
+                bool has_edge_val = !mfp.pattern;
+
+                if (has_edge_val)
+                {
+                    num_input = sscanf(line.c_str(), "%lld %lld %lf", &ll_row, &ll_col, &lf_value);
+
+                    if (mfp.array && (num_input == 1))
+                    {
+                        ll_value = ll_row;
+                        ll_col = ll_row;
+                        ll_row = ll_row;
+                    }
+                    else if (mfp.array || num_input < 2)
+                    {
+                        succeed = false;
+                        break;
+                    }
+                    else if (num_input == 2)
+                    {
+                        ll_value = 1;
+                    }
+                    else if (num_input > 2)
+                    {
+                        if (typeid(ValueT) == typeid(float) ||
+                            typeid(ValueT) == typeid(double) ||
+                            typeid(ValueT) == typeid(long double))
+                            ll_value = (ValueT)lf_value;
+                        else
+                            ll_value = (ValueT)(lf_value + 1e-10);
+        
+                    }
+
+                }
+                else 
+                { // if (GraphT::FLAG & graph::HAS_EDGE_VALUES)
+                    num_input = sscanf(line.c_str(), "%lld %lld", &ll_row, &ll_col);
+
+                    if (mfp.array && (num_input == 1)) 
+                    {
+                        ll_value = ll_row;
+                        ll_col =0;
+                        ll_row = 0;
+                    }
+                    else if (mfp.array || (num_input != 2)) {
+                        succeed = false;
+                        break;
+                    }
+                }
+
+                if (succeed)
+                {
+                    ptr[i].first = static_cast<T>(ll_row);
+                    ptr[i].second = static_cast<T>(ll_col);
+                    if (mfp.symmetric)
+                        if (ll_col != ll_row)
+                        {
+                            ptr[i].first = static_cast<T>(ll_col);
+                            ptr[i].second = static_cast<T>(ll_row);
+                            i++;
+                        }
+                }
+            }
+            return i;
+        }
+
 
         template <typename T, typename WT> size_t read_tsv(WEdgeTy<T, WT>* ptr, const size_t n) {
 
@@ -153,10 +260,9 @@ namespace graph
             }
             else if (endswith(path, ".mtx"))
             {
-
                 type_ = FileType::MTX;
-                Log(LogPriorityEnum::info, "Mtarix format : convert to bel before use\n");
-
+                market_file.open(path_.c_str(), std::ios::in);
+                AdvanceWithMarketFile();
             }
             else {
                 Log(LogPriorityEnum::critical, "no reader for file {}", path);
@@ -169,10 +275,77 @@ namespace graph
         }
 
         ~EdgeListFile() {
-            if (fp_) {
+            if (fp_ && type_ != FileType::MTX) {
                 fclose(fp_);
                 fp_ = nullptr;
             }
+            else if (market_file && type_ == FileType::MTX)
+            {
+                market_file.close();
+            }
+
+        }
+        void sort_edges(std::vector<EdgeTy<uint>>& edges)
+        {
+            std::sort(edges.begin(), edges.end(), [](const EdgeTy<uint>& a, const EdgeTy<uint>& b) -> bool
+                {
+                    return a.first < b.first || (a.first == b.first && a.second < b.second);
+                });
+        }
+        void AdvanceWithMarketFile()
+        {
+            std::istream& input_stream = market_file;
+            int nodes = 0;
+            int edges = 0;
+            bool got_edge_values = false;
+            bool symmetric = false;  // whether the graph is undirected
+            bool skew = false;  // whether edge values are inverse for symmetric matrices
+            bool array = false;  // whether the mtx file is in dense array format
+            bool pattern = false;
+
+            std::string line;
+            while (true) {
+                std::getline(input_stream, line);
+                if (line[0] != '%')
+                {
+                    break;
+                }
+                else
+                {
+                    if (strlen(line.c_str()) >= 2 && line[1] == '%') {
+                        symmetric = (strstr(line.c_str(), "symmetric") != NULL);
+                        skew = (strstr(line.c_str(), "skew") != NULL);
+                        array = (strstr(line.c_str(), "array") != NULL);
+                        pattern = (strstr(line.c_str(), "pattern") != NULL);
+                    }
+                }
+            }
+
+            mfp.Set(symmetric, skew, array, pattern);
+
+            long long ll_nodes_x, ll_nodes_y, ll_edges;
+            int items_scanned = sscanf(line.c_str(), "%lld %lld %lld", &ll_nodes_x, &ll_nodes_y, &ll_edges);
+
+            if (array && items_scanned == 2) {
+                ll_edges = ll_nodes_x * ll_nodes_y;
+            }
+            else if (!array && items_scanned == 3) {
+
+                if (ll_nodes_x != ll_nodes_y) {
+                    Log(LogPriorityEnum::critical, "Error parsing MARKET graph: not square %d, %d\n", ll_nodes_x, ll_nodes_y);
+                    return;
+                }
+            }
+            else
+            {
+                Log(LogPriorityEnum::critical, "Error parsing MARKET graph: invalid problem description\n");
+            }
+
+            nodes = ll_nodes_x;
+            edges = ll_edges;
+
+
+            Log(LogPriorityEnum::debug, "%d nodes, %d directed edges\n", ll_nodes_x, ll_edges);
         }
 
         /*! \brief attempt to read n edges from the file
@@ -200,6 +373,7 @@ namespace graph
                 break;
             }
             case FileType::MTX:
+                numRead = read_market<T,T>(edges.data(), n, false);
                 break;
             default: {
                 Log(LogPriorityEnum::critical, "unexpected file type");
@@ -451,6 +625,104 @@ namespace graph
             fclose(writer);
             free(l);
         }
+
+
+        template <typename T, typename ValueT = int>
+        void write_tsv_bel(
+            const std::string path,
+            const std::string outputPath
+        ) {
+
+            FILE* fp_;
+            fp_ = fopen(path.c_str(), "r");
+            std::vector<EdgeTy<T>> fileEdges;
+
+            int numread = 0;
+            do{
+                long long unsigned dst, src, weight;
+                numread = fscanf(fp_, "%llu %llu %llu", &dst, &src, &weight);
+                if (numread == 3)
+                {
+                    fileEdges.push_back(std::make_pair(src, dst));
+                }
+            } while (numread == 3);
+
+            int n = fileEdges.size();
+            FILE* writer = fopen(outputPath.c_str(), "wb");
+
+            if (writer == nullptr) {
+
+                return;
+            }
+
+            unsigned long long* l;
+            l = (unsigned long long*)malloc(3 * n * sizeof(unsigned long long));
+            int elementCounter = 0;
+            for (int i = 0; i < n; i++)
+            {
+                EdgeTy<T> p = fileEdges[i];
+
+                //in TSV (d, s, w)
+                l[elementCounter++] = p.second;
+                l[elementCounter++] = p.first;
+                l[elementCounter++] = 0;
+            }
+
+
+            const size_t numWritten = fwrite(l, 8, 3 * n, writer);
+
+            fclose(writer);
+            free(l);
+        }
+
+
+
+        template <typename T, typename ValueT = double>
+        void write_tsv_market(
+            const std::string path,
+            const std::string outputPath
+        ) {
+
+            FILE* fp_;
+            fp_ = fopen(path.c_str(), "r");
+            std::vector<EdgeTy<T>> fileEdges;
+            std::vector<ValueT> weights;
+
+            int numread = 0;
+            do {
+                long long unsigned dst, src;
+                ValueT weight;
+                if(typeid(ValueT) != typeid(double))
+                    numread = fscanf(fp_, "%llu %llu %llu", &dst, &src, &weight);
+                else
+                    numread = fscanf(fp_, "%llu %llu %llg", &dst, &src, &weight);
+
+                if (numread == 3)
+                {
+                    fileEdges.push_back(std::make_pair(src, dst));
+                    weights.push_back(weight);
+                }
+            } while (numread == 3);
+
+            int m = fileEdges.size();
+            int n = fileEdges[m - 1].first;
+
+
+            std::fstream file;
+            file.open(outputPath, std::ios::out);
+
+            file << "%%MatrixMarket matrix coordinate general" << endl;
+            file << n << " " << n << " " << m << endl;
+
+            for (int i = 0; i < m; i++)
+            {
+                file << fileEdges[i].first << " " << fileEdges[i].second <<" " << weights[i] << endl;
+            }
+           
+            //closing the file
+            file.close();
+        }
+
 
     };
 

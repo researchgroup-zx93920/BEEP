@@ -40,6 +40,108 @@ kernel_serial_arrays(uint64* count, //!< [inout] the count, caller should zero
     }
 }
 
+
+
+template <typename T, size_t BLOCK_DIM_X>
+__global__ void __launch_bounds__(BLOCK_DIM_X)
+kernel_serial_warp_arrays(uint64* count, //!< [inout] the count, caller should zero
+    T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, const size_t edgeStart, int increasing = 0) {
+
+   
+    constexpr size_t warpsPerBlock = BLOCK_DIM_X / 32;
+    const size_t lx = threadIdx.x % 32;
+    const size_t wx = threadIdx.x / 32;
+    const size_t gwx = (BLOCK_DIM_X * blockIdx.x + threadIdx.x) / 32;
+
+    uint64 threadCount = 0;
+
+    __shared__ T srcSpace[warpsPerBlock][32];
+    __shared__ T dstSpace[warpsPerBlock][32];
+
+    for (size_t i = gwx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x/32) 
+    {
+        const T src = rowInd[i];
+        const T dst = colInd[i];
+        T ap = rowPtr[src];
+        T bp = rowPtr[dst];
+        const T aEnd = rowPtr[src + 1];
+        const T bEnd = rowPtr[dst + 1];
+
+        bool loadA = true;
+        bool loadB = true;
+
+        bool loadAShared = true;
+        bool loadBShared = true;
+
+        T a, b, numA, numB;
+        while (ap < aEnd && bp < bEnd) 
+        {
+            numA = (aEnd - ap) > 32 ? 32 : (aEnd - ap);
+            numB = (bEnd - bp) > 32 ? 32 : (bEnd - bp);
+
+            if (loadAShared)
+            {
+                //All threads in the warp will load
+                srcSpace[wx][lx] = (lx < numA) ? colInd[ap + lx] : 0;
+                loadAShared = false;
+            }
+            if (loadBShared)
+            {
+                //All threads in the warp will load
+                dstSpace[wx][lx] = (lx < numB) ? colInd[bp + lx] : 0;
+                loadBShared = false;
+            }
+
+            //Ufortunately process by single thread
+            if (lx == 0)
+            {
+                T sap = 0;
+                T sbp = 0;
+
+                while (sap < numA && sbp < numB)
+                {
+                    a = srcSpace[wx][sap];
+                    b = dstSpace[wx][sbp];
+                      
+                    if (a == b) {
+                        ++threadCount;
+                        ++sap;
+                        ++sbp;
+                    }
+                    else if (a < b) {
+                        ++sap;
+                    }
+                    else {
+                        ++sbp;
+                    }
+                }
+                if (sap == numA)
+                {
+                    ap += numA;
+                    loadAShared = true;
+                }
+                if (sbp == numB)
+                {
+                    bp += numB;
+                    loadBShared = true;
+                }
+            }    
+           unsigned int writemask_deq = __activemask();
+           
+            ap = __shfl_sync(writemask_deq, ap, 0);
+            loadBShared = __shfl_sync(writemask_deq, loadBShared, 0);
+            loadAShared = __shfl_sync(writemask_deq, loadAShared, 0);
+            bp = __shfl_sync(writemask_deq, bp, 0);
+        }
+    }
+
+    // Add to total count
+    if (0 == lx) {
+        atomicAdd(count, threadCount);
+    }
+}
+
+
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_serial_pe_arrays(int* count, //!< [inout] the count, caller should zero
@@ -324,12 +426,15 @@ namespace graph {
             const int dimGridBlock = (dimBlock * numEdges + (dimBlock)-1) / (dimBlock);
 
             assert(TcBase<T>::count_);
-            Log(LogPriorityEnum::info, "device = %d, blocks = %d, threads = %d", TcBase<T>::dev_, dimGrid, dimBlock);
+            Log(LogPriorityEnum::debug, "device = %d, blocks = %d, threads = %d", TcBase<T>::dev_, dimGrid, dimBlock);
             CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
 
 
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
-            kernel_serial_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, rp, ri, ci, ne, edgeOffset);
+            if(kernelType == Thread)
+                kernel_serial_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, rp, ri, ci, ne, edgeOffset);
+            else if(kernelType == Warp)
+                kernel_serial_warp_arrays<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, rp, ri, ci, ne, edgeOffset);
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
         }
 

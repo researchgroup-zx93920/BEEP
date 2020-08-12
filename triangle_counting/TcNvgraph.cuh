@@ -13,17 +13,10 @@ namespace graph {
 
         void count_async(GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
-            T* rp = rowPtr.gdata();
-            T* ri = rowInd.gdata();
-            T* ci = colInd.gdata();
-
-            CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
-
-
-
-           /*T* rp = rowPtr.gdata();
-            T* ri = rowInd.gdata();
-            T* ci = colInd.gdata();
+         
+           /*int* rp = (int*)rowPtr.gdata();
+            int* ri = (int*)rowInd.gdata();
+            int* ci = (int*)colInd.gdata();
 
             CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
 

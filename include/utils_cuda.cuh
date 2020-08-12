@@ -69,6 +69,7 @@
     CUDA_RUNTIME(cudaEventSynchronize(end)); \
     CUDA_RUNTIME(cudaDeviceSynchronize()); \
     CUDA_RUNTIME(cudaEventElapsedTime(&singleKernelTime, start, end)); \
+    if(verbose) printf("%f", singleKernelTime/1000.0); \
     \
     {\
     }\

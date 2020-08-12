@@ -236,7 +236,7 @@ namespace graph {
             const int dimGridBlock = (dimBlock * numEdges + (dimBlock)-1) / (dimBlock);
 
             assert(TcBase<T>::count_);
-            Log(LogPriorityEnum::info, "device = %d, blocks = %d, threads = %d\n", TcBase<T>::dev_, dimGrid, dimBlock);
+            Log(LogPriorityEnum::debug, "device = %d, blocks = %d, threads = %d\n", TcBase<T>::dev_, dimGrid, dimBlock);
             CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
 
 

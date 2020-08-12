@@ -4,7 +4,7 @@
 
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
-kernel_hash_thread_arrays(int* count, //!< [inout] the count, caller should zero
+kernel_hash_thread_arrays(uint64* count, //!< [inout] the count, caller should zero
     T* rowPtr, T* rowInd, T* colInd,
     T* hp, T* hbs, const size_t hashConstant,
     const size_t numEdges, const size_t edgeStart, int increasing = 0) {
@@ -87,7 +87,7 @@ kernel_hash_thread_arrays(int* count, //!< [inout] the count, caller should zero
 
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
-kernel_hash_warp_arrays(int* count, //!< [inout] the count, caller should zero
+kernel_hash_warp_arrays(uint64* count, //!< [inout] the count, caller should zero
     T* rowPtr, T* rowInd, T* colInd,
     T* hp, T* hbs, const size_t hashConstant,
     const size_t numEdges, const size_t edgeStart, int increasing = 0) {
@@ -204,7 +204,7 @@ namespace graph {
             const int dimGridBlock = (dimBlock * numEdges + (dimBlock)-1) / (dimBlock);
 
             assert(TcBase<T>::count_);
-            Log(LogPriorityEnum::info, "device = %d, blocks = %d, threads = %d\n", TcBase<T>::dev_, dimGrid, dimBlock);
+            Log(LogPriorityEnum::debug, "device = %d, blocks = %d, threads = %d\n", TcBase<T>::dev_, dimGrid, dimBlock);
             CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
 
 
