@@ -8,7 +8,7 @@
 #include "../include/utils_cuda.cuh"
 #include "../include/cub_wrappers.cuh"
 
-#include <immintrin.h>
+//#include <immintrin.h>
 #include <cuda_runtime.h>
 #include <cuda_runtime.h>
 #include "../include/CGArray.cuh"
@@ -301,7 +301,7 @@ uint32_t LinearSearch(T* array, uint32_t offset_beg, uint32_t offset_end, T val)
     }
     return offset_end;
 }
-
+/*
 template<typename T>
 uint32_t BranchFreeBinarySearch(T* a, uint32_t offset_beg, uint32_t offset_end, T x) {
     int32_t n = offset_end - offset_beg;
@@ -397,7 +397,7 @@ inline int FindSrc(int n, int m, graph::GPUArray<T> rowPtr, graph::GPUArray<T> c
     }
     return u;
 }
-
+*/
 
 //
 //struct Edge {
@@ -445,7 +445,7 @@ namespace graph {
 
         void getEidAndEdgeList(int n,int m,graph::GPUArray<T> rowPtr, graph::GPUArray<T> colInd) 
         {
-            Timer t;
+            /*Timer t;
 
             //Allocate space for eid -- size g->m
             idToEdge.initialize("id2edge", AllocationTypeEnum::unified, m / 2, 0);
@@ -507,7 +507,7 @@ namespace graph {
             free(num_edges_copy);
 
             #pragma omp single
-            Log(LogPriorityEnum::info, "EID and Edge list: %.9lfs", t.elapsed());
+            Log(LogPriorityEnum::info, "EID and Edge list: %.9lfs", t.elapsed());*/
         }
         BmpGpu()
         {

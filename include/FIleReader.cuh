@@ -711,18 +711,74 @@ namespace graph
             std::fstream file;
             file.open(outputPath, std::ios::out);
 
-            file << "%%MatrixMarket matrix coordinate general" << endl;
-            file << n << " " << n << " " << m << endl;
+            file << "%%MatrixMarket matrix coordinate general" << std::endl;
+            file << n << " " << n << " " << m << std::endl;
 
             for (int i = 0; i < m; i++)
             {
-                file << fileEdges[i].first << " " << fileEdges[i].second <<" " << weights[i] << endl;
+                file << fileEdges[i].first << " " << fileEdges[i].second <<" " << weights[i] << std::endl;
             }
            
             //closing the file
             file.close();
         }
 
+
+
+        template <typename T, typename ValueT = double>
+        void write_bel_market(
+            const std::string path,
+            const std::string outputPath
+        ) {
+
+            FILE* fp_;
+            std::vector<char> belBuf_;
+            fp_ = fopen(path.c_str(), "rb");
+            std::vector<EdgeTy<T>> fileEdges;
+            std::vector<ValueT> weights;
+
+            int numRead = 0;
+            int blockSize = 1000;
+            do {
+
+
+                belBuf_.resize(24 * blockSize);
+                numRead = fread(belBuf_.data(), 24, blockSize, fp_);
+
+                // end of file or error
+                if (numRead > 0)
+                {
+                    for (size_t i = 0; i < numRead; ++i) {
+                        uint64_t src, dst;
+                        memcpy(&src, &belBuf_[i * 24 + 8], 8);
+                        memcpy(&dst, &belBuf_[i * 24 + 0], 8);
+                        fileEdges.push_back(std::make_pair(src, dst));
+                        ValueT weight;
+                        
+                        memcpy(&weight, &belBuf_[i * 24 + 16], 8);
+                        weights.push_back(weight);
+                    }
+                }
+            } while (numRead > 0);
+
+            int m = fileEdges.size();
+            int n = fileEdges[m - 1].first;
+
+
+            std::fstream file;
+            file.open(outputPath, std::ios::out);
+
+            file << "%%MatrixMarket matrix coordinate general" << std::endl;
+            file << n << " " << n << " " << m << std::endl;
+
+            for (int i = 0; i < m; i++)
+            {
+                file << fileEdges[i].first << " " << fileEdges[i].second << " " << weights[i] << std::endl;
+            }
+
+            //closing the file
+            file.close();
+        }
 
     };
 

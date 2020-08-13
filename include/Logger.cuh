@@ -1,19 +1,30 @@
 #pragma once
 #include "utils.cuh"
 
+//logger for IBM Machines
+//template<class T>
+//T const& convert_for_log_note(T const& x)
+//{
+//	return x;
+//}
+//
+//const char* convert_for_log_note(std::string const& x)
+//{
+//	return x.c_str();
+//}
 
 
-template<bool NEWLINE = true,typename... Args>
+template<bool NEWLINE = true, typename... Args>
 void Log(LogPriorityEnum l, const char* f, Args... args)
 {
 
 	bool print = true;
-	#ifndef __DEBUG__
+#ifndef __DEBUG__
 	if (l == debug)
 	{
 		print = false;
 	}
-	#endif // __DEBUG__
+#endif // __DEBUG__
 
 	if (print)
 	{

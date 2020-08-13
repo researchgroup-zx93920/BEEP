@@ -250,6 +250,7 @@ struct Node
 //#define TSV_MARKET
 //#define MARKET_BEL
 //#define TSV_BEL
+//#define BEL_MARKET
 
 int main(int argc, char **argv){
 
@@ -257,19 +258,23 @@ int main(int argc, char **argv){
 
 	printf("\033[0m");
 	graph::MtB_Writer m;
-	auto fileSrc = "";
-	auto fileDst = "";
+	auto fileSrc = "D:\\graphs\\graph500-scale18-ef16_adj.bel";
+	auto fileDst = "D:\\graphs\\graph500-scale18-ef16_adj.mtx";
 
 #ifdef MARKET_BEL
-	m.write_market_bel<uint, int>(fileSource, fileDst, false);
+	m.write_market_bel<uint, int>(fileSrc, fileDst, false);
 #endif
 
 #ifdef TSV_BEL
-	m.write_tsv_bel<uint, uint>(fileSource, fileDst);
+	m.write_tsv_bel<uint, uint>(fileSrc, fileDst);
 #endif
 
 #ifdef TSV_MARKET
-	m.write_tsv_market<uint, int>(fileSource, fileDst);
+	m.write_tsv_market<uint, int>(fileSrc, fileDst);
+#endif
+
+#ifdef BEL_MARKET
+	m.write_bel_market<uint, int>(fileSrc, fileDst);
 #endif
 
 #ifndef NORMAL
@@ -281,7 +286,7 @@ int main(int argc, char **argv){
 	
 	char* matr;
 	
-	matr = "D:\\graphs\\amazon0601_adj_2.mtx";
+	matr = "D:\\graphs\\graph500-scale18-ef16_adj.bel";
 
 	#ifndef __DEBUG__
 	if(argc > 1)
@@ -390,7 +395,8 @@ int main(int argc, char **argv){
 
 		//CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
 		uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
-		uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Test, 0);
+		uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::WarpShared, 0);
+		uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Test, 0);
 		uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", tcBE, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
 		CountTrianglesHash<uint>(divideConstant, tchash, rowPtr, sl, dl, ee, csrcoo.num_rows(), 0, ProcessingElementEnum::Warp, 0);
 		bmp.Count(csrcoo.num_rows(), rowPtr, dl);

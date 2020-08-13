@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cub/cub.cuh>
 #include "../include/utils.cuh"
 #include "../include/Logger.cuh"
 #include "../include/CGArray.cuh"
