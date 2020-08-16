@@ -239,7 +239,7 @@ namespace graph
 
 		T*& cdata()
 		{
-			if (_at == AllocationTypeEnum::unified)
+			if (_at == unified)
 				return gpu_data;
 
 			return cpu_data;

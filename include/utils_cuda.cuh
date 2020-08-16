@@ -1,7 +1,8 @@
 /*---- 1. CUDA kernel check functions ----*/
 #pragma once
 #include <driver_types.h>
-
+#include "utils.cuh"
+#include "Logger.cuh"
 #define WARP_BITS   (5)
 #define WARP_SIZE   (1<<WARP_BITS)
 #define WARP_MASK   (WARP_SIZE-1)
@@ -87,6 +88,7 @@
                                 var += __shfl_down_sync(0xFFFFFFFF, var, 2);\
                                 var += __shfl_down_sync(0xFFFFFFFF, var, 1);\
                             }
+
 
 
 struct CUDAContext {

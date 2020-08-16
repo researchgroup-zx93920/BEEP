@@ -1,7 +1,15 @@
 #pragma once
-
-#include "utils.cuh"
 #include <cuda_runtime.h>
+#include "utils.cuh"
+
+
+#define WARP_REDUCE_MASK(var, mask)    { \
+                                var += __shfl_down_sync(mask, var, 16);\
+                                var += __shfl_down_sync(mask, var, 8);\
+                                var += __shfl_down_sync(mask, var, 4);\
+                                var += __shfl_down_sync(mask, var, 2);\
+                                var += __shfl_down_sync(mask, var, 1);\
+                            }
 
 namespace graph
 {
@@ -607,6 +615,63 @@ namespace graph
         {
             return threadCount;
         }
+    }
+
+
+    template <size_t WARPS_PER_BLOCK, typename T, bool reduce = true>
+    __device__ __forceinline__ uint64_t warp_sorted_count_binary_upto(int k, bool* keep, 
+        const T* const A, //!< [in] array A
+        const T aStart,
+        const size_t aSz, //!< [in] the number of elements in A
+        T* B, //!< [in] array B
+        const T bStart,
+        T bSz  //!< [in] the number of elements in B
+    )
+    {
+        uint64_t  lastCount = 0;
+        const int warpIdx = threadIdx.x / 32; // which warp in thread block
+        const int laneIdx = threadIdx.x % 32; // which thread in warp
+
+        uint64_t threadCount = 0;
+        uint64_t warpCount = 0;
+        T lastIndex = 0;
+      
+        // cover entirety of A with warp
+        int round = 0;
+        for (size_t i = laneIdx; i < aSz; i += 32)
+        {
+            // one element of A per thread, just search for A into B
+            if (keep[i + aStart])
+            {
+                const T searchVal = A[i];
+                const T leftValue = B[lastIndex];
+                const T lb = graph::binary_search<T>(B, lastIndex, bSz, searchVal);
+                if (lb < bSz)
+                {
+                    if (B[lb] == searchVal && keep[lb + bStart])
+                    {
+                        //printf("At %u, SearchVal = %u\n", lb, searchVal);
+                        threadCount++;
+                    }
+                }
+                lastIndex = lb;
+
+            }
+
+            round++;
+
+            if (round * 32 > k)
+            {
+                unsigned int writemask_deq = __activemask();
+                warpCount = threadCount;
+                WARP_REDUCE_MASK(warpCount, writemask_deq);
+                warpCount = __shfl_sync(writemask_deq, warpCount, 0);
+                if (warpCount >= k)
+                    break;
+            }
+        }
+
+        return warpCount;
     }
 
 

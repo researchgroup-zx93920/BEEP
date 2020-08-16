@@ -32,7 +32,7 @@ using namespace std;
 
 
 template<typename T>
-uint64 CountTriangles(std::string message, graph::TcBase<T> *tc, graph::GPUArray<T> rowPtr, graph::GPUArray<T> rowInd, graph::GPUArray<T> colInd,
+uint64 CountTriangles(std::string message, graph::TcBase<T>* tc, graph::GPUArray<T> rowPtr, graph::GPUArray<T> rowInd, graph::GPUArray<T> colInd,
 	const size_t numEdges, const size_t numRows, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
 {
 	tc->count_async(rowPtr, rowInd, colInd, numEdges, edgeOffset, kernelType, increasing);
@@ -41,7 +41,7 @@ uint64 CountTriangles(std::string message, graph::TcBase<T> *tc, graph::GPUArray
 	printf("TC = %u\n", tc->count());
 	double secs = tc->kernel_time();
 	int dev = tc->device();
-	Log(LogPriorityEnum::info, "Kernel [%s]: gpu %d kernel time %f (%f teps) \n",message, dev, secs, numEdges / secs);
+	Log(LogPriorityEnum::info, "Kernel [%s]: gpu %d kernel time %f (%f teps) \n", message, dev, secs, numEdges / secs);
 	cudaDeviceSynchronize();
 
 
@@ -53,14 +53,14 @@ void CountTrianglesHash(const int divideConstant, graph::TcBase<T>* tc, graph::G
 	const size_t numEdges, const size_t numRows, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
 {
 
-	const int minRowLen = 8*1024;
+	const int minRowLen = 8 * 1024;
 	const int maxRowLen = 32 * 1024;
 	const int cNumBins = 512; //not used
 
 	//Construct
 	auto hash1 = [](uint val, uint div) { return (val / 11) % div; };
 	graph::GPUArray<uint> htp("hash table pointer", AllocationTypeEnum::gpu, numRows + 1, 0);
-	graph::GPUArray<uint> htd("hash table", AllocationTypeEnum::gpu, numEdges-edgeOffset, 0);
+	graph::GPUArray<uint> htd("hash table", AllocationTypeEnum::gpu, numEdges - edgeOffset, 0);
 
 	htp.cdata()[0] = 0;
 	for (int i = 0; i < numRows; i++)
@@ -68,7 +68,7 @@ void CountTrianglesHash(const int divideConstant, graph::TcBase<T>* tc, graph::G
 		uint s = rowPtr.cdata()[i];
 		uint e = rowPtr.cdata()[i + 1];
 
-		if ((e - s) >= minRowLen && (e-s) < maxRowLen)
+		if ((e - s) >= minRowLen && (e - s) < maxRowLen)
 			htp.cdata()[i + 1] = (e - s) / divideConstant + 1;
 		else
 			htp.cdata()[i + 1] = 0;
@@ -232,7 +232,7 @@ void ConstructTriList(graph::GPUArray<T>& triIndex, graph::GPUArray<T>& triPoint
 	printf("%u\n", triPointer.cdata()[numEdges]);*/
 }
 
- 
+
 struct Node
 {
 	uint val;
@@ -245,36 +245,40 @@ struct Node
 #define __DEBUG__
 
 #define NORMAL
-#define TC
+//#define TC
 #define KTRUSS
 //#define TSV_MARKET
 //#define MARKET_BEL
 //#define TSV_BEL
 //#define BEL_MARKET
 
-int main(int argc, char **argv){
+int main(int argc, char** argv) {
 
 	//CUDA_RUNTIME(cudaDeviceReset());
 
 	printf("\033[0m");
-	graph::MtB_Writer m;
-	auto fileSrc = "D:\\graphs\\graph500-scale18-ef16_adj.bel";
-	auto fileDst = "D:\\graphs\\graph500-scale18-ef16_adj.mtx";
+	graph::MtB_Writer mwriter;
+	auto fileSrc = argv[1];
+	auto fileDst = argv[2];
 
 #ifdef MARKET_BEL
-	m.write_market_bel<uint, int>(fileSrc, fileDst, false);
+	mwriter.write_market_bel<uint, int>(fileSrc, fileDst, false);
+	return;
 #endif
 
 #ifdef TSV_BEL
-	m.write_tsv_bel<uint, uint>(fileSrc, fileDst);
+	mwriter.write_tsv_bel<uint, uint>(fileSrc, fileDst);
+	return;
 #endif
 
 #ifdef TSV_MARKET
-	m.write_tsv_market<uint, int>(fileSrc, fileDst);
+	mwriter.write_tsv_market<uint, int>(fileSrc, fileDst);
+	return;
 #endif
 
 #ifdef BEL_MARKET
-	m.write_bel_market<uint, int>(fileSrc, fileDst);
+	mwriter.write_bel_market<uint, int>(fileSrc, fileDst);
+	return;
 #endif
 
 #ifndef NORMAL
@@ -283,15 +287,15 @@ int main(int argc, char **argv){
 
 
 	//1) Read File to EdgeList
-	
-	char* matr;
-	
-	matr = "D:\\graphs\\graph500-scale18-ef16_adj.bel";
 
-	#ifndef __DEBUG__
-	if(argc > 1)
+	char* matr;
+
+	matr = "D:\\graphs\\amazon0601_adj.bel";
+
+#ifndef __DEBUG__
+	if (argc > 1)
 		matr = argv[1];
-	#endif
+#endif
 
 	graph::EdgeListFile f(matr);
 	std::vector<EdgeTy<uint>> edges;
@@ -299,7 +303,7 @@ int main(int argc, char **argv){
 	auto lowerTriangular = [](const Edge& e) { return e.first > e.second; };
 	auto upperTriangular = [](const Edge& e) { return e.first < e.second; };
 	auto full = [](const Edge& e) { return false; };
-	while (f.get_edges(fileEdges, 100)) 
+	while (f.get_edges(fileEdges, 100))
 	{
 		edges.insert(edges.end(), fileEdges.begin(), fileEdges.end());
 	}
@@ -314,13 +318,13 @@ int main(int argc, char **argv){
 	/*graph::MtB_Writer m;
 	m.write_market_bel<uint, int>("D:\\graphs\\hollywood-2009.mtx", "D:\\graphs\\hollywood-2009-2.bel", false);*/
 
-	graph::CSRCOO<uint> csrcoo = graph::CSRCOO<uint>::from_edgelist(edges, upperTriangular);
-	//graph::CSRCOO<uint> csrcooFull = graph::CSRCOO<uint>::from_edgelist(edges, full);
+	graph::CSRCOO<uint> csrcoo = graph::CSRCOO<uint>::from_edgelist(edges, full);
+	//graph::CSRCOO<uint> csrcooFull = graph::CSRCOO<uint>::from_edgelist(edges, upperTriangular);
 
 #pragma region TCTEST
 	//2) Move to GPU
-	graph::GPUArray<uint> sl("source", AllocationTypeEnum::cpuonly), 
-		dl("destination", AllocationTypeEnum::cpuonly), 
+	graph::GPUArray<uint> sl("source", AllocationTypeEnum::cpuonly),
+		dl("destination", AllocationTypeEnum::cpuonly),
 		rowPtr("row pointer", AllocationTypeEnum::cpuonly);
 
 	//2.a CPU
@@ -334,23 +338,25 @@ int main(int argc, char **argv){
 	cudaDeviceSynchronize();
 
 	//2.b GPU
+	
+
+
+	//Count triangle serially
+
+#ifdef TC
+
 	sl.switch_to_gpu(0, csrcoo.nnz());
 	dl.switch_to_gpu(0, csrcoo.nnz());
-	rowPtr.switch_to_gpu(0, csrcoo.num_rows()+1);
+	rowPtr.switch_to_gpu(0, csrcoo.num_rows() + 1);
 	cudaDeviceSynchronize();
 
-	
-	//Count triangle serially
-	
-
-
 	//Count traingles binary-search: Thread or Warp
-	uint step =csrcoo.nnz();
+	uint step = csrcoo.nnz();
 	uint st = 0;
 	uint ee = st + step; // st + 2;
-	graph::TcBase<uint> *tcb = new graph::TcBinary<uint>(0, ee, csrcoo.num_rows());
+	graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(0, ee, csrcoo.num_rows());
 	graph::TcBase<uint>* tcNV = new graph::TcNvgraph<uint>(0, ee, csrcoo.num_rows());
-	graph::TcBase<uint> *tcBE = new graph::TcBinaryEncoding<uint>(0, ee, csrcoo.num_rows());
+	graph::TcBase<uint>* tcBE = new graph::TcBinaryEncoding<uint>(0, ee, csrcoo.num_rows());
 	graph::TcBase<uint>* tc = new graph::TcSerial<uint>(0, ee, csrcoo.num_rows());
 
 	const int divideConstant = 1;
@@ -391,7 +397,7 @@ int main(int argc, char **argv){
 			printf("}\n");
 		}
 
-		//uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Thread, 0);
+		uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Thread, 0);
 
 		//CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
 		uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
@@ -401,7 +407,7 @@ int main(int argc, char **argv){
 		CountTrianglesHash<uint>(divideConstant, tchash, rowPtr, sl, dl, ee, csrcoo.num_rows(), 0, ProcessingElementEnum::Warp, 0);
 		bmp.Count(csrcoo.num_rows(), rowPtr, dl);
 
-		//CountTriangles<uint>(tcNV, rowPtr, sl, dl, ee, csrcoo.num_rows());
+		CountTriangles<uint>("NVGRAPH", tcNV, rowPtr, sl, dl, ee, csrcoo.num_rows());
 
 		/*if (serialTc != binaryTc)
 			break;*/
@@ -412,25 +418,11 @@ int main(int argc, char **argv){
 
 		break;
 	}
-
+#endif
 	////Takes either serial or binary triangle Counter
 	//graph::GPUArray<uint> triPointer("tri Pointer", cpuonly);
 	//graph::GPUArray<uint> triIndex("tri Index", cpuonly);
 	//ConstructTriList(triIndex, triPointer, tcb, rowPtr, sl, dl, csrcoo.nnz(), csrcoo.num_rows(), 0, ProcessingElementEnum::Warp);
-
-
-	////Now I will start TC with hash
-	//
-	//
-	
-	//
-
-	//int n = csrcoo.num_rows();
-	//int m = csrcoo.nnz();
-	//
-	//
-	//double tc_time = bmp.Count(n, rowPtr, dl);
-
 
 #pragma endregion
 
@@ -438,34 +430,10 @@ int main(int argc, char **argv){
 
 	//Thanos<uint> t(rowPtr, sl, dl, csrcoo.nnz(), csrcoo.num_rows());
 
-	//Now bmp (binary packing)
-	//Here we need the full graph --> Ktruss
-	//graph::GPUArray<uint> slFull("source Full ", AllocationTypeEnum::cpuonly),
-	//	dlFull("destination Full ", AllocationTypeEnum::cpuonly),
-	//	rowPtrFull("row pointer Full ", AllocationTypeEnum::cpuonly);
-
-	////2.a CPU
-	//slFull.cdata() = csrcooFull.row_ind();
-	//dlFull.cdata() = csrcooFull.col_ind();
-	//rowPtrFull.cdata() = csrcooFull.row_ptr();
-
-	//////2.b GPU
-	//slFull.switch_to_gpu(0, csrcooFull.nnz());
-	//dlFull.switch_to_gpu(0, csrcooFull.nnz());
-	//rowPtrFull.switch_to_unified(0, csrcooFull.num_rows() + 1);
-	//cudaDeviceSynchronize();
-	//
-	//
-	//graph::BmpGpu<uint> bmp;
-	//int n = csrcooFull.num_rows();
-	//int m = csrcooFull.nnz();
-
 	//bmp.InitBMP(n, m, rowPtrFull, dlFull);
 	////bmp.getEidAndEdgeList(n, m, rowPtrFull, dlFull);
 	//bmp.bmpConstruct(n, m, rowPtrFull, dlFull);
 	//double tc_time = bmp.Count(n, rowPtrFull, dlFull);
-
-
 
 	//graph::IterHelper<uint> h(n,m);
 	//auto process_functor = [&h](int level) {
@@ -482,32 +450,45 @@ int main(int argc, char **argv){
 
 
 	//GPU Ktruss BMP
-	//graph::GPUArray<int> output("KT Output", AllocationTypeEnum::gpu, m / 2, 0);
+	
+#ifdef KTRUSS
+
+	sl.switch_to_unified(0, csrcoo.nnz());
+	dl.switch_to_unified(0, csrcoo.nnz());
+	rowPtr.switch_to_unified(0, csrcoo.num_rows() + 1);
+	cudaDeviceSynchronize();
+
+	int n = csrcoo.num_rows();
+	int m = csrcoo.nnz();
+	graph::GPUArray<int> output("KT Output", AllocationTypeEnum::unified, m / 2, 0);
+	graph::BmpGpu<uint> bmp;
+	bmp.InitBMP(csrcoo.num_rows(), csrcoo.nnz(), rowPtr, dl);
+	bmp.getEidAndEdgeList(n, m, rowPtr, dl);
+	bmp.bmpConstruct(csrcoo.num_rows(), csrcoo.nnz(), rowPtr, dl);
+	double tc_time = bmp.Count_Set(n, m, rowPtr, dl);
+	#define MAX_LEVEL  (20000)
+	auto level_start_pos = (uint*)calloc(MAX_LEVEL, sizeof(uint));
+	
+	graph::PKT_cuda(
+		n, m,
+		rowPtr, dl, bmp,
+		nullptr,
+		100, output, level_start_pos, 0, tc_time);
 
 
-	//#define MAX_LEVEL  (20000)
-	//auto level_start_pos = (uint*)calloc(MAX_LEVEL, sizeof(uint));
-	//
-	//graph::PKT_cuda(
-	//	n, m,
-	//	rowPtrFull, dlFull, bmp,
-	//	nullptr,
-	//	100, output, level_start_pos, 0, tc_time);
 
+	graph::SingleGPU_Ktruss<uint> mohatruss(0);
 
+	Timer t;
+	mohatruss.findKtrussIncremental_sync(3, 1000, rowPtr, sl, dl,
+		n, m, nullptr, nullptr, 0, 0);
+	mohatruss.sync();
+	double time = t.elapsed();
+	
 
-	//graph::SingleGPU_Ktruss<uint> mohatruss(0);
-
-	//Timer t;
-	//mohatruss.findKtrussIncremental_sync(3, 1000, rowPtrFull, slFull, dlFull,
-	//	n, m, nullptr, nullptr, 0, 0);
-	//mohatruss.sync();
-	//double time = t.elapsed();
-	//
-
-	//Log(info, "count time %.f s", time);
-	//Log(info, "MOHA %d ktruss (%f teps)", mohatruss.count(), m / time);
-	//
+	Log(info, "count time %.f s", time);
+	Log(info, "MOHA %d ktruss (%f teps)", mohatruss.count(), m / time);
+	
 
 
 
@@ -525,7 +506,7 @@ int main(int argc, char **argv){
 	//Log(info, "count time %.f s", time);
 	//Log(info, "MOHA %d ktruss (%f teps)", mohatrussM.count(), m / time);
 
-
+#endif
 
 #pragma region MyRegion
 	////Hashing tests
@@ -659,13 +640,13 @@ int main(int argc, char **argv){
 
 
 #endif
-    printf("Done ....\n");
+	printf("Done ....\n");
 	/*slFull.freeGPU();
 	dlFull.freeGPU();
 	rowPtrFull.freeGPU();*/
 	//A.freeGPU();
 	//B.freeGPU();
-    return 0;
+	return 0;
 }
 
 

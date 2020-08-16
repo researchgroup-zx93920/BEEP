@@ -194,7 +194,7 @@ kernel_serial_pe_upto_arrays(int upto, bool *mask,
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_serial_pe_level_q_arrays(
-    uint64* count,
+    int* count,
     T* rowPtr, T* rowInd, T* colInd, const size_t numEdges,
     int level, bool* processed,
     int* affected, int& affected_cnt,
@@ -498,12 +498,12 @@ namespace graph {
 
 
             //process affetced
-           /* kernel_serial_pe_level_q_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (
+           kernel_serial_pe_level_q_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (
                 tcpt.gdata(), rp, ri, ci, ne,
                 level, processed.gdata(),
                 affected.gdata(), *affected_cnt.gdata(),
                 next.gdata(), inNext.gdata(), *next_cnt.gdata(),
-                in_bucket_window_.gdata(), bucket_buf_.gdata(), *window_bucket_buf_size_, bucket_level_end_);*/
+                in_bucket_window_.gdata(), bucket_buf_.gdata(), *window_bucket_buf_size_, bucket_level_end_);
 
         }
 
@@ -513,6 +513,7 @@ namespace graph {
             int level, GPUArray<bool> processed,
             GPUArray<int>& curr, GPUArray<bool> inCurr, int curr_cnt,
             GPUArray<int>& affected, GPUArray<bool>& inAffected, GPUArray<int>& affected_cnt, //next queue
+            GPUArray<uint> reversed,
             const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
         
