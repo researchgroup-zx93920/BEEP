@@ -127,15 +127,90 @@ kernel_binary_thread_pe_eid_arrays(int* count, //!< [inout] the count, caller sh
 }
 
 
+
+__inline__ __device__
+void process_support2(
+    uint32_t edge_idx, int level, int* EdgeSupport,
+    int* next, int& next_cnt, bool* inNext,
+    bool* in_bucket_window_, uint* bucket_buf_, uint& window_bucket_buf_size_,
+    int bucket_level_end_)
+{
+    auto cur = atomicSub(&EdgeSupport[edge_idx], 1);
+    if (cur == (level + 1)) {
+        auto insert_idx = atomicAdd(&next_cnt, 1);
+        next[insert_idx] = edge_idx;
+        inNext[edge_idx] = true;
+    }
+    if (cur <= level) {
+        atomicAdd(&EdgeSupport[edge_idx], 1);
+    }
+
+    // Update the Bucket.
+    auto latest = cur - 1;
+    if (latest > level && latest < bucket_level_end_) {
+        auto old_token = atomicCASBool(in_bucket_window_ + edge_idx, InBucketFalse, InBucketTrue);
+        if (!old_token) {
+            auto insert_idx = atomicAdd(&window_bucket_buf_size_, 1);
+            bucket_buf_[insert_idx] = edge_idx;
+        }
+    }
+
+}
+
+
+template <typename T>
+__device__ inline void addNexBucket(T e1, T e2, T e3, bool* processed,
+    int* edgeSupport, int level,
+    bool* inCurr,
+    int* next, bool* inNext, int& next_cnt,
+    uint* bucket, bool* inBucket, uint& bucket_cnt, int bucket_upper_level)
+{
+    bool is_peel_e2 = !inCurr[e2];
+    bool is_peel_e3 = !inCurr[e3];
+    if (is_peel_e2 || is_peel_e3)
+    {
+        if ((!processed[e2]) && (!processed[e3]))
+        {
+            if (is_peel_e2 && is_peel_e3)
+            {
+
+                process_support2(e2, level, edgeSupport, next, next_cnt, inNext, inBucket, bucket, bucket_cnt, bucket_upper_level);
+                process_support2(e3, level, edgeSupport, next, next_cnt, inNext, inBucket, bucket, bucket_cnt, bucket_upper_level);
+
+
+
+            }
+            else if (is_peel_e2)
+            {
+                if (e1 < e3) {
+                    process_support2(e2, level, edgeSupport, next, next_cnt, inNext, inBucket, bucket, bucket_cnt, bucket_upper_level);
+                }
+            }
+            else
+            {
+                if (e1 < e2)
+                {
+                    process_support2(e3, level, edgeSupport, next, next_cnt, inNext, inBucket, bucket, bucket_cnt, bucket_upper_level);
+                }
+            }
+        }
+    }
+}
+
+
+
+
+
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_binary_thread_pe_level_affected(
     T* rowPtr_csr, T* colIndex_csr,
     T* rowInd, T* colInd, T* eid,
     const size_t numEdges,
-    int level, bool* processed,
+    int level, bool* processed, int* edgeSupport,
     int* curr, bool* inCurr, int curr_cnt,
-    int* affected, int* inAffected, int& affected_cnt
+    int* next, bool* inNext, int& next_cnt,
+    T* bucket, bool* inBucket, uint& bucket_cnt, int bucket_level_end_
 )
 {
 
@@ -176,53 +251,8 @@ kernel_binary_thread_pe_level_affected(
                 {
                     T ap_e = eid[srcStart + j];
                     T bp_e = eid[dstStart + lb];
-
-                    bool is_peel_e2 = !inCurr[ap_e];
-                    bool is_peel_e3 = !inCurr[bp_e];
-                    if (is_peel_e2 || is_peel_e3)
-                    {
-                        if ((!processed[ap_e]) && (!processed[bp_e]))
-                        {
-                            if (is_peel_e2 && is_peel_e3) {
-                                auto old_token = atomicAdd(inAffected + ap_e, 1);
-                                if (old_token == 0)
-                                {
-                                    auto insert_idx = atomicAdd(&affected_cnt, 1);
-                                    affected[insert_idx] = ap_e;
-                                }
-
-                                old_token = atomicAdd(inAffected + bp_e, 1);
-                                if (old_token == 0)
-                                {
-                                    auto insert_idx = atomicAdd(&affected_cnt, 1);
-                                    affected[insert_idx] = bp_e;
-                                }
-                            }
-                            else if (is_peel_e2)
-                            {
-                                if (edgeId < bp_e) {
-                                    auto old_token = atomicAdd(inAffected + ap_e, 1);
-                                    if (old_token == 0)
-                                    {
-                                        auto insert_idx = atomicAdd(&affected_cnt, 1);
-                                        affected[insert_idx] = ap_e;
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                if (edgeId < ap_e)
-                                {
-                                    auto old_token = atomicAdd(inAffected + bp_e, 1);
-                                    if (old_token == 0)
-                                    {
-                                        auto insert_idx = atomicAdd(&affected_cnt, 1);
-                                        affected[insert_idx] = bp_e;
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    addNexBucket(edgeId, ap_e, bp_e, processed, edgeSupport, level, inCurr, next, inNext, next_cnt,
+                        bucket, inBucket, bucket_cnt, bucket_level_end_);
                 }
             }
             else
@@ -442,8 +472,6 @@ kernel_binary_warp_pe_eid_arrays(int* count,                //!< [inout] the cou
     
 }
 
-
-
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_binary_warp_pe_level_affected(
@@ -459,8 +487,19 @@ kernel_binary_warp_pe_level_affected(
     constexpr size_t warpsPerBlock = BLOCK_DIM_X / 32;
 
     const size_t lx = threadIdx.x % 32;
+    const int warpIdx = threadIdx.x / 32; // which warp in thread block
     const size_t gwx = (BLOCK_DIM_X * blockIdx.x + threadIdx.x) / 32;
-    uint64 warpCount = 0;
+
+
+    __shared__ T q[warpsPerBlock][3 * 2 * 32];
+    __shared__ int sizes[warpsPerBlock];
+    T* e1_arr = &q[warpIdx][0];
+    T* e2_arr = &q[warpIdx][1*32 *2];
+    T* e3_arr = &q[warpIdx][2*32 * 2];
+    int* size = &sizes[warpIdx];
+
+    if (lx == 0)
+        *size = 0;
 
     for (size_t i = gwx; i < curr_cnt; i += BLOCK_DIM_X * gridDim.x / 32)
     {
@@ -487,88 +526,208 @@ kernel_binary_warp_pe_level_affected(
         }
 
         // FIXME: remove warp reduction from this function call
-        const int warpIdx = threadIdx.x / 32; // which warp in thread block
+
         T lastIndex = 0;
 
         // cover entirety of A with warp
-        for (size_t j = lx; j < srcLen; j += 32)
+        for (size_t j = lx; j < (srcLen + 31)/32 * 32; j += 32)
         {
-            // one element of A per thread, just search for A into B
-            const T searchVal = colIndex_csr[srcStart + j];
-            const T leftValue = colIndex_csr[dstStart + lastIndex];
-
-            if (searchVal >= leftValue)
+            __syncwarp();
+            if (*size >= 32)
             {
-
-                const T lb = graph::binary_search<T>(&colIndex_csr[dstStart], lastIndex, dstLen, searchVal);
-                if (lb < dstLen)
+                for (int e = lx; e < *size; e += 32)
                 {
-                    if (colIndex_csr[dstStart + lb] == searchVal)
+                    T e1 = e1_arr[e];
+                    T e2 = e2_arr[e];
+                    T e3 = e3_arr[e];
+                    affectTri(e1, e2, e3, processed, inCurr, affected, inAffected, affected_cnt);
+                }
+
+                __syncwarp();
+                if (lx == 0)
+                    *size = 0;
+                __syncwarp();
+            }
+
+          
+
+            if (j < srcLen)
+            {
+                // one element of A per thread, just search for A into B
+                const T searchVal = colIndex_csr[srcStart + j];
+                const T leftValue = colIndex_csr[dstStart + lastIndex];
+
+                if (searchVal >= leftValue)
+                {
+
+                    const T lb = graph::binary_search<T>(&colIndex_csr[dstStart], lastIndex, dstLen, searchVal);
+                    if (lb < dstLen)
                     {
-                        T ap_e = eid[srcStart + j];
-                        T bp_e = eid[dstStart + lb];
-
-                        bool is_peel_e2 = !inCurr[ap_e];
-                        bool is_peel_e3 = !inCurr[bp_e];
-                       if (is_peel_e2 || is_peel_e3)
+                        if (colIndex_csr[dstStart + lb] == searchVal)
                         {
-                            if ((!processed[ap_e]) && (!processed[bp_e]))
-                            {
-                                if (is_peel_e2 && is_peel_e3) {
-                                    auto old_token = atomicAdd(inAffected + ap_e, 1);
-                                    if (old_token == 0)
-                                    {
-                                        auto insert_idx = atomicAdd(&affected_cnt, 1);
-                                        affected[insert_idx] = ap_e;
-                                    }
-
-                                    old_token = atomicAdd(inAffected + bp_e, 1);
-                                    if (old_token == 0)
-                                    {
-                                        auto insert_idx = atomicAdd(&affected_cnt, 1);
-                                        affected[insert_idx] = bp_e;
-                                    }
-                                }
-                                else if (is_peel_e2)
-                                {
-                                    if (edgeId < bp_e) {
-                                        auto old_token = atomicAdd(inAffected + ap_e, 1);
-                                        if (old_token == 0)
-                                        {
-                                            auto insert_idx = atomicAdd(&affected_cnt, 1);
-                                            affected[insert_idx] = ap_e;
-                                        }
-                                    }
-                                }
-                                else
-                                {
-                                    if (edgeId < ap_e)
-                                    {
-                                        auto old_token = atomicAdd(inAffected + bp_e, 1);
-                                        if (old_token == 0)
-                                        {
-                                            auto insert_idx = atomicAdd(&affected_cnt, 1);
-                                            affected[insert_idx] = bp_e;
-                                        }
-                                    }
-                                }
-                            }
+                            T ap_e = eid[srcStart + j];
+                            T bp_e = eid[dstStart + lb];
+                            auto pos = atomicAdd(size, 1);
+                            e1_arr[pos] = edgeId;
+                            e2_arr[pos] = ap_e;
+                            e3_arr[pos] = bp_e;
                         }
                     }
 
-
+                    lastIndex = lb;
                 }
-
-                lastIndex = lb;
             }
 
-            /*unsigned int writemask_deq = __activemask();
-            lastIndex = __shfl_sync(writemask_deq, lastIndex, 31);*/
+            unsigned int writemask_deq = __activemask();
+            lastIndex = __shfl_sync(writemask_deq, lastIndex, 31);
+        }
+
+        __syncwarp();
+        for (int e = lx; e < *size; e += 32)
+        {
+            T e1 = e1_arr[e];
+            T e2 = e2_arr[e];
+            T e3 = e3_arr[e];
+            affectTri(e1, e2, e3, processed, inCurr, affected, inAffected, affected_cnt);
         }
     }
 
 
 }
+
+
+
+template <typename T, size_t BLOCK_DIM_X>
+__global__ void __launch_bounds__(BLOCK_DIM_X)
+kernel_binary_warp_pe_level_next(
+    T* rowPtr_csr, T* colIndex_csr,
+    T* rowInd, T* colInd, T* eid,
+    const size_t numEdges,
+    int level, bool* processed, int *edgeSupport,
+    int* curr, bool* inCurr, int curr_cnt,
+    int* next, bool* inNext, int& next_cnt,
+    T *bucket, bool *inBucket, uint& bucket_cnt, int bucket_level_end_
+)
+{
+
+    constexpr size_t warpsPerBlock = BLOCK_DIM_X / 32;
+
+    const size_t lx = threadIdx.x % 32;
+    const int warpIdx = threadIdx.x / 32; // which warp in thread block
+    const size_t gwx = (BLOCK_DIM_X * blockIdx.x + threadIdx.x) / 32;
+
+
+    __shared__ T q[warpsPerBlock][3 * 2 * 32];
+    __shared__ int sizes[warpsPerBlock];
+    T* e1_arr = &q[warpIdx][0];
+    T* e2_arr = &q[warpIdx][1 * 32 * 2];
+    T* e3_arr = &q[warpIdx][2 * 32 * 2];
+    int* size = &sizes[warpIdx];
+
+    if (lx == 0)
+        *size = 0;
+
+    for (size_t i = gwx; i < curr_cnt; i += BLOCK_DIM_X * gridDim.x / 32)
+    {
+        T edgeId = curr[i];
+
+        T src = rowInd[edgeId];
+        T dst = colInd[edgeId];
+
+        T srcStart = rowPtr_csr[src];
+        T srcStop = rowPtr_csr[src + 1];
+
+        T dstStart = rowPtr_csr[dst];
+        T dstStop = rowPtr_csr[dst + 1];
+
+        T dstLen = dstStop - dstStart;
+        T srcLen = srcStop - srcStart;
+
+
+        if (srcLen > dstLen)
+        {
+            swap_ele(srcStart, dstStart);
+            swap_ele(srcStop, dstStop);
+            swap_ele(srcLen, dstLen);
+        }
+
+        // FIXME: remove warp reduction from this function call
+
+        T lastIndex = 0;
+
+        // cover entirety of A with warp
+        for (size_t j = lx; j < (srcLen + 31) / 32 * 32; j += 32)
+        {
+            __syncwarp();
+            if (*size >= 32)
+            {
+                for (int e = lx; e < *size; e += 32)
+                {
+                    T e1 = e1_arr[e];
+                    T e2 = e2_arr[e];
+                    T e3 = e3_arr[e];
+                    addNexBucket(e1, e2, e3, processed, edgeSupport, level, inCurr, next, inNext, next_cnt,
+                        bucket, inBucket, bucket_cnt, bucket_level_end_);
+
+
+                }
+
+                __syncwarp();
+                if (lx == 0)
+                    *size = 0;
+                __syncwarp();
+            }
+
+
+
+            if (j < srcLen)
+            {
+                // one element of A per thread, just search for A into B
+                const T searchVal = colIndex_csr[srcStart + j];
+                const T leftValue = colIndex_csr[dstStart + lastIndex];
+
+                if (searchVal >= leftValue)
+                {
+
+                    const T lb = graph::binary_search<T>(&colIndex_csr[dstStart], lastIndex, dstLen, searchVal);
+                    if (lb < dstLen)
+                    {
+                        if (colIndex_csr[dstStart + lb] == searchVal)
+                        {
+                            T ap_e = eid[srcStart + j];
+                            T bp_e = eid[dstStart + lb];
+                            auto pos = atomicAdd(size, 1);
+                            e1_arr[pos] = edgeId;
+                            e2_arr[pos] = ap_e;
+                            e3_arr[pos] = bp_e;
+                        }
+                    }
+
+                    lastIndex = lb;
+                }
+            }
+
+            unsigned int writemask_deq = __activemask();
+            lastIndex = __shfl_sync(writemask_deq, lastIndex, 31);
+        }
+
+        __syncwarp();
+        for (int e = lx; e < *size; e += 32)
+        {
+            T e1 = e1_arr[e];
+            T e2 = e2_arr[e];
+            T e3 = e3_arr[e];
+            addNexBucket(e1, e2, e3, processed, edgeSupport, level, inCurr, next, inNext, next_cnt,
+                bucket, inBucket, bucket_cnt, bucket_level_end_);
+        }
+    }
+
+
+}
+
+
+
+
 
 
 template <typename T, size_t BLOCK_DIM_X>
@@ -1018,10 +1177,11 @@ namespace graph {
         void affect_per_edge_level_q_async(
             GPUArray<T> rowPtr_csr, GPUArray<T> colIndex_csr,
             GPUArray<T> rowInd, GPUArray<T> colInd, GPUArray<T> eid, const size_t numEdges,
-            int level, GPUArray<bool> processed,
+            int level, GPUArray<bool> processed, GPUArray<int>& edgeSupport,
             GPUArray<int>& curr, GPUArray<bool> inCurr, int curr_cnt,
             GPUArray<int>& affected, GPUArray<int>& inAffected, GPUArray<int>& affected_cnt, //next queue
-            GPUArray<uint> reversed,
+            GPUArray<int>& next, GPUArray<bool>& inNext, GPUArray<int>& next_cnt, //next queue
+            GPUArray <bool>& in_bucket_window_, GPUArray<uint>& bucket_buf_, GPUArray<uint>& window_bucket_buf_size_, int bucket_level_end_,
             const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
 
@@ -1043,15 +1203,26 @@ namespace graph {
             if (kernelType == ProcessingElementEnum::Thread)
                 kernel_binary_thread_pe_level_affected<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (
                     rp_csr, ci_csr, ri, ci, eid.gdata(), ne,
-                    level, processed.gdata(),
+                    level, processed.gdata(), edgeSupport.gdata(),
                     curr.gdata(), inCurr.gdata(), curr_cnt,
-                    affected.gdata(), inAffected.gdata(), *affected_cnt.gdata());
+                    next.gdata(), inNext.gdata(), *next_cnt.gdata(),
+                    bucket_buf_.gdata(), in_bucket_window_.gdata(), *window_bucket_buf_size_.gdata(), bucket_level_end_);
             else if (kernelType == ProcessingElementEnum::Warp)
-                kernel_binary_warp_pe_level_affected<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (
+                /*  kernel_binary_warp_pe_level_affected<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (
+                      rp_csr, ci_csr, ri, ci, eid.gdata(), ne,
+                      level, processed.gdata(),
+                      curr.gdata(), inCurr.gdata(), curr_cnt,
+                      affected.gdata(), inAffected.gdata(), *affected_cnt.gdata());*/
+
+                kernel_binary_warp_pe_level_next<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (
                     rp_csr, ci_csr, ri, ci, eid.gdata(), ne,
-                    level, processed.gdata(),
+                    level, processed.gdata(), edgeSupport.gdata(),
                     curr.gdata(), inCurr.gdata(), curr_cnt,
-                    affected.gdata(), inAffected.gdata(), *affected_cnt.gdata());
+                    next.gdata(), inNext.gdata(), *next_cnt.gdata(),
+                    bucket_buf_.gdata(), in_bucket_window_.gdata(), *window_bucket_buf_size_.gdata(), bucket_level_end_);
+
+
+
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
 
 

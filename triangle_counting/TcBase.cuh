@@ -95,10 +95,11 @@ namespace graph {
         virtual void affect_per_edge_level_q_async(
             GPUArray<T> rowPtr_csr, GPUArray<T> colIndex_csr,
             GPUArray<T> rowInd, GPUArray<T> colInd, GPUArray<T> eid, const size_t numEdges,
-            int level, GPUArray<bool> processed,
+            int level, GPUArray<bool> processed, GPUArray<int>&  edgeSupport,
             GPUArray<int>& curr, GPUArray<bool> inCurr, int curr_cnt,
             GPUArray<int>& affected, GPUArray<int>& inAffected, GPUArray<int>& affected_cnt, //next queue
-            GPUArray<uint> reversed,
+            GPUArray<int>& next, GPUArray<bool>& inNext, GPUArray<int>& next_cnt, //next queue
+            GPUArray <bool>& in_bucket_window_, GPUArray<uint>& bucket_buf_, GPUArray<uint>& window_bucket_buf_size_, int bucket_level_end_,
             const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {}
 

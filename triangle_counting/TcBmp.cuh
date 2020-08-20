@@ -186,7 +186,7 @@ __global__ void bmp_bsr_count_kernel(uint32_t* d_offsets, /*card: |V|+1*/
     uint32_t* bmp_offs,
     uint* bmp_word_indices,
     uint* bmp_words,
-    uint64_t *count
+    uint64 *count
 ) {
     const uint32_t tid = threadIdx.x + blockDim.x * threadIdx.y; /*threads in a warp are with continuous threadIdx.x */ //per block
     const uint32_t num_threads = blockDim.x * blockDim.y; // per block
@@ -242,7 +242,7 @@ __global__ void bmp_bsr_count_kernel(uint32_t* d_offsets, /*card: |V|+1*/
         auto dv = d_offsets[v + 1] - d_offsets[v];
         //if (dv > du || ((du == dv) && u > v))continue; //for full graph
 
-        uint32_t private_count = 0;
+        uint64 private_count = 0;
         auto size_nv = bmp_offs[v + 1] - bmp_offs[v];
         if (size_nv > 0) {
             for (uint32_t wi = bmp_offs[v] + threadIdx.x; wi < bmp_offs[v + 1]; wi += blockDim.x) {
@@ -757,7 +757,7 @@ namespace graph {
             graph::GPUArray<T> colInd)
         {
 
-            uint64_t* count;
+            uint64* count;
             CUDA_RUNTIME(cudaMallocManaged(&count, sizeof(*count)));
             uint32_t block_size = 512; // maximally reduce the number of bitmaps
             dim3 t_dimension(32, block_size / 32); /*2-D*/

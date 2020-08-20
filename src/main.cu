@@ -25,7 +25,7 @@
 #include "../truss/cudaKtruss.cuh"
 #include "../truss19/ourtruss19.cuh"
 #include "../truss19/newTruss.cuh"
-#include "../truss19/ourtruss19Warp.cuh"
+#include "../truss19/ourTruss19Warp.cuh"
 
 #include "../graph_partition/cross_decmp.cuh"
 
@@ -91,7 +91,7 @@ int main(int argc, char** argv) {
 
 	char* matr;
 
-	matr = "D:\\graphs\\graph500-scale18-ef16_adj.bel";
+	matr = "D:\\graphs\\cit-Patents_adj.bel";
 
 #ifndef __VS__
 	if (argc > 1)

@@ -229,7 +229,7 @@ __global__ void  update_support(int* count,
 		int edgeId = affected[i];
 		
 		count[edgeId] -= inAffected[edgeId];
-
+		inAffected[edgeId] = 0;
 		auto currCount = count[edgeId];
 
 		if (currCount <= level) {
@@ -248,10 +248,7 @@ __global__ void  update_support(int* count,
 		}
 		
 
-	}
-
-
-	
+	}	
 }
 
 
@@ -509,6 +506,7 @@ namespace graph
 			tcCounter->count_per_edge_eid_async(edgeSupport, rowPtr_csr, colIndex_csr, ptrSrc, ptrDst, numEdges, 0, Warp);
 			tcCounter->sync();
 			int todo = numEdges;
+			const auto todo_original = numEdges;
 			while (todo > 0)
 			{
 			//	//printf("k=%d\n", k);
@@ -517,8 +515,7 @@ namespace graph
 				cudaDeviceSynchronize();
 
 				//1 bucket fill
-				bucket_scan(edgeSupport, numEdges, level, curr, inCurr, *curr_cnt, identity_arr_asc, in_bucket_window_, bucket_buf_, window_bucket_buf_size_.gdata(), bucket_level_end_);
-				cudaDeviceSynchronize();
+				bucket_scan(edgeSupport, todo_original, level, curr, inCurr, *curr_cnt, identity_arr_asc, in_bucket_window_, bucket_buf_, window_bucket_buf_size_.gdata(), bucket_level_end_);
 
 				while (*curr_cnt > 0)
 				{
@@ -530,39 +527,28 @@ namespace graph
 
 					*next_cnt.gdata() = 0;
 					*affected_cnt.gdata() = 0;
-					if (level == 0) {
-						PKT_LevelZeroProcess(curr, *curr_cnt, inCurr, processed);
-					}
-					else
+					if (level == 0) 
 					{
-
-						tcCounter->affect_per_edge_level_q_async(rowPtr_csr, colIndex_csr,
-							ptrSrc, ptrDst, eid, numEdges,
-							level, processed,
-							curr, inCurr, *curr_cnt,
-							affected, inAffedted, affected_cnt, reversed,0,Warp);
-						tcCounter->sync();
-						cudaDeviceSynchronize();
-						CUDA_RUNTIME(cudaGetLastError());
-
 						auto block_size = 256;
 						auto grid_size = (*curr_cnt + block_size - 1) / block_size;
 						execKernel(update_processed, grid_size, block_size, false, curr.gdata(), *curr_cnt, inCurr.gdata(), processed.gdata());
-
-						if (*affected_cnt.gdata() > 0)
-						{
-							
-							auto block_size = 256;
-							grid_size = (*affected_cnt.gdata() + block_size - 1) / block_size;
-							execKernel(update_support, grid_size, block_size, false, edgeSupport.gdata(), level, processed.gdata(), affected.gdata(),   inAffedted.gdata(), *affected_cnt.gdata(),
-								next.gdata(), inNext.gdata(), *next_cnt.gdata(),
-								in_bucket_window_.gdata(), bucket_buf_.gdata(), *window_bucket_buf_size_.gdata(), bucket_level_end_, reversed.gdata());
-							cudaDeviceSynchronize();
-						
-							execKernel(update_queueu, grid_size, block_size, false, affected.gdata(), *affected_cnt.gdata(), inAffedted.gdata());
-						}
-
-						CUDA_RUNTIME(cudaGetLastError());
+					}
+					else
+					{
+						tcCounter->affect_per_edge_level_q_async(rowPtr_csr, colIndex_csr,
+							ptrSrc, ptrDst, eid, numEdges,
+							level, processed,
+							edgeSupport,
+							curr, inCurr, *curr_cnt,
+							affected, inAffedted, affected_cnt, 
+							next, inNext, next_cnt,
+							in_bucket_window_, bucket_buf_, window_bucket_buf_size_, bucket_level_end_,
+							0,Thread);
+						tcCounter->sync();
+				
+						auto block_size = 256;
+						auto grid_size = (*curr_cnt + block_size - 1) / block_size;
+						execKernel(update_processed, grid_size, block_size, false, curr.gdata(), *curr_cnt, inCurr.gdata(), processed.gdata());
 					}
 
 					numDeleted_l = numEdges - todo;
