@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../include/utils.cuh"
+#include "../include/utils_cuda.cuh"
 #include "../include/Logger.cuh"
 #include "../include/CGArray.cuh"
 
@@ -9,47 +10,6 @@ typedef uint64_t EncodeDataType;
 
 
 
-/*! Binary search
-
- \tparam arr  			Pointer to the array
- \tparam l 					Left boundary of arr
- \tparam r   				Right boundary of arr
-	 \tparam x				 	Value to search for
-*/
-__device__ inline uint binarySearch_b(const uint* arr, uint l, uint r, uint x)
-{
-	size_t left = l;
-	size_t right = r;
-	while (left < right) {
-		const size_t mid = (left + right) / 2;
-		uint val = arr[mid];
-		bool pred = val < x;
-		if (pred) {
-			left = mid + 1;
-		}
-		else {
-			right = mid;
-		}
-	}
-	return left;
-}
-
-/*! Obtain the index of an edge using its two nodes
-
- \tparam mat  			Graph view represented in COO+CSR format
- \tparam sn 				Source node
- \tparam dn   			Destination node
-*/
-
-__device__ inline uint getEdgeId(uint* rowPtr, uint* rowInd, uint* colInd, uint sn, const uint dn)
-{
-	uint index = 0;
-
-	uint start = rowPtr[sn];
-	uint end2 = rowPtr[sn + 1];
-	index = binarySearch_b(colInd, start, end2, dn); // pangolin::binary_search(p, length, dn);
-	return index;
-}
 
 template <size_t BLOCK_DIM_X>
 __global__ void InitializeArrays(uint edgeStart, uint numEdges, uint* rowPtr, uint* rowInd, uint* colInd, BCTYPE* keep_l,
@@ -73,7 +33,7 @@ __global__ void InitializeArrays(uint edgeStart, uint numEdges, uint* rowPtr, ui
 		keep_l[i] = val;
 		affected_l[i] = false;
 
-		reversed[i] = getEdgeId(rowPtr, rowInd, colInd, dn, sn);
+		reversed[i] = getEdgeId(rowPtr, colInd, dn, sn);
 		srcKP[i] = i;
 		destKP[i] = i;
 	}
@@ -151,7 +111,7 @@ __global__ void RebuildReverse(uint edgeStart, uint numEdges, uint* rowPtr, uint
 		//length
 		uint sl = rowPtr[sn + 1] - rowPtr[sn];
 		uint dl = rowPtr[dn + 1] - rowPtr[dn];
-		reversed[i] = getEdgeId(rowPtr, rowInd, colInd, dn, sn);
+		reversed[i] = getEdgeId(rowPtr, colInd, dn, sn);
 	}
 }
 
@@ -353,7 +313,7 @@ __global__ void core_indirect(uint* keepPointer, uint* gnumdeleted, uint* gnumaf
 
 
 template <size_t BLOCK_DIM_X>
-__global__ void core_direct(
+__global__ void core_directA(
 	uint* gnumdeleted, uint* gnumaffected,
 	const uint k, const size_t edgeStart, const size_t numEdges,
 	uint* rowPtr, uint* rowInd, uint* colInd, const size_t numNodes, BCTYPE* keep, bool* affected, uint* reversed, bool firstTry, const int uMax, unsigned short* reverseIndex, EncodeDataType* bitMap)
@@ -719,6 +679,7 @@ namespace graph
 			ptrSrc.gdata() = s1.gdata();
 			ptrDst.gdata() = d1.gdata();
 
+			cudaDeviceSynchronize();
 
 			k = 3;
 			int cc = 2;
@@ -736,7 +697,7 @@ namespace graph
 				{
 					assumpAffected = false;
 
-					core_direct<dimBlock> << <dimGridEdges, dimBlock, 0, stream_ >> > (gnumdeleted,
+					core_directA<dimBlock> << <dimGridEdges, dimBlock, 0, stream_ >> > (gnumdeleted,
 						gnumaffected, k, edgeOffset, numEdges,
 						rowPtr.gdata(), ptrSrc.gdata(), ptrDst.gdata(), numNodes, keep_l.gdata(), affected_l.gdata(), reversed.gdata(), firstTry, 1, reverseIndex, bitMap);
 
@@ -766,7 +727,7 @@ namespace graph
 					if (percDeleted_l > 0.1)
 					{
 
-						CUBSelect(s1.gdata(), s2.gdata(), keep_l.gdata(), numEdges);
+						/*CUBSelect(s1.gdata(), s2.gdata(), keep_l.gdata(), numEdges);
 						T newNumEdges = CUBSelect(d1.gdata(), d2.gdata(), keep_l.gdata(), numEdges);
 
 						ptrSrc.gdata() = s2.gdata();
@@ -787,7 +748,7 @@ namespace graph
 
 
 						cudaDeviceSynchronize();
-						CUDA_RUNTIME(cudaGetLastError());
+						CUDA_RUNTIME(cudaGetLastError());*/
 					}
 					assumpAffected = true;
 				}

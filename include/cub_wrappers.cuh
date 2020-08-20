@@ -121,37 +121,37 @@ uint32_t CUBSelect(
     uint32_t* countOutput = nullptr;
     CUDA_RUNTIME(cudaMallocManaged(&countOutput, sizeof(uint32_t)));
 
-    CUDA_RUNTIME(cudaEventCreate(&start));
-    CUDA_RUNTIME(cudaEventCreate(&end));
+  /*  CUDA_RUNTIME(cudaEventCreate(&start));
+    CUDA_RUNTIME(cudaEventCreate(&end));*/
 
     void* d_temp_storage = nullptr;
     size_t temp_storage_bytes = 0;
 
-    CUDA_RUNTIME(cudaEventRecord(start));
+    //CUDA_RUNTIME(cudaEventRecord(start));
     cub::DeviceSelect::Flagged(d_temp_storage, temp_storage_bytes, input, flags, output, countOutput, countInput);
-    CUDA_RUNTIME(cudaEventRecord(end));
+    /*CUDA_RUNTIME(cudaEventRecord(end));
     CUDA_RUNTIME(cudaEventSynchronize(start));
-    CUDA_RUNTIME(cudaEventSynchronize(end));
+    CUDA_RUNTIME(cudaEventSynchronize(end));*/
     CUDA_RUNTIME(cudaDeviceSynchronize());
 
-    CUDA_RUNTIME(cudaEventElapsedTime(&singleKernelTime, start, end));
+  /*  CUDA_RUNTIME(cudaEventElapsedTime(&singleKernelTime, start, end));
     elaspedTime += singleKernelTime;
 
-    CHECK_KERNEL("CUB 1st select");
+    CHECK_KERNEL("CUB 1st select");*/
 
     CUDA_RUNTIME(cudaMallocManaged(&d_temp_storage, temp_storage_bytes));
 
-    CUDA_RUNTIME(cudaEventRecord(start));
+    //CUDA_RUNTIME(cudaEventRecord(start));
     cub::DeviceSelect::Flagged(d_temp_storage, temp_storage_bytes, input, flags, output, countOutput, countInput);
-    CUDA_RUNTIME(cudaEventRecord(end));
+   /* CUDA_RUNTIME(cudaEventRecord(end));
     CUDA_RUNTIME(cudaEventSynchronize(start));
-    CUDA_RUNTIME(cudaEventSynchronize(end));
+    CUDA_RUNTIME(cudaEventSynchronize(end));*/
     CUDA_RUNTIME(cudaDeviceSynchronize());
 
-    CUDA_RUNTIME(cudaEventElapsedTime(&singleKernelTime, start, end));
-    elaspedTime += singleKernelTime;
+    //CUDA_RUNTIME(cudaEventElapsedTime(&singleKernelTime, start, end));
+    //elaspedTime += singleKernelTime;
 
-    CHECK_KERNEL("CUB 2nd select"); 
+    //CHECK_KERNEL("CUB 2nd select"); 
     
     uint32_t res = *countOutput;
 

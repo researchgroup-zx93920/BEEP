@@ -10,7 +10,7 @@
 
 #include "../include/Logger.cuh"
 #include "../include/FIleReader.cuh"
-#include "../include/CGArray.cuh"
+//#include "../include/CGArray.cuh"
 #include "../include/TriCountPrim.cuh"
 #include "../triangle_counting/TcBase.cuh"
 #include "../triangle_counting/TcSerial.cuh"
@@ -25,8 +25,11 @@
 #include "../truss/cudaKtruss.cuh"
 #include "../truss19/ourtruss19.cuh"
 #include "../truss19/newTruss.cuh"
+#include "../truss19/ourtruss19Warp.cuh"
 
 #include "../graph_partition/cross_decmp.cuh"
+
+#include "../include/main_support.cuh"
 
 using namespace std;
 
@@ -290,7 +293,7 @@ int main(int argc, char** argv) {
 
 	char* matr;
 
-	matr = "D:\\graphs\\amazon0601_adj.bel";
+	matr = "D:\\graphs\\graph500-scale18-ef16_adj.bel";
 
 #ifndef __DEBUG__
 	if (argc > 1)
@@ -308,7 +311,7 @@ int main(int argc, char** argv) {
 		edges.insert(edges.end(), fileEdges.begin(), fileEdges.end());
 	}
 
-	bool sort = true;
+	bool sort = false;
 	if (sort)
 	{
 		f.sort_edges(edges);
@@ -320,6 +323,8 @@ int main(int argc, char** argv) {
 
 	graph::CSRCOO<uint> csrcoo = graph::CSRCOO<uint>::from_edgelist(edges, full);
 	//graph::CSRCOO<uint> csrcooFull = graph::CSRCOO<uint>::from_edgelist(edges, upperTriangular);
+
+	
 
 #pragma region TCTEST
 	//2) Move to GPU
@@ -456,10 +461,14 @@ int main(int argc, char** argv) {
 	sl.switch_to_unified(0, csrcoo.nnz());
 	dl.switch_to_unified(0, csrcoo.nnz());
 	rowPtr.switch_to_unified(0, csrcoo.num_rows() + 1);
-	cudaDeviceSynchronize();
 
 	int n = csrcoo.num_rows();
 	int m = csrcoo.nnz();
+
+	/*
+
+
+	
 	graph::GPUArray<int> output("KT Output", AllocationTypeEnum::unified, m / 2, 0);
 	graph::BmpGpu<uint> bmp;
 	bmp.InitBMP(csrcoo.num_rows(), csrcoo.nnz(), rowPtr, dl);
@@ -468,16 +477,27 @@ int main(int argc, char** argv) {
 	double tc_time = bmp.Count_Set(n, m, rowPtr, dl);
 	#define MAX_LEVEL  (20000)
 	auto level_start_pos = (uint*)calloc(MAX_LEVEL, sizeof(uint));
-	
-	graph::PKT_cuda(
+	*/
+	/*graph::PKT_cuda(
 		n, m,
 		rowPtr, dl, bmp,
 		nullptr,
 		100, output, level_start_pos, 0, tc_time);
 
+	sl.cdata() = csrcoo.row_ind();
+	dl.cdata() = csrcoo.col_ind();
+	rowPtr.cdata() = csrcoo.row_ptr();
 
+	sl.copyCPUtoGPU(0, csrcoo.nnz());
+	cudaDeviceSynchronize();
 
-	graph::SingleGPU_Ktruss<uint> mohatruss(0);
+	dl.copyCPUtoGPU(0, csrcoo.nnz());
+	cudaDeviceSynchronize();
+
+	rowPtr.copyCPUtoGPU(0, csrcoo.num_rows() + 1);
+	cudaDeviceSynchronize();*/
+
+	/*graph::SingleGPU_Ktruss<uint> mohatruss(0);
 
 	Timer t;
 	mohatruss.findKtrussIncremental_sync(3, 1000, rowPtr, sl, dl,
@@ -486,26 +506,58 @@ int main(int argc, char** argv) {
 	double time = t.elapsed();
 	
 
-	Log(info, "count time %.f s", time);
-	Log(info, "MOHA %d ktruss (%f teps)", mohatruss.count(), m / time);
+	Log(info, "count time %f s", time);
+	Log(info, "MOHA %d ktruss (%f teps)", mohatruss.count(), m / time);*/
 	
 
+	//We need to change the graph representation
+	graph::GPUArray<uint> rowIndex("Half Row Index", AllocationTypeEnum::unified, csrcoo.nnz() / 2, 0),
+		colIndex("Half Col Index", AllocationTypeEnum::unified, csrcoo.nnz() / 2, 0),
+		EID("EID", AllocationTypeEnum::unified, csrcoo.nnz(), 0),
+		asc("ASC temp", AllocationTypeEnum::unified, csrcoo.nnz(), 0);
+
+	graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, csrcoo.nnz(), 0);
+
+
+	execKernel(init, (csrcoo.nnz() + 512 - 1) / 512, 512, false, (uint)csrcoo.nnz(), asc.gdata(), keep.gdata(), sl.gdata(), dl.gdata());
+
+	CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m);
+	CUBSelect(sl.gdata(), rowIndex.gdata(), keep.gdata(), m);
+	uint newNumEdges = CUBSelect(dl.gdata(), colIndex.gdata(), keep.gdata(), m);
+	execKernel(InitEid, (newNumEdges + 512 - 1) / 512, 512, false, newNumEdges, asc.gdata(), rowIndex.gdata(), colIndex.gdata(), rowPtr.gdata(), dl.gdata(), EID.gdata());
+	asc.freeGPU();
+	keep.freeGPU();
 
 
 
-	//graph::SingleGPU_KtrussMod<uint> mohatrussM(0);
+	graph::SingleGPU_KtrussMod<uint> mohatrussM(0);
 
-	//Timer t;
-	//graph::TcBase<uint>* tcb = new graph::TcSerial<uint>(0, csrcooFull.nnz(), csrcooFull.num_rows(), mohatrussM.stream());
-	//mohatrussM.findKtrussIncremental_sync(3, 1000, tcb, rowPtrFull, slFull, dlFull,
-	//	n, m, nullptr, nullptr, 0, 0);
-	//mohatrussM.sync();
-	//double time = t.elapsed();
+	Timer t;
+	graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(0, csrcoo.nnz(), csrcoo.num_rows(), mohatrussM.stream());
+
+	mohatrussM.findKtrussIncremental_sync(3, 1000, tcb, rowPtr,  dl,
+		rowIndex, colIndex, EID,
+		n, m, nullptr, nullptr, 0, 0);
+	mohatrussM.sync();
+	double time = t.elapsed();
 
 
-	//Log(info, "count time %.f s", time);
-	//Log(info, "MOHA %d ktruss (%f teps)", mohatrussM.count(), m / time);
+	Log(info, "count time %f s", time);
+	Log(info, "MOHA %d ktruss (%f teps)", mohatrussM.count(), m / time);
 
+
+
+	/*graph::SingleGPU_KtrussWarp<uint> mohatrussM(0);
+
+	Timer t;
+	mohatrussM.findKtrussIncremental_sync(3, 1000, rowPtr, sl, dl,
+		n, m, nullptr, nullptr, 0, 0);
+	mohatrussM.sync();
+	double time = t.elapsed();
+
+
+	Log(info, "count time %f s", time);
+	Log(info, "MOHA %d ktruss (%f teps)", mohatrussM.count(), m / time);*/
 #endif
 
 #pragma region MyRegion

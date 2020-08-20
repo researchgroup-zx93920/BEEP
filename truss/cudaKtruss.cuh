@@ -434,10 +434,12 @@ namespace graph
         uint* edge_off_origin_cpu, int shrink_factor,
         GPUArray<int> output, uint* level_start_pos, int level, double tc_time)
     {
-        Timer scan_timer, sub_process_timer, copy_timer, tc_timer, shrink_timer, prepare_timer;
-        double scan_time = 0, sub_process_time = 0, copy_time = 0, shrink_time = 0, prepare_time = 0, penalty_tc_time = 0;
+        Timer scan_timer, sub_process_timer, copy_timer, tc_timer, shrink_timer, prepare_timer, completeTimer;
+        double scan_time = 0, sub_process_time = 0, copy_time = 0, shrink_time = 0, prepare_time = 0, penalty_tc_time = 0, completeTime;
         // 1st: Prepare CSR/EL/Eid/Queues.
       
+
+        completeTimer.reset();
 
         GPUArray<int> curr, next;
         GPUArray<bool> inCurr, inNext;
@@ -496,7 +498,7 @@ namespace graph
         //Begin of Level-Processing, finding edges in k-truss but not in the (k+1)-truss.
         while (todo > 0) 
         {
-            Log(LogPriorityEnum::info, "Level: %d, todo(origin): %d, todo(cur): %d., have: %d", level, todo_original, todo,
+            Log(LogPriorityEnum::debug, "Level: %d, todo(origin): %d, todo(cur): %d., have: %d", level, todo_original, todo,
                 level_start_pos[level]);
             // 1st: Shrinking.
             if ((deleted_acc * 1.0 / todo_original) > (1.0 / shrink_factor)) 
@@ -530,7 +532,7 @@ namespace graph
                 execKernel(init_asc, grid_size, BLOCK_SIZE, time_stat, false, identity_arr_asc, edge_num);
                 #endif
                 shrink_first_time = false;
-                Log(LogPriorityEnum::info, "Shrink graph finished");
+                Log(LogPriorityEnum::debug, "Shrink graph finished");
             }
             cudaDeviceSynchronize();
 
@@ -630,6 +632,9 @@ namespace graph
             level_start_pos[level + 1] = level_start_pos[level] + level_acc_cnt;
             level++;
         }
+
+        completeTime = completeTimer.elapsed();
+
 //
           cudaDeviceSynchronize();
           processed.freeGPU();
@@ -673,6 +678,8 @@ namespace graph
         //ss2 << tc_stat;
         Log(LogPriorityEnum::info,"TC stat: %s", ss2.str().c_str());
         Log(LogPriorityEnum::info,"Update processed time: %.4f s.", process_update_time);
+
+        Log(LogPriorityEnum::info, "Complete Time: %.4f s.", completeTime);
 
     }
 };

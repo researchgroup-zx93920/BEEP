@@ -10,6 +10,53 @@
 #define WARPS_PER_BLOCK (BLOCK_SIZE/WARP_SIZE)
 #define GRID_SIZE   (1024) /*default grid size*/
 
+
+
+
+
+/*! Binary search
+
+ \tparam arr  			Pointer to the array
+ \tparam l 					Left boundary of arr
+ \tparam r   				Right boundary of arr
+     \tparam x				 	Value to search for
+*/
+__device__ inline uint binarySearch_b(const uint* arr, uint l, uint r, uint x)
+{
+    size_t left = l;
+    size_t right = r;
+    while (left < right) {
+        const size_t mid = (left + right) / 2;
+        uint val = arr[mid];
+        bool pred = val < x;
+        if (pred) {
+            left = mid + 1;
+        }
+        else {
+            right = mid;
+        }
+    }
+    return left;
+}
+
+/*! Obtain the index of an edge using its two nodes
+
+ \tparam mat  			Graph view represented in COO+CSR format
+ \tparam sn 				Source node
+ \tparam dn   			Destination node
+*/
+
+__device__ inline uint getEdgeId(uint* rowPtr, uint* colInd, uint sn, const uint dn)
+{
+    uint index = 0;
+
+    uint start = rowPtr[sn];
+    uint end2 = rowPtr[sn + 1];
+    index = binarySearch_b(colInd, start, end2, dn); // pangolin::binary_search(p, length, dn);
+    return index;
+}
+
+
 /*
  * cudaPeekAtLastError(): get the code of last error, no resetting
  * udaGetLastError(): get the code of last error, resetting to cudaSuccess

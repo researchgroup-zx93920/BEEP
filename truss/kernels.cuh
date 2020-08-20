@@ -343,7 +343,8 @@ __global__
 void warp_detect_deleted_edges(
     uint* old_offsets, uint32_t old_offset_cnt,
     uint* eid, bool* old_processed,
-    uint* histogram, bool* focus) {
+    uint* histogram, bool* focus) 
+{
 
     __shared__ uint32_t cnts[WARPS_PER_BLOCK];
 

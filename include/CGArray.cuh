@@ -144,6 +144,18 @@ namespace graph
 				N = (size == 0) ? N : size;
 				CUDA_RUNTIME(cudaMemcpy(gpu_data, cpu_data, N * sizeof(T), cudaMemcpyKind::cudaMemcpyHostToDevice));
 			}
+
+		}
+
+		void copyCPUtoGPU(int devId, uint size = 0)
+		{
+			if (_at != cpuonly)
+			{
+				N = (size == 0) ? N : size;
+				CUDA_RUNTIME(cudaSetDevice(_deviceId));
+				CUDA_RUNTIME(cudaStreamCreate(&_stream));
+				CUDA_RUNTIME(cudaMemcpy(gpu_data, cpu_data, N * sizeof(T), cudaMemcpyKind::cudaMemcpyHostToDevice));
+			}
 		}
 
 

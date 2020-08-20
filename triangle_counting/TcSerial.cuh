@@ -161,10 +161,43 @@ kernel_serial_pe_arrays(int* count, //!< [inout] the count, caller should zero
 
         T min = increasing == 0 ? 0 : dst;
         threadCount += graph::serial_sorted_count_linear(min, srcBegin, srcEnd, dstBegin, dstEnd);
+
+
+        count[i] = threadCount;
     }
 
-    count[gx] = threadCount;
 }
+
+
+
+template <typename T, size_t BLOCK_DIM_X>
+__global__ void __launch_bounds__(BLOCK_DIM_X)
+kernel_serial_pe_eid_arrays(int* count, //!< [inout] the count, caller should zero
+    T* rowPtr_csr, T* colIndex_csr,
+    T* rowInd, T* colInd, const size_t numEdges, const size_t edgeStart, int increasing = 0) {
+
+    size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
+    uint64 threadCount = 0;
+
+    for (size_t i = gx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x) {
+        const T src = rowInd[i];
+        const T dst = colInd[i];
+
+        const T* srcBegin = &colIndex_csr[rowPtr_csr[src]];
+        const T* srcEnd = &colIndex_csr[rowPtr_csr[src + 1]];
+        const T* dstBegin = &colIndex_csr[rowPtr_csr[dst]];
+        const T* dstEnd = &colIndex_csr[rowPtr_csr[dst + 1]];
+
+        T min = increasing == 0 ? 0 : dst;
+        threadCount += graph::serial_sorted_count_linear(min, srcBegin, srcEnd, dstBegin, dstEnd);
+    
+    
+        count[i] = threadCount;
+    }
+
+    
+}
+
 
 
 template <typename T, size_t BLOCK_DIM_X>
@@ -185,9 +218,12 @@ kernel_serial_pe_upto_arrays(int upto, bool *mask,
             T min = 0; // increasing == 0 ? 0 : dst;
             threadCount += graph::serial_sorted_count_upto_linear(upto, mask, min, colInd, rowPtr[src], rowPtr[src + 1], rowPtr[dst], rowPtr[dst + 1]);
         }
+
+
+        count[i] = threadCount;
     }
 
-    count[gx] = threadCount;
+  
 }
 
 
@@ -195,49 +231,54 @@ template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_serial_pe_level_q_arrays(
     int* count,
-    T* rowPtr, T* rowInd, T* colInd, const size_t numEdges,
+    T* rowPtr_csr, T* colIndex_csr,
+    T* rowInd, T* colInd, T* eid,
+    const size_t numEdges,
     int level, bool* processed,
-    int* affected, int& affected_cnt,
-    int* next, bool* inNext, int& next_cnt,
-    bool* in_bucket_window_, T* bucket_buf_, T& window_bucket_buf_size_, int bucket_level_end_
+    int* affected, int& affected_cnt
 ) 
 {
 
     size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
     
 
-    for (size_t i = gx; i < affected_cnt; i += BLOCK_DIM_X * gridDim.x)
+    for (size_t i = gx; i < numEdges; i += BLOCK_DIM_X * gridDim.x)
     {
-        int edgeId = affected[i];
+        int edgeId = i; // affected[i];
 
         uint64 threadCount = 0;
         const T src = rowInd[edgeId];
         const T dst = colInd[edgeId];
 
         T min = 0; // increasing == 0 ? 0 : dst;
-        T ap = rowPtr[src];
-        T bp = rowPtr[dst];
+        T ap = rowPtr_csr[src];
+        T bp = rowPtr_csr[dst];
 
-        T aEnd = rowPtr[src + 1];
-        T bEnd = rowPtr[dst + 1];
+        T aEnd = rowPtr_csr[src + 1];
+        T bEnd = rowPtr_csr[dst + 1];
 
         bool loadA = true;
         bool loadB = true;
 
         T a, b;
-        while (ap < aEnd && bp < bEnd) {
+        while (ap < aEnd && bp < bEnd)
+        {
 
             if (loadA) {
-                a = colInd[ap];
+                a = colIndex_csr[ap];
                 loadA = false;
             }
             if (loadB) {
-                b = colInd[bp];
+                b = colIndex_csr[bp];
                 loadB = false;
             }
 
             if (a == b) {
-                if (!processed[ap] && !processed[bp])
+
+                T ap_e = eid[ap];
+                T bp_e = eid[bp];
+
+                if (!processed[ap_e] && !processed[bp_e])
                     ++threadCount;
 
                 ++ap;
@@ -255,34 +296,8 @@ kernel_serial_pe_level_q_arrays(
                 loadB = true;
             }
         }
-
-        //Queue and bucket
-        auto prev = count[edgeId];
-        if (prev > level)
-        {
-            if (threadCount < level)
-            {
-                threadCount = level;
-            }
-
-            count[edgeId] = threadCount;
-            if (threadCount == level) {
-                auto insert_idx = atomicAdd(&next_cnt, 1);
-                next[insert_idx] = edgeId;
-                inNext[edgeId] = true;
-            }
-            // Update the Bucket.
-            auto latest = threadCount;
-            if (latest > level && latest < bucket_level_end_)
-            {
-                auto old_token = atomicCASBool(in_bucket_window_ + edgeId, false, true);
-                if (!old_token) {
-                    auto insert_idx = atomicAdd(&window_bucket_buf_size_, 1);
-                    bucket_buf_[insert_idx] = edgeId;
-                }
-            }
-
-        }
+        count[edgeId] = threadCount;
+           
     }
 }
 
@@ -291,27 +306,27 @@ kernel_serial_pe_level_q_arrays(
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_serial_pe_level_affected(
-    T* rowPtr, T* rowInd, T* colInd, const size_t numEdges,
+    T* rowPtr_csr, T* colIndex_csr,
+    T* rowInd, T* colInd, T* eid,
+    const size_t numEdges,
     int level, bool* processed,
     int *curr, bool* inCurr, int curr_cnt,
-    int* affected, bool* inAffected, int& affected_cnt
+    int* affected, int* inAffected, int& affected_cnt, T *reversed
 )
 {
 
     size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
-
-
     for (size_t i = gx; i < curr_cnt; i += BLOCK_DIM_X * gridDim.x)
     {
         int edgeId = curr[i];
 
         const T src = rowInd[edgeId];
         const T dst = colInd[edgeId];
-        T ap = rowPtr[src];
-        T bp = rowPtr[dst];
+        T ap = rowPtr_csr[src];
+        T bp = rowPtr_csr[dst];
 
-        T aEnd = rowPtr[src + 1];
-        T bEnd = rowPtr[dst + 1];
+        T aEnd = rowPtr_csr[src + 1];
+        T bEnd = rowPtr_csr[dst + 1];
 
         bool loadA = true;
         bool loadB = true;
@@ -320,38 +335,67 @@ kernel_serial_pe_level_affected(
         while (ap < aEnd && bp < bEnd) {
 
             if (loadA) {
-                a = colInd[ap];
+                a = colIndex_csr[ap];
                 loadA = false;
             }
             if (loadB) {
-                b = colInd[bp];
+                b = colIndex_csr[bp];
                 loadB = false;
             }
 
             if (a == b) 
             {
-                if (!processed[ap] && !inCurr[ap])
+
+                T ap_e = eid[ap];
+                T bp_e = eid[bp];
+
+                bool is_peel_e2 = !inCurr[ap_e];
+                bool is_peel_e3 = !inCurr[bp_e];
+                if (is_peel_e2 || is_peel_e3) 
                 {
-                    //Add to affected queue
-                    auto old_token = atomicCASBool(inAffected + ap, false, true);
-                    if (!old_token)
+                    if ((!processed[ap_e]) && (!processed[bp_e]))
                     {
-                        auto insert_idx = atomicAdd(&affected_cnt, 1);
-                        affected[insert_idx] = ap;
+                        if (is_peel_e2 && is_peel_e3) {
+                            auto old_token = atomicAdd(inAffected + ap_e, 1);
+                            if (old_token == 0)
+                            {
+                                auto insert_idx = atomicAdd(&affected_cnt, 1);
+                                affected[insert_idx] = ap_e;
+                            }
+
+                            old_token = atomicAdd(inAffected + bp_e, 1);
+                            if (old_token == 0)
+                            {
+                                auto insert_idx = atomicAdd(&affected_cnt, 1);
+                                affected[insert_idx] = bp_e;
+                            }
+                        }
+                        else if (is_peel_e2)
+                        {
+                            if (edgeId < bp_e) {
+                                auto old_token = atomicAdd(inAffected + ap_e, 1);
+                                if (old_token == 0)
+                                {
+                                    auto insert_idx = atomicAdd(&affected_cnt, 1);
+                                    affected[insert_idx] = ap_e;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            if (edgeId < ap_e)
+                            {
+                                auto old_token = atomicAdd(inAffected + bp_e, 1);
+                                if (old_token == 0)
+                                {
+                                    auto insert_idx = atomicAdd(&affected_cnt, 1);
+                                    affected[insert_idx] = bp_e;
+                                }
+                            }
+                        }
                     }
                 }
 
-                if (!processed[bp] && !inCurr[bp])
-                {
-
-                    auto old_token = atomicCASBool(inAffected + bp, false, true);
-                    if (!old_token)
-                    {
-                        auto insert_idx = atomicAdd(&affected_cnt, 1);
-                        affected[insert_idx] = bp;
-                    }
-                }
-                
                 ++ap;
                 ++bp;
                 loadA = true;
@@ -465,6 +509,34 @@ namespace graph {
         }
 
 
+        void count_per_edge_eid_async(GPUArray<int>& tcpt, GPUArray<T> rowPtr_csr, GPUArray<T> colIndex_csr,  GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+        {
+            const size_t dimBlock = 512;
+            const size_t ne = numEdges;
+            T* rp_csr = rowPtr_csr.gdata();
+            T* ci_csr = colIndex_csr.gdata();
+
+            T* ri = rowInd.gdata();
+            T* ci = colInd.gdata();
+
+            CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
+
+            // create one warp per edge
+            const int dimGrid = (numEdges - edgeOffset + (dimBlock)-1) / (dimBlock);
+            const int dimGridWarp = (32 * numEdges + (dimBlock)-1) / (dimBlock);
+            const int dimGridBlock = (dimBlock * numEdges + (dimBlock)-1) / (dimBlock);
+
+            assert(TcBase<T>::count_);
+            Log(LogPriorityEnum::info, "device = %d, blocks = %d, threads = %d\n", TcBase<T>::dev_, dimGrid, dimBlock);
+            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
+
+
+            CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
+            kernel_serial_pe_eid_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (tcpt.gdata(), rp_csr, ci_csr, ri, ci, ne, edgeOffset, increasing);
+            CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
+        }
+
+
         void count_per_edge_upto_async(int upto, GPUArray<bool> mask, GPUArray<int>& tcpt, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
             const size_t dimBlock = 32;
@@ -479,57 +551,62 @@ namespace graph {
 
 
         void count_per_edge_level_q_async(
-            GPUArray<int>& tcpt, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges,
+            GPUArray<int>& tcpt,
+            GPUArray<T> rowPtr_csr, GPUArray<T> colIndex_csr,
+            GPUArray<T> rowInd, GPUArray<T> colInd, GPUArray<T> eid, const size_t numEdges,
             int level, GPUArray<bool> processed,
             GPUArray<int>& curr, int curr_cnt,
-            GPUArray<int>& affected, GPUArray<bool>& inAffected, GPUArray<int>& affected_cnt, //next queue
-            GPUArray<int>& next, GPUArray<bool>& inNext, GPUArray<int> next_cnt, //next queue
-            GPUArray<bool>& in_bucket_window_, GPUArray<uint>& bucket_buf_, uint*& window_bucket_buf_size_, int bucket_level_end_,
+            GPUArray<int>& affected, GPUArray<int>& inAffected, GPUArray<int>& affected_cnt, //next queue
             const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
         
             const size_t dimBlock = 32;
             const size_t ne = numEdges;
-            T* rp = rowPtr.gdata();
+            T* rp_csr = rowPtr_csr.gdata();
+            T* ci_csr = colIndex_csr.gdata();
+
             T* ri = rowInd.gdata();
             T* ci = colInd.gdata();
-            const int dimGrid = (*affected_cnt.gdata() - edgeOffset + (dimBlock)-1) / (dimBlock);
+            const int dimGrid = (numEdges - edgeOffset + (dimBlock)-1) / (dimBlock);
             CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
 
 
             //process affetced
            kernel_serial_pe_level_q_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (
-                tcpt.gdata(), rp, ri, ci, ne,
+                tcpt.gdata(), 
+                rp_csr,ci_csr,  ri, ci, eid.gdata(), ne,
                 level, processed.gdata(),
-                affected.gdata(), *affected_cnt.gdata(),
-                next.gdata(), inNext.gdata(), *next_cnt.gdata(),
-                in_bucket_window_.gdata(), bucket_buf_.gdata(), *window_bucket_buf_size_, bucket_level_end_);
+                affected.gdata(), *affected_cnt.gdata());
 
         }
 
 
         void affect_per_edge_level_q_async(
-            GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges,
+            GPUArray<T> rowPtr_csr, GPUArray<T> colIndex_csr,
+            GPUArray<T> rowInd, GPUArray<T> colInd, GPUArray<T> eid, const size_t numEdges,
             int level, GPUArray<bool> processed,
             GPUArray<int>& curr, GPUArray<bool> inCurr, int curr_cnt,
-            GPUArray<int>& affected, GPUArray<bool>& inAffected, GPUArray<int>& affected_cnt, //next queue
+            GPUArray<int>& affected, GPUArray<int>& inAffected, GPUArray<int>& affected_cnt, //next queue
             GPUArray<uint> reversed,
             const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
         
             const size_t dimBlock = 32;
             const size_t ne = numEdges;
-            T* rp = rowPtr.gdata();
+            T* rp_csr = rowPtr_csr.gdata();
+            T* ci_csr = colIndex_csr.gdata();
+
             T* ri = rowInd.gdata();
             T* ci = colInd.gdata();
+
             const int dimGrid = (curr_cnt - edgeOffset + (dimBlock)-1) / (dimBlock);
             CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
             
             kernel_serial_pe_level_affected<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (
-                rp, ri, ci, ne,
+                rp_csr, ci_csr, ri, ci, eid.gdata(), ne,
                 level, processed.gdata(),
                 curr.gdata(), inCurr.gdata(), curr_cnt,
-                affected.gdata(), inAffected.gdata(), *affected_cnt.gdata());
+                affected.gdata(), inAffected.gdata(), *affected_cnt.gdata(), reversed.gdata());
         
         }
 

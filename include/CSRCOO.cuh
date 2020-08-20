@@ -48,6 +48,9 @@ namespace graph {
                 const Index src = static_cast<Index>(edge.first);
                 const Index dst = static_cast<Index>(edge.second);
 
+                if (src == dst)
+                    continue;
+
                 // edge has a new src and should be in a new row
                 // even if the edge is filtered out, we need to add empty rows
                 while (csr.rowPtr_.size() != size_t(src + 1)) {
