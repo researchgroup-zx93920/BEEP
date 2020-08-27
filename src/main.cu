@@ -47,10 +47,10 @@ using namespace std;
 
 #define NORMAL
 //#define Matrix_Stats
-//#define TC
+#define TC
 //#define Cross_Decomposition
 //#define TriListConstruct
-#define KTRUSS
+//#define KTRUSS
 
 
 int main(int argc, char** argv) {
@@ -91,7 +91,7 @@ int main(int argc, char** argv) {
 
 	char* matr;
 
-	matr = "D:\\graphs\\cit-Patents_adj.bel";
+	matr = "D:\\graphs\\graph500-scale21-ef16_adj.bel";
 
 #ifndef __VS__
 	if (argc > 1)
@@ -188,12 +188,15 @@ int main(int argc, char** argv) {
 			printf("}\n");
 		}
 
-		uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Thread, 0);
+		//uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Thread, 0);
 
 		//CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
 		uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
 		uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::WarpShared, 0);
 		uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Test, 0);
+
+		uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Queue, 0);
+
 		uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", tcBE, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
 		CountTrianglesHash<uint>(divideConstant, tchash, rowPtr, sl, dl, ee, csrcoo.num_rows(), 0, ProcessingElementEnum::Warp, 0);
 		bmp.Count(csrcoo.num_rows(), rowPtr, dl);
@@ -241,6 +244,7 @@ int main(int argc, char** argv) {
 	bmp.getEidAndEdgeList(n, m, rowPtr, dl);// EID creation
 	bmp.InitBMP(csrcoo.num_rows(), csrcoo.nnz(), rowPtr, dl);
 	bmp.bmpConstruct(csrcoo.num_rows(), csrcoo.nnz(), rowPtr, dl);
+	
 	double tc_time = bmp.Count_Set(n, m, rowPtr, dl);
 	#define MAX_LEVEL  (20000)
 	auto level_start_pos = (uint*)calloc(MAX_LEVEL, sizeof(uint));
@@ -276,7 +280,7 @@ int main(int argc, char** argv) {
 	graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, csrcoo.nnz(), 0);
 
 
-	execKernel(init, (csrcoo.nnz() + 512 - 1) / 512, 512, false, (uint)csrcoo.nnz(), asc.gdata(), keep.gdata(), sl.gdata(), dl.gdata());
+	execKernel(init, (csrcoo.nnz() + 512 - 1) / 512, 512, false, (uint)csrcoo.nnz(), asc.gdata(), keep.gdata(), rowPtr.gdata(), sl.gdata(), dl.gdata());
 
 	CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m);
 	CUBSelect(sl.gdata(), rowIndex.gdata(), keep.gdata(), m);

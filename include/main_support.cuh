@@ -7,7 +7,7 @@
 
 
 template<typename T>
-__global__ void init(T numEdges, T* asc, bool* keep, T* src, T* dst)
+__global__ void init(T numEdges, T* asc, bool* keep, T *rowPtr, T* rowInd, T* colInd)
 {
 	uint tx = threadIdx.x;
 	uint bx = blockIdx.x;
@@ -16,7 +16,21 @@ __global__ void init(T numEdges, T* asc, bool* keep, T* src, T* dst)
 
 	for (uint i = ptx; i < numEdges; i += blockDim.x * gridDim.x)
 	{
-		keep[i] = src[i] < dst[i];
+		const T src = rowInd[i];
+		const T dst = colInd[i];
+
+		const T srcStart = rowPtr[src];
+		const T srcStop = rowPtr[src + 1];
+
+		const T dstStart = rowPtr[dst];
+		const T dstStop = rowPtr[dst + 1];
+
+		const T dstLen = dstStop - dstStart;
+		const T srcLen = srcStop - srcStart;
+
+
+		keep[i] = (dstLen < srcLen || ((dstLen == srcLen) && src < dst));// Some simple graph orientation
+		//src[i] < dst[i];
 		asc[i] = i;
 	}
 }
@@ -61,7 +75,7 @@ uint64 CountTriangles(std::string message, graph::TcBase<T>* tc, graph::GPUArray
 	printf("TC = %u\n", tc->count());
 	double secs = tc->kernel_time();
 	int dev = tc->device();
-	Log(LogPriorityEnum::info, "Kernel [%s]: gpu %d kernel time %f (%f teps) \n", message, dev, secs, numEdges / secs);
+	Log(LogPriorityEnum::info, "Kernel [%s]: gpu %d kernel time %f (%f teps) \n", message.c_str(), dev, secs, numEdges / secs);
 	cudaDeviceSynchronize();
 
 

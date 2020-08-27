@@ -496,6 +496,62 @@ namespace graph
         }
     }
 
+
+    template <size_t WARPS_PER_BLOCK, typename T, bool reduce = true>
+    __device__ __forceinline__ uint64_t warp_sorted_count_binary(int startCount, const T* const A, //!< [in] array A
+        const size_t aSz, //!< [in] the number of elements in A
+        T* B, //!< [in] array B
+        T bSz  //!< [in] the number of elements in B
+    )
+    {
+        const int warpIdx = threadIdx.x / 32; // which warp in thread block
+        const int laneIdx = threadIdx.x % 32; // which thread in warp
+
+        uint64_t threadCount = startCount;
+        T lastIndex = 0;
+
+        // cover entirety of A with warp
+        for (size_t i = laneIdx; i < aSz; i += 32)
+        {
+            // one element of A per thread, just search for A into B
+            const T searchVal = A[i];
+            const T leftValue = B[lastIndex];
+
+            if (searchVal >= leftValue)
+            {
+
+                const T lb = graph::binary_search<T>(B, lastIndex, bSz, searchVal);
+                if (lb < bSz)
+                {
+                    if (B[lb] == searchVal)
+                    {
+                        //printf("At %u, SearchVal = %u\n", lb, searchVal);
+                        threadCount++;
+                    }
+
+
+                }
+
+                lastIndex = lb;
+            }
+
+            unsigned int writemask_deq = __activemask();
+            lastIndex = __shfl_sync(writemask_deq, lastIndex, 31);
+        }
+
+        if (reduce) {
+            // give lane 0 the total count discovered by the warp
+            typedef cub::WarpReduce<uint64_t> WarpReduce;
+            __shared__ typename WarpReduce::TempStorage tempStorage[WARPS_PER_BLOCK];
+            uint64_t aggregate = WarpReduce(tempStorage[warpIdx]).Sum(threadCount);
+            return aggregate;
+        }
+        else
+        {
+            return threadCount;
+        }
+    }
+
     template <size_t WARPS_PER_BLOCK, typename T, bool reduce = true>
     __device__ __forceinline__ uint64_t warp_sorted_count_binary_s(const T* const A, //!< [in] array A
         const size_t aSz, //!< [in] the number of elements in A
@@ -747,7 +803,7 @@ namespace graph
         }
         return 0;
     }
-    template <size_t BLOCK_DIM_X, typename T>
+    template <size_t BLOCK_DIM_X, typename T, bool reduce=true>
     __device__ uint64_t block_sorted_count_binary(const T* const A, //!< [in] array A
         const size_t aSz, //!< [in] the number of elements in A
         const T* const B, //!< [in] array B
@@ -781,14 +837,19 @@ namespace graph
             }
         }
 
-        __syncthreads();
+        if (reduce)
+        {
+            __syncthreads();
 
-        typedef cub::BlockReduce<uint64_t, BLOCK_DIM_X> BlockReduce;
-        __shared__ typename BlockReduce::TempStorage tempStorage;
-        uint64_t aggregate = BlockReduce(tempStorage).Sum(threadCount);
+            typedef cub::BlockReduce<uint64_t, BLOCK_DIM_X> BlockReduce;
+            __shared__ typename BlockReduce::TempStorage tempStorage;
+            uint64_t aggregate = BlockReduce(tempStorage).Sum(threadCount);
+            return aggregate;
+        }
+        else return threadCount;
 
 
-        return aggregate;
+       
     }
 
 

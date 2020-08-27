@@ -26,7 +26,7 @@ template <typename NodeTy, typename WeightTy> using WEdgeTy = std::tuple<NodeTy,
 typedef unsigned long long int uint64;
 
 //Enums
-enum ProcessingElementEnum { Thread, Warp, Block, Grid, WarpShared, Test };
+enum ProcessingElementEnum { Thread, Warp, Block, Grid, WarpShared, Test, Queue };
 enum AllocationTypeEnum { cpuonly, gpu, unified, zerocopy };
 enum LogPriorityEnum { critical, warn, error, info, debug, none };
 

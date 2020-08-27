@@ -543,7 +543,7 @@ namespace graph
 							affected, inAffedted, affected_cnt, 
 							next, inNext, next_cnt,
 							in_bucket_window_, bucket_buf_, window_bucket_buf_size_, bucket_level_end_,
-							0,Thread);
+							0,Block);
 						tcCounter->sync();
 				
 						auto block_size = 256;
