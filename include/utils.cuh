@@ -219,4 +219,51 @@ void PrintMtarixStruct(int nnz, int nr, int nc, T* csrRowPointer, T* csrColumns)
 		printf("\n");
 	}
 
-} // referenceSpMV
+}
+
+template<typename T>
+void quicksort(T* key, T* data, T start, T end) {
+	if ((end - start + 1) > 1) {
+		T left = start, right = end;
+		T pivot = key[right];
+		while (left <= right) {
+			while (key[left] < pivot) {
+				left = left + 1;
+			}
+			while (key[right] > pivot) {
+				right = right - 1;
+			}
+			if (left <= right) {
+				T tmpKey = key[left]; key[left] = key[right]; key[right] = tmpKey;
+				T tmpData = data[left]; data[left] = data[right]; data[right] = tmpData;
+				left = left + 1;
+				right = right - 1;
+			}
+		}
+		quicksort(key, data, start, right);
+		quicksort(key, data, left, end);
+	}
+}
+
+template<typename T>
+void quicksort(T* key, T start, T end) {
+	if ((end - start + 1) > 1) {
+		T left = start, right = end;
+		T pivot = key[right];
+		while (left <= right) {
+			while (key[left] < pivot) {
+				left = left + 1;
+			}
+			while (key[right] > pivot) {
+				right = right - 1;
+			}
+			if (left <= right) {
+				T tmpKey = key[left]; key[left] = key[right]; key[right] = tmpKey;
+				left = left + 1;
+				right = right - 1;
+			}
+		}
+		quicksort(key, start, right);
+		quicksort(key, left, end);
+	}
+}

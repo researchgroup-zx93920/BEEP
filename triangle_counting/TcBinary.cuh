@@ -5,20 +5,20 @@
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_binary_thread_arrays(uint64* count, //!< [inout] the count, caller should zero
-    T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, const size_t edgeStart) {
+    graph::COOCSRGraph_d<T> g, const size_t numEdges, const size_t edgeStart) {
 
     size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
     uint64 threadCount = 0;
 
     for (size_t i = gx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x) {
-        const T src = rowInd[i];
-        const T dst = colInd[i];
+        const T src = g.rowInd[i];
+        const T dst = g.colInd[i];
 
-        const T srcStart = rowPtr[src];
-        const T srcStop = rowPtr[src + 1];
+        const T srcStart = g.rowPtr[src];
+        const T srcStop = g.rowPtr[src + 1];
 
-        const T dstStart = rowPtr[dst];
-        const T dstStop = rowPtr[dst + 1];
+        const T dstStart = g.rowPtr[dst];
+        const T dstStop = g.rowPtr[dst + 1];
 
         const T dstLen = dstStop - dstStart;
         const T srcLen = srcStop - srcStart;
@@ -26,12 +26,12 @@ kernel_binary_thread_arrays(uint64* count, //!< [inout] the count, caller should
         //printf("%u,%u,%u,%u,%u,%u,%u,%u\n", src, dst, srcStart, srcStop, dstStart, dstStop, srcLen, dstLen);
 
         if (dstLen > srcLen) {
-            threadCount += graph::thread_sorted_count_binary<T>(&(colInd[srcStart]), srcLen,
-                &(colInd[dstStart]), dstLen);
+            threadCount += graph::thread_sorted_count_binary<T>(&(g.colInd[srcStart]), srcLen,
+                &(g.colInd[dstStart]), dstLen);
         }
         else {
-            threadCount += graph::thread_sorted_count_binary<T>(&(colInd[dstStart]), dstLen,
-                &(colInd[srcStart]), srcLen);
+            threadCount += graph::thread_sorted_count_binary<T>(&(g.colInd[dstStart]), dstLen,
+                &(g.colInd[srcStart]), srcLen);
         }
     }
 
@@ -46,6 +46,209 @@ kernel_binary_thread_arrays(uint64* count, //!< [inout] the count, caller should
     }
 }
 
+
+template <typename T, size_t BLOCK_DIM_X>
+__global__ void __launch_bounds__(BLOCK_DIM_X)
+kernel_binary_enqueue_arrays(uint64* count, //!< [inout] the count, caller should zero
+    graph::COOCSRGraph_d<T> g, const size_t numEdges, const size_t edgeStart,
+    T* wq, T* wc, T* bq, T* bc
+    
+    ) {
+
+    size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
+    int tid = threadIdx.x;
+    int lx = threadIdx.x % 32;
+    uint64 threadCount = 0;
+
+    __shared__ T sharedWarpQ[BLOCK_DIM_X];
+    __shared__ T sharedBlockQ[BLOCK_DIM_X];
+
+    __shared__ int swc, sbc;
+    __shared__ int startWarpQueue, startBlockQueue, global;
+
+
+    if (gx == 0)
+        *wc = 0;
+    if (gx == 1)
+        *bc = 0;
+
+    if (tid == 0)
+        swc = 0;
+    if (tid == 1)
+        sbc = 0;
+    __syncthreads();
+
+    int i = gx + edgeStart;
+    if(i < numEdges)
+    {
+         T src = g.rowInd[i];
+         T dst = g.colInd[i];
+
+      T srcStart = g.rowPtr[src];
+         T srcStop = g.rowPtr[src + 1];
+
+         T dstStart = g.rowPtr[dst];
+         T dstStop = g.rowPtr[dst + 1];
+
+         T dstLen = dstStop - dstStart;
+         T srcLen = srcStop - srcStart;
+
+        if (srcLen > dstLen)
+        {
+            swap_ele(srcStart, dstStart);
+            swap_ele(srcStop, dstStop);
+            swap_ele(srcLen, dstLen);
+        }
+
+        if (srcLen >= 8 && srcLen < 64)
+        {
+            auto prev = atomicAdd(&swc, 1);
+            sharedWarpQ[prev] = i;
+        }
+        else if(srcLen >= 64)
+        {
+            auto prev = atomicAdd(&sbc, 1);
+            sharedBlockQ[prev] = i;
+        }
+    }
+    __syncthreads();
+    if (tid == 0)
+    {
+        if (swc > 0)
+        {
+            startWarpQueue = atomicAdd(wc, swc);
+        }
+    }
+    if (tid == 1)
+    {
+        if (sbc > 0)
+            startBlockQueue = atomicAdd(bc, sbc);
+    }
+    __syncthreads();
+    for (int q = tid; q < swc; q+= BLOCK_DIM_X)
+        wq[startWarpQueue + q] = sharedWarpQ[q];
+
+    for (int q = tid; q < sbc; q+= BLOCK_DIM_X)
+        bq[startBlockQueue + q] = sharedBlockQ[q];
+}
+
+
+
+
+template <typename T, size_t BLOCK_DIM_X>
+__global__ void __launch_bounds__(BLOCK_DIM_X)
+kernel_binary_dequeue_arrays(uint64* count, //!< [inout] the count, caller should zero
+    graph::COOCSRGraph_d<T> g, const size_t numEdges, const size_t edgeStart,
+    T* wq, T* wc, T* bq, T* bc
+
+) {
+
+    size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
+    int tid = threadIdx.x;
+    int lx = threadIdx.x % 32;
+    uint64 threadCount = 0;
+
+    int i = gx + edgeStart;
+    if (i < numEdges)
+    {
+        T src = g.rowInd[i];
+        T dst = g.colInd[i];
+
+        T srcStart = g.rowPtr[src];
+        T srcStop = g.rowPtr[src + 1];
+
+        T dstStart = g.rowPtr[dst];
+        T dstStop = g.rowPtr[dst + 1];
+
+        T dstLen = dstStop - dstStart;
+        T srcLen = srcStop - srcStart;
+
+
+        if (srcLen > dstLen)
+        {
+            swap_ele(srcStart, dstStart);
+            swap_ele(srcStop, dstStop);
+            swap_ele(srcLen, dstLen);
+        }
+
+        if (srcLen < 8)
+        {
+            threadCount += graph::thread_sorted_count_binary<T>(&(g.colInd[srcStart]), srcLen,
+                &(g.colInd[dstStart]), dstLen);
+        }
+        
+    }
+    __syncthreads();
+    //Now :1 Warp
+    constexpr size_t warpsPerBlock = BLOCK_DIM_X / 32;
+    gx = gx / 32;
+    for (size_t i = gx; i < *wc; i += BLOCK_DIM_X * gridDim.x / 32) {
+
+        T edgeId = wq[i];
+
+        const T src = g.rowInd[edgeId];
+        const T dst = g.colInd[edgeId];
+
+        const T srcStart = g.rowPtr[src];
+        const T srcStop = g.rowPtr[src + 1];
+
+        const T dstStart = g.rowPtr[dst];
+        const T dstStop = g.rowPtr[dst + 1];
+
+        const T dstLen = dstStop - dstStart;
+        const T srcLen = srcStop - srcStart;
+
+        // FIXME: remove warp reduction from this function call
+        if (dstLen > srcLen) {
+            threadCount += graph::warp_sorted_count_binary<warpsPerBlock, T, false>(&(g.colInd[srcStart]), srcLen,
+                &(g.colInd[dstStart]), dstLen);
+        }
+        else {
+            threadCount += graph::warp_sorted_count_binary<warpsPerBlock, T, false>(&(g.colInd[dstStart]), dstLen,
+                &(g.colInd[srcStart]), srcLen);
+        }
+    }
+
+
+    //Now: 2 Block
+    uint64 blockCount = 0;
+    for (size_t i = blockIdx.x; i < *bc; i += gridDim.x)
+    {
+        T edgeId = bq[i];
+
+        const T src = g.rowInd[edgeId];
+        const T dst = g.colInd[edgeId];
+
+        const T srcStart = g.rowPtr[src];
+        const T srcStop = g.rowPtr[src + 1];
+
+        const T dstStart = g.rowPtr[dst];
+        const T dstStop = g.rowPtr[dst + 1];
+
+        const T dstLen = dstStop - dstStart;
+        const T srcLen = srcStop - srcStart;
+
+        // FIXME: remove warp reduction from this function call
+        if (dstLen > srcLen) {
+            threadCount += graph::block_sorted_count_binary<BLOCK_DIM_X, T, false>(&(g.colInd[srcStart]), srcLen,
+                &(g.colInd[dstStart]), dstLen);
+        }
+        else {
+            threadCount += graph::block_sorted_count_binary<BLOCK_DIM_X, T, false>(&(g.colInd[dstStart]), dstLen,
+                &(g.colInd[srcStart]), srcLen);
+        }
+    }
+
+
+
+   typedef cub::BlockReduce<uint64_t, BLOCK_DIM_X> BlockReduce;
+    __shared__ typename BlockReduce::TempStorage tempStorage;
+    uint64_t aggregate = BlockReduce(tempStorage).Sum(threadCount);
+    if (threadIdx.x == 0)
+        atomicAdd(count, aggregate);
+}
+
+
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_binary_thread_pe_arrays(int* count, //!< [inout] the count, caller should zero
@@ -55,17 +258,17 @@ kernel_binary_thread_pe_arrays(int* count, //!< [inout] the count, caller should
     uint64 threadCount = 0;
 
     for (size_t i = gx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x) {
-         T src = rowInd[i];
-         T dst = colInd[i];
+        T src = rowInd[i];
+        T dst = colInd[i];
 
-         T srcStart = rowPtr[src];
-         T srcStop = rowPtr[src + 1];
+        T srcStart = rowPtr[src];
+        T srcStop = rowPtr[src + 1];
 
-         T dstStart = rowPtr[dst];
-         T dstStop = rowPtr[dst + 1];
+        T dstStart = rowPtr[dst];
+        T dstStop = rowPtr[dst + 1];
 
-         T dstLen = dstStop - dstStart;
-         T srcLen = srcStop - srcStart;
+        T dstLen = dstStop - dstStart;
+        T srcLen = srcStop - srcStart;
 
         //printf("%u,%u,%u,%u,%u,%u,%u,%u\n", src, dst, srcStart, srcStop, dstStart, dstStop, srcLen, dstLen);
 
@@ -93,17 +296,17 @@ kernel_binary_thread_pe_eid_arrays(int* count, //!< [inout] the count, caller sh
     uint64 threadCount = 0;
 
     for (size_t i = gx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x) {
-         T src = rowInd[i];
-         T dst = colInd[i];
+        T src = rowInd[i];
+        T dst = colInd[i];
 
-         T srcStart = rowPtr_csr[src];
-         T srcStop = rowPtr_csr[src + 1];
+        T srcStart = rowPtr_csr[src];
+        T srcStop = rowPtr_csr[src + 1];
 
-         T dstStart = rowPtr_csr[dst];
-         T dstStop = rowPtr_csr[dst + 1];
+        T dstStart = rowPtr_csr[dst];
+        T dstStop = rowPtr_csr[dst + 1];
 
-         T dstLen = dstStop - dstStart;
-         T srcLen = srcStop - srcStart;
+        T dstLen = dstStop - dstStart;
+        T srcLen = srcStop - srcStart;
 
         //printf("%u,%u,%u,%u,%u,%u,%u,%u\n", src, dst, srcStart, srcStop, dstStart, dstStop, srcLen, dstLen);
 
@@ -115,15 +318,15 @@ kernel_binary_thread_pe_eid_arrays(int* count, //!< [inout] the count, caller sh
             swap_ele(srcLen, dstLen);
         }
 
-       
+
         threadCount += graph::thread_sorted_count_binary<T>(&(colIndex_csr[srcStart]), srcLen,
             &(colIndex_csr[dstStart]), dstLen);
 
         count[i + edgeStart] = threadCount;
-       
+
     }
 
-   
+
 }
 
 
@@ -197,13 +400,9 @@ __device__ inline void addNexBucket(T e1, T e2, T e3, bool* processed,
     }
 }
 
-
-
-
-
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
-kernel_binary_thread_pe_level_affected(
+kernel_binary_thread_pe_level_next(
     T* rowPtr_csr, T* colIndex_csr,
     T* rowInd, T* colInd, T* eid,
     const size_t numEdges,
@@ -240,6 +439,8 @@ kernel_binary_thread_pe_level_affected(
         }
 
         T lb = 0;
+
+        T count = 0;
         // cover entirety of A with warp
         for (size_t j = 0; j < srcLen; j++) {
             // one element of A per thread, just search for A into B
@@ -264,48 +465,6 @@ kernel_binary_thread_pe_level_affected(
 
     }
 }
-
-
-
-template <typename T, size_t BLOCK_DIM_X>
-__global__ void __launch_bounds__(BLOCK_DIM_X)
-kernel_binary_thread_pe_upto_arrays(int upto, bool* mask, int* count, //!< [inout] the count, caller should zero
-    T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, const size_t edgeStart) {
-
-    size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
-    uint64 threadCount = 0;
-
-    for (size_t i = gx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x) {
-        const T src = rowInd[i];
-        const T dst = colInd[i];
-
-        const T srcStart = rowPtr[src];
-        const T srcStop = rowPtr[src + 1];
-
-        const T dstStart = rowPtr[dst];
-        const T dstStop = rowPtr[dst + 1];
-
-        const T dstLen = dstStop - dstStart;
-        const T srcLen = srcStop - srcStart;
-
-        //printf("%u,%u,%u,%u,%u,%u,%u,%u\n", src, dst, srcStart, srcStop, dstStart, dstStop, srcLen, dstLen);
-
-        if (dstLen > srcLen) {
-            threadCount += graph::thread_sorted_count_upto_binary<T>(upto, mask, srcStart, dstStart, colInd, srcLen,
-                 dstLen);
-        }
-        else {
-            threadCount += graph::thread_sorted_count_upto_binary<T>(upto, mask, dstStart, srcStart, colInd, dstLen,
-                srcLen);
-        }
-
-
-        count[i + edgeStart] = threadCount;
-    }
-
-    
-}
-
 
 
 template <typename T, size_t BLOCK_DIM_X>
@@ -348,7 +507,7 @@ kernel_binary_thread_set_arrays(int* count, //!< [inout] the count, caller shoul
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_binary_warp_arrays(uint64* count,                //!< [inout] the count, caller should zero
-    T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, //!< the number of edges this kernel will count
+    graph::COOCSRGraph_d<T> g, const size_t numEdges, //!< the number of edges this kernel will count
     const size_t edgeStart                       //!< the edge this kernel will start counting at
 ) {
     constexpr size_t warpsPerBlock = BLOCK_DIM_X / 32;
@@ -358,26 +517,28 @@ kernel_binary_warp_arrays(uint64* count,                //!< [inout] the count, 
     uint64 warpCount = 0;
 
     for (size_t i = gwx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x / 32) {
-        const T src = rowInd[i];
-        const T dst = colInd[i];
+        const T src = g.rowInd[i];
+        const T dst = g.colInd[i];
 
-        const T srcStart = rowPtr[src];
-        const T srcStop = rowPtr[src + 1];
+        const T srcStart = g.rowPtr[src];
+        const T srcStop = g.rowPtr[src + 1];
 
-        const T dstStart = rowPtr[dst];
-        const T dstStop = rowPtr[dst + 1];
+        const T dstStart = g.rowPtr[dst];
+        const T dstStop = g.rowPtr[dst + 1];
 
         const T dstLen = dstStop - dstStart;
         const T srcLen = srcStop - srcStart;
 
+
+
         // FIXME: remove warp reduction from this function call
         if (dstLen > srcLen) {
-            warpCount += graph::warp_sorted_count_binary<warpsPerBlock>(&colInd[srcStart], srcLen,
-                &colInd[dstStart], dstLen);
+            warpCount += graph::warp_sorted_count_binary<warpsPerBlock>(&g.colInd[srcStart], srcLen,
+                &g.colInd[dstStart], dstLen);
         }
         else {
-            warpCount += graph::warp_sorted_count_binary<warpsPerBlock>(&colInd[dstStart], dstLen,
-                &colInd[srcStart], srcLen);
+            warpCount += graph::warp_sorted_count_binary<warpsPerBlock>(&g.colInd[dstStart], dstLen,
+                &g.colInd[srcStart], srcLen);
         }
     }
 
@@ -390,7 +551,7 @@ kernel_binary_warp_arrays(uint64* count,                //!< [inout] the count, 
 
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
-kernel_binary_warp_pe_arrays( int* count,                //!< [inout] the count, caller should zero
+kernel_binary_warp_pe_arrays(int* count,                //!< [inout] the count, caller should zero
     T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, //!< the number of edges this kernel will count
     const size_t edgeStart                       //!< the edge this kernel will start counting at
 ) {
@@ -441,72 +602,10 @@ kernel_binary_warp_pe_eid_arrays(int* count,                //!< [inout] the cou
     const size_t gwx = (BLOCK_DIM_X * blockIdx.x + threadIdx.x) / 32;
     uint64 warpCount = 0;
 
-    for (size_t i = gwx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x / 32) {
-         T src = rowInd[i];
-         T dst = colInd[i];
-
-         T srcStart = rowPtr_csr[src];
-         T srcStop = rowPtr_csr[src + 1];
-
-         T dstStart = rowPtr_csr[dst];
-         T dstStop = rowPtr_csr[dst + 1];
-
-         T dstLen = dstStop - dstStart;
-         T srcLen = srcStop - srcStart;
-
-
-        if (srcLen > dstLen)
-        {
-            swap_ele(srcStart, dstStart);
-            swap_ele(srcStop, dstStop);
-            swap_ele(srcLen, dstLen);
-        }
-
-        // FIXME: remove warp reduction from this function call
-        warpCount += graph::warp_sorted_count_binary<warpsPerBlock>(&colIndex_csr[srcStart], srcLen,
-            &colIndex_csr[dstStart], dstLen);
-
-        if (lx == 0)
-            count[i + edgeStart] = warpCount;
-    }
-    
-}
-
-template <typename T, size_t BLOCK_DIM_X>
-__global__ void __launch_bounds__(BLOCK_DIM_X)
-kernel_binary_warp_pe_level_affected(
-    T* rowPtr_csr, T* colIndex_csr,
-    T* rowInd, T* colInd, T* eid,
-    const size_t numEdges,
-    int level, bool* processed,
-    int* curr, bool* inCurr, int curr_cnt,
-    int* affected, int* inAffected, int& affected_cnt
-)
-{
-
-    constexpr size_t warpsPerBlock = BLOCK_DIM_X / 32;
-
-    const size_t lx = threadIdx.x % 32;
-    const int warpIdx = threadIdx.x / 32; // which warp in thread block
-    const size_t gwx = (BLOCK_DIM_X * blockIdx.x + threadIdx.x) / 32;
-
-
-    __shared__ T q[warpsPerBlock][3 * 2 * 32];
-    __shared__ int sizes[warpsPerBlock];
-    T* e1_arr = &q[warpIdx][0];
-    T* e2_arr = &q[warpIdx][1*32 *2];
-    T* e3_arr = &q[warpIdx][2*32 * 2];
-    int* size = &sizes[warpIdx];
-
-    if (lx == 0)
-        *size = 0;
-
-    for (size_t i = gwx; i < curr_cnt; i += BLOCK_DIM_X * gridDim.x / 32)
+    for (size_t i = gwx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x / 32)
     {
-        T edgeId = curr[i];
-
-        T src = rowInd[edgeId];
-        T dst = colInd[edgeId];
+        T src = rowInd[i];
+        T dst = colInd[i];
 
         T srcStart = rowPtr_csr[src];
         T srcStop = rowPtr_csr[src + 1];
@@ -518,82 +617,23 @@ kernel_binary_warp_pe_level_affected(
         T srcLen = srcStop - srcStart;
 
 
-        if (srcLen > dstLen)
-        {
-            swap_ele(srcStart, dstStart);
-            swap_ele(srcStop, dstStop);
-            swap_ele(srcLen, dstLen);
-        }
+        // if (srcLen > dstLen)
+        // {
+        //     swap_ele(srcStart, dstStart);
+        //     swap_ele(srcStop, dstStop);
+        //     swap_ele(srcLen, dstLen);
+        // }
 
         // FIXME: remove warp reduction from this function call
+        warpCount += graph::warp_sorted_count_binary<warpsPerBlock>(&colIndex_csr[dstStart], dstLen,
+            &colIndex_csr[srcStart], srcLen);
 
-        T lastIndex = 0;
-
-        // cover entirety of A with warp
-        for (size_t j = lx; j < (srcLen + 31)/32 * 32; j += 32)
-        {
-            __syncwarp();
-            if (*size >= 32)
-            {
-                for (int e = lx; e < *size; e += 32)
-                {
-                    T e1 = e1_arr[e];
-                    T e2 = e2_arr[e];
-                    T e3 = e3_arr[e];
-                    affectTri(e1, e2, e3, processed, inCurr, affected, inAffected, affected_cnt);
-                }
-
-                __syncwarp();
-                if (lx == 0)
-                    *size = 0;
-                __syncwarp();
-            }
-
-          
-
-            if (j < srcLen)
-            {
-                // one element of A per thread, just search for A into B
-                const T searchVal = colIndex_csr[srcStart + j];
-                const T leftValue = colIndex_csr[dstStart + lastIndex];
-
-                if (searchVal >= leftValue)
-                {
-
-                    const T lb = graph::binary_search<T>(&colIndex_csr[dstStart], lastIndex, dstLen, searchVal);
-                    if (lb < dstLen)
-                    {
-                        if (colIndex_csr[dstStart + lb] == searchVal)
-                        {
-                            T ap_e = eid[srcStart + j];
-                            T bp_e = eid[dstStart + lb];
-                            auto pos = atomicAdd(size, 1);
-                            e1_arr[pos] = edgeId;
-                            e2_arr[pos] = ap_e;
-                            e3_arr[pos] = bp_e;
-                        }
-                    }
-
-                    lastIndex = lb;
-                }
-            }
-
-            unsigned int writemask_deq = __activemask();
-            lastIndex = __shfl_sync(writemask_deq, lastIndex, 31);
-        }
-
-        __syncwarp();
-        for (int e = lx; e < *size; e += 32)
-        {
-            T e1 = e1_arr[e];
-            T e2 = e2_arr[e];
-            T e3 = e3_arr[e];
-            affectTri(e1, e2, e3, processed, inCurr, affected, inAffected, affected_cnt);
-        }
+        if (lx == 0)
+            count[i + edgeStart] = warpCount;
     }
 
-
 }
+
 
 
 
@@ -603,10 +643,10 @@ kernel_binary_warp_pe_level_next(
     T* rowPtr_csr, T* colIndex_csr,
     T* rowInd, T* colInd, T* eid,
     const size_t numEdges,
-    int level, bool* processed, int *edgeSupport,
+    int level, bool* processed, int* edgeSupport,
     int* curr, bool* inCurr, int curr_cnt,
     int* next, bool* inNext, int& next_cnt,
-    T *bucket, bool *inBucket, uint& bucket_cnt, int bucket_level_end_
+    T* bucket, bool* inBucket, uint& bucket_cnt, int bucket_level_end_
 )
 {
 
@@ -725,7 +765,153 @@ kernel_binary_warp_pe_level_next(
 
 }
 
+template <typename T, size_t BLOCK_DIM_X>
+__global__ void __launch_bounds__(BLOCK_DIM_X)
+kernel_binary_block_pe_level_next(
+    T* rowPtr_csr, T* colIndex_csr,
+    T* rowInd, T* colInd, T* eid,
+    const size_t numEdges,
+    int level, bool* processed, int* edgeSupport,
+    int* curr, bool* inCurr, int curr_cnt,
+    int* next, bool* inNext, int& next_cnt,
+    T* bucket, bool* inBucket, uint& bucket_cnt, int bucket_level_end_
+)
+{
 
+    auto tid = threadIdx.x;
+    const size_t gbx = (BLOCK_DIM_X * blockIdx.x + threadIdx.x) / BLOCK_DIM_X;
+
+
+    __shared__ T first[BLOCK_DIM_X];
+    __shared__ T q[3 * 2 * BLOCK_DIM_X];
+    __shared__ int size;
+    T* e1_arr = &q[0];
+    T* e2_arr = &q[1 * BLOCK_DIM_X * 2];
+    T* e3_arr = &q[2 * BLOCK_DIM_X * 2];
+
+    if (tid == 0)
+        size = 0;
+
+    __syncthreads();
+
+    for (size_t i = gbx; i < curr_cnt; i += gridDim.x)
+    {
+        T edgeId = curr[i];
+
+        T src = rowInd[edgeId];
+        T dst = colInd[edgeId];
+
+        T srcStart = rowPtr_csr[src];
+        T srcStop = rowPtr_csr[src + 1];
+
+        T dstStart = rowPtr_csr[dst];
+        T dstStop = rowPtr_csr[dst + 1];
+
+        T dstLen = dstStop - dstStart;
+        T srcLen = srcStop - srcStart;
+
+
+        // if (srcLen > dstLen)
+        // {
+        //     swap_ele(srcStart, dstStart);
+        //     swap_ele(srcStop, dstStop);
+        //     swap_ele(srcLen, dstLen);
+        // }
+
+        int startIndex = 0;
+        const T par = (srcLen + BLOCK_DIM_X - 1) / (BLOCK_DIM_X);
+        const T numElements = srcLen < BLOCK_DIM_X ? srcLen : (srcLen + par - 1) / par;
+
+        for (int i = 0; i < 1; i++)
+        {
+            int sharedIndex = startIndex + BLOCK_DIM_X * i + tid;
+            int realIndex = srcStart + (tid + i * BLOCK_DIM_X) * par;
+
+            first[sharedIndex] = (tid + BLOCK_DIM_X * i) <= numElements ? colIndex_csr[realIndex] : 0;
+        }
+
+        T lastIndex = 0;
+        T fl = 0;
+        // cover entirety of A with warp
+        for (size_t j = tid; j < (dstLen + BLOCK_DIM_X - 1) / BLOCK_DIM_X * BLOCK_DIM_X; j += BLOCK_DIM_X)
+        {
+            __syncthreads();
+            if (size >= BLOCK_DIM_X)
+            {
+                for (int e = tid; e < size; e += BLOCK_DIM_X)
+                {
+                    T e1 = e1_arr[e];
+                    T e2 = e2_arr[e];
+                    T e3 = e3_arr[e];
+                    addNexBucket(e1, e2, e3, processed, edgeSupport, level, inCurr, next, inNext, next_cnt,
+                        bucket, inBucket, bucket_cnt, bucket_level_end_);
+
+
+                }
+
+                __syncthreads();
+                if (tid == 0)
+                {
+                    size = 0;
+                }
+                __syncthreads();
+            }
+
+            if (j < dstLen)
+            {
+                // one element of A per thread, just search for A into B
+                const T searchVal = colIndex_csr[dstStart + j];
+                fl = graph::binary_search_left<T>(first, fl, numElements, searchVal);
+                lastIndex = par * fl;
+                T right = 0;
+
+                if (srcLen < BLOCK_DIM_X)
+                {
+                    if (searchVal == first[fl])
+                    {
+                        T ap_e = eid[dstStart + j];
+                        T bp_e = eid[srcStart + lastIndex];
+                        auto pos = atomicAdd(&size, 1);
+                        e1_arr[pos] = edgeId;
+                        e2_arr[pos] = ap_e;
+                        e3_arr[pos] = bp_e;
+                    }
+                    continue;
+                }
+                else if (fl == numElements - 1)
+                    right = srcLen;
+                else
+                    right = (fl + 1) * par;
+
+                const T lb = graph::binary_search_left<T>(&colIndex_csr[srcStart], lastIndex, right, searchVal);
+                if (lb < srcLen)
+                {
+                    if (colIndex_csr[srcStart + lb] == searchVal)
+                    {
+                        T ap_e = eid[dstStart + j];
+                        T bp_e = eid[srcStart + lb];
+                        auto pos = atomicAdd(&size, 1);
+                        e1_arr[pos] = edgeId;
+                        e2_arr[pos] = ap_e;
+                        e3_arr[pos] = bp_e;
+                    }
+                }
+            }
+        }
+
+        __syncthreads();
+        for (int e = tid; e < size; e += BLOCK_DIM_X)
+        {
+            T e1 = e1_arr[e];
+            T e2 = e2_arr[e];
+            T e3 = e3_arr[e];
+            addNexBucket(e1, e2, e3, processed, edgeSupport, level, inCurr, next, inNext, next_cnt,
+                bucket, inBucket, bucket_cnt, bucket_level_end_);
+        }
+    }
+
+
+}
 
 
 
@@ -760,10 +946,10 @@ kernel_binary_warp_pe_arrays(bool* mask, int* count,                //!< [inout]
             warpCount += graph::warp_sorted_count_mask_binary<warpsPerBlock>(mask, srcStart, dstStart, colInd, srcLen,
                 dstLen);
         }
-       /* else {
-            warpCount += graph::warp_sorted_count_mask_binary<warpsPerBlock>(mask, dstStart, srcStart, colInd, dstLen,
-                 srcLen);
-        }*/
+        /* else {
+             warpCount += graph::warp_sorted_count_mask_binary<warpsPerBlock>(mask, dstStart, srcStart, colInd, dstLen,
+                  srcLen);
+         }*/
     }
     if (lx == 0)
         count[gwx + edgeStart] = warpCount;
@@ -822,7 +1008,7 @@ kernel_binary_warp_set_arrays(T* count,
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_binary_block_arrays(uint64* count,                //!< [inout] the count, caller should zero
-    T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, //!< the number of edges this kernel will count
+    graph::COOCSRGraph_d<T> g, const size_t numEdges, //!< the number of edges this kernel will count
     const size_t edgeStart                       //!< the edge this kernel will start counting at
 ) {
     constexpr size_t warpsPerBlock = BLOCK_DIM_X / 32;
@@ -832,26 +1018,26 @@ kernel_binary_block_arrays(uint64* count,                //!< [inout] the count,
     uint64 blockCount = 0;
 
     for (size_t i = gwx + edgeStart; i < numEdges; i += gridDim.x) {
-        const T src = rowInd[i];
-        const T dst = colInd[i];
+        const T src = g.rowInd[i];
+        const T dst = g.colInd[i];
 
-        const T srcStart = rowPtr[src];
-        const T srcStop = rowPtr[src + 1];
+        const T srcStart = g.rowPtr[src];
+        const T srcStop = g.rowPtr[src + 1];
 
-        const T dstStart = rowPtr[dst];
-        const T dstStop = rowPtr[dst + 1];
+        const T dstStart = g.rowPtr[dst];
+        const T dstStop = g.rowPtr[dst + 1];
 
         const T dstLen = dstStop - dstStart;
         const T srcLen = srcStop - srcStart;
 
         // FIXME: remove warp reduction from this function call
         if (dstLen > srcLen) {
-            blockCount += graph::block_sorted_count_binary<BLOCK_DIM_X>(&colInd[srcStart], srcLen,
-                &colInd[dstStart], dstLen);
+            blockCount += graph::block_sorted_count_binary<BLOCK_DIM_X>(&g.colInd[srcStart], srcLen,
+                &g.colInd[dstStart], dstLen);
         }
         else {
-            blockCount += graph::block_sorted_count_binary<BLOCK_DIM_X>(&colInd[dstStart], dstLen,
-                &colInd[srcStart], srcLen);
+            blockCount += graph::block_sorted_count_binary<BLOCK_DIM_X>(&g.colInd[dstStart], dstLen,
+                &g.colInd[srcStart], srcLen);
         }
     }
 
@@ -865,7 +1051,7 @@ kernel_binary_block_arrays(uint64* count,                //!< [inout] the count,
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_binary_warp_shared_arrays(uint64* count,                //!< [inout] the count, caller should zero
-    T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, //!< the number of edges this kernel will count
+    graph::COOCSRGraph_d<T> g, const size_t numEdges, //!< the number of edges this kernel will count
     const size_t edgeStart                       //!< the edge this kernel will start counting at
 ) {
     constexpr size_t warpsPerBlock = BLOCK_DIM_X / 32;
@@ -875,33 +1061,33 @@ kernel_binary_warp_shared_arrays(uint64* count,                //!< [inout] the 
 
     const int num32perWarp = 4;
     const int pwMaxSize = num32perWarp * 32;
-   
+
     __shared__ T first[warpsPerBlock * pwMaxSize];
 
 
     uint64 warpCount = 0;
 
     for (size_t i = gwx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x / 32) {
-        T src = rowInd[i];
-        T dst = colInd[i];
+        T src = g.rowInd[i];
+        T dst = g.colInd[i];
 
-        T srcStart = rowPtr[src];
-        T srcStop = rowPtr[src + 1];
+        T srcStart = g.rowPtr[src];
+        T srcStop = g.rowPtr[src + 1];
 
-        T dstStart = rowPtr[dst];
-        T dstStop = rowPtr[dst + 1];
+        T dstStart = g.rowPtr[dst];
+        T dstStop = g.rowPtr[dst + 1];
 
         T dstLen = dstStop - dstStart;
         T srcLen = srcStop - srcStart;
 
 
-        if (srcLen >dstLen) 
+        if (srcLen > dstLen)
         {
             swap_ele(srcStart, dstStart);
             swap_ele(srcStop, dstStop);
             swap_ele(srcLen, dstLen);
         }
-        
+
         int startIndex = wx * pwMaxSize;
         const T par = (dstLen + pwMaxSize - 1) / (pwMaxSize);
         const T numElements = dstLen < pwMaxSize ? dstLen : (dstLen + par - 1) / par;
@@ -909,14 +1095,14 @@ kernel_binary_warp_shared_arrays(uint64* count,                //!< [inout] the 
         for (int i = 0; i < num32perWarp; i++)
         {
             int sharedIndex = startIndex + 32 * i + lx;
-            int realIndex = dstStart + (lx + i * 32 ) * par;
+            int realIndex = dstStart + (lx + i * 32) * par;
 
-            first[sharedIndex] = (lx + 32 * i) <= numElements ? colInd[realIndex] : 0;
+            first[sharedIndex] = (lx + 32 * i) <= numElements ? g.colInd[realIndex] : 0;
         }
 
-      
-        warpCount += graph::warp_sorted_count_binary_s<warpsPerBlock>(&colInd[srcStart], srcLen,
-                &colInd[dstStart], dstLen, &(first[startIndex]), par, numElements, pwMaxSize);
+
+        warpCount += graph::warp_sorted_count_binary_s<warpsPerBlock>(&g.colInd[srcStart], srcLen,
+            &g.colInd[dstStart], dstLen, &(first[startIndex]), par, numElements, pwMaxSize);
 
     }
 
@@ -929,7 +1115,7 @@ kernel_binary_warp_shared_arrays(uint64* count,                //!< [inout] the 
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_binary_warp_shared_colab_arrays(uint64* count,                //!< [inout] the count, caller should zero
-    T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, //!< the number of edges this kernel will count
+    graph::COOCSRGraph_d<T> g, const size_t numEdges, //!< the number of edges this kernel will count
     const size_t edgeStart                       //!< the edge this kernel will start counting at
 ) {
     constexpr size_t warpsPerBlock = BLOCK_DIM_X / 32;
@@ -947,14 +1133,14 @@ kernel_binary_warp_shared_colab_arrays(uint64* count,                //!< [inout
     uint64 warpCount = 0;
 
     for (size_t i = gwx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x / 32) {
-        T src = rowInd[i];
-        T dst = colInd[i];
+        T src = g.rowInd[i];
+        T dst = g.colInd[i];
 
-        T srcStart = rowPtr[src];
-        T srcStop = rowPtr[src + 1];
+        T srcStart = g.rowPtr[src];
+        T srcStop = g.rowPtr[src + 1];
 
-        T dstStart = rowPtr[dst];
-        T dstStop = rowPtr[dst + 1];
+        T dstStart = g.rowPtr[dst];
+        T dstStop = g.rowPtr[dst + 1];
 
         T dstLen = dstStop - dstStart;
         T srcLen = srcStop - srcStart;
@@ -975,7 +1161,7 @@ kernel_binary_warp_shared_colab_arrays(uint64* count,                //!< [inout
 
         bool colab = false;
         bool oddWarp = wx & 0x1 == 1;
-        if (!oddWarp  && comm[wx + 1] == dst)
+        if (!oddWarp && comm[wx + 1] == dst)
             colab = true;
         else if (oddWarp && comm[wx - 1] == dst)
             colab = true;
@@ -993,11 +1179,11 @@ kernel_binary_warp_shared_colab_arrays(uint64* count,                //!< [inout
         else if (colab && oddWarp)
         {
             colabMaxSize = 2 * pwMaxSize;
-            startIndex = (wx-1) * pwMaxSize;
+            startIndex = (wx - 1) * pwMaxSize;
         }
 
 
-        
+
         const T par = (dstLen + colabMaxSize - 1) / (colabMaxSize);
         const T numElements = dstLen < colabMaxSize ? dstLen : (dstLen + par - 1) / par;
 
@@ -1017,14 +1203,14 @@ kernel_binary_warp_shared_colab_arrays(uint64* count,                //!< [inout
             int sharedIndex = startIndex + oddWarp * pwMaxSize + 32 * i + lx;
             int realIndex = dstStart + (lx + i * 32 + oddWarp * pwMaxSize) * par;
 
-            first[sharedIndex] = (lx + 32*i + oddWarp * pwMaxSize) <= numElements ? colInd[realIndex] : 0;
+            first[sharedIndex] = (lx + 32 * i + oddWarp * pwMaxSize) <= numElements ? g.colInd[realIndex] : 0;
         }
-     
+
         __syncthreads();
 
 
-        warpCount += graph::warp_sorted_count_binary_s<warpsPerBlock>(&colInd[srcStart], srcLen,
-            &colInd[dstStart], dstLen, &(first[startIndex]), par, numElements, colabMaxSize);
+        warpCount += graph::warp_sorted_count_binary_s<warpsPerBlock>(&g.colInd[srcStart], srcLen,
+            &g.colInd[dstStart], dstLen, &(first[startIndex]), par, numElements, colabMaxSize);
 
     }
 
@@ -1046,13 +1232,10 @@ namespace graph {
         TcBinary(int dev, uint64 ne, uint64 nn, cudaStream_t stream = 0) :TcBase<T>(dev, ne, nn, stream)
         {}
 
-        void count_async(GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int limit = 0)
+        void count_async(COOCSRGraph_d<T>* g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int limit = 0)
         {
-            const size_t dimBlock = 128;
+            const size_t dimBlock = 256;
             const size_t ne = numEdges;
-            T* rp = rowPtr.gdata();
-            T* ri = rowInd.gdata();
-            T* ci = colInd.gdata();
 
             CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
 
@@ -1068,15 +1251,46 @@ namespace graph {
 
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
             if (kernelType == ProcessingElementEnum::Thread)
-                kernel_binary_thread_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, rp, ri, ci, ne, edgeOffset);
+                kernel_binary_thread_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, *g, ne, edgeOffset);
             else if (kernelType == ProcessingElementEnum::Warp)
-                kernel_binary_warp_arrays<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, rp, ri, ci, ne, edgeOffset);
+                kernel_binary_warp_arrays<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, *g, ne, edgeOffset);
             else if (kernelType == ProcessingElementEnum::WarpShared)
-                kernel_binary_warp_shared_arrays<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, rp, ri, ci, ne, edgeOffset);
+                kernel_binary_warp_shared_arrays<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, *g, ne, edgeOffset);
             else if (kernelType == ProcessingElementEnum::Test)
-                kernel_binary_warp_shared_colab_arrays<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, rp, ri, ci, ne, edgeOffset);
+                kernel_binary_warp_shared_colab_arrays<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, *g, ne, edgeOffset);
             else if (kernelType == ProcessingElementEnum::Block)
-                kernel_binary_block_arrays<T, dimBlock> << <dimGridBlock, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, rp, ri, ci, ne, edgeOffset);
+                kernel_binary_block_arrays<T, dimBlock> << <dimGridBlock, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, *g, ne, edgeOffset);
+            else if (kernelType == Queue)
+            {
+                GPUArray<T> warpQueue("Warp Queue", AllocationTypeEnum::unified, numEdges, 0);
+                GPUArray<T> blockQueue("Block Queue", AllocationTypeEnum::unified, numEdges, 0);
+                GPUArray<T> warpCount("Warp Count", AllocationTypeEnum::unified, 1, 0);
+                GPUArray<T> blockCount("block Count", AllocationTypeEnum::unified, 1, 0);
+
+              kernel_binary_enqueue_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, *g, ne, edgeOffset,
+                    
+                    warpQueue.gdata(), warpCount.gdata(), blockQueue.gdata(), blockCount.gdata()
+                    );
+
+
+                cudaDeviceSynchronize();
+
+                /*printf("Warp Queue = %u elements\n", warpCount.gdata()[0]);
+                printf("Block Queue = %u elements\n", blockCount.gdata()[0]);*/
+
+
+               kernel_binary_dequeue_arrays<T, dimBlock> << < (32 * warpCount.gdata()[0] + dimBlock -1) / (dimBlock) , dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, *g, ne, edgeOffset,
+
+                    warpQueue.gdata(), warpCount.gdata(), blockQueue.gdata(), blockCount.gdata()
+                    );
+
+
+                warpQueue.freeGPU();
+                warpCount.freeGPU();
+                blockQueue.freeGPU();
+                blockCount.freeGPU();
+
+            }
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
         }
 
@@ -1108,44 +1322,15 @@ namespace graph {
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
         }
 
-        void count_per_edge_upto_async(int upto, GPUArray<bool> mask, GPUArray<int>& tcpt, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+        void count_per_edge_eid_async(GPUArray<int>& tcpt, EidGraph_d<T> g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
-        
-            const size_t dimBlock = 512;
+            const size_t dimBlock = 32;
             const size_t ne = numEdges;
-            T* rp = rowPtr.gdata();
-            T* ri = rowInd.gdata();
-            T* ci = colInd.gdata();
+            T* rp_csr = g.rowPtr_csr;
+            T* ci_csr = g.colInd_csr;
 
-            // create one warp per edge
-            const int dimGrid = (numEdges - edgeOffset + (dimBlock)-1) / (dimBlock);
-            const int dimGridWarp = (32 * numEdges + (dimBlock)-1) / (dimBlock);
-            const int dimGridBlock = (dimBlock * numEdges + (dimBlock)-1) / (dimBlock);
-
-            assert(TcBase<T>::count_);
-            //Log(LogPriorityEnum::info, "device = %d, blocks = %d, threads = %d\n", TcBase<T>::dev_, dimGrid, dimBlock);
-            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
-
-
-
-            CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
-            if (kernelType == ProcessingElementEnum::Thread)
-                kernel_binary_thread_pe_upto_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (upto, mask.gdata(), tcpt.gdata(), rp, ri, ci, ne, edgeOffset);
-            else if (kernelType == ProcessingElementEnum::Warp)
-                kernel_binary_warp_pe_arrays<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (mask.gdata(), tcpt.gdata(), rp, ri, ci, ne, edgeOffset);
-            CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
-        }
-
-
-        void count_per_edge_eid_async(GPUArray<int>& tcpt, GPUArray<T> rowPtr_csr, GPUArray<T> colIndex_csr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
-        {
-            const size_t dimBlock = 512;
-            const size_t ne = numEdges;
-            T* rp_csr = rowPtr_csr.gdata();
-            T* ci_csr = colIndex_csr.gdata();
-
-            T* ri = rowInd.gdata();
-            T* ci = colInd.gdata();
+            T* ri = g.rowInd;
+            T* ci = g.colInd;
 
             CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
 
@@ -1167,71 +1352,62 @@ namespace graph {
 
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
             if (kernelType == ProcessingElementEnum::Thread)
-                kernel_binary_thread_pe_eid_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (tcpt.gdata(), rp_csr, ci_csr, ri, ci, ne, edgeOffset);
+                kernel_binary_thread_pe_eid_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (tcpt.gdata(), rp_csr, ci_csr, ri, ci, ne, edgeOffset);//need to be changed
             else if (kernelType == ProcessingElementEnum::Warp)
                 kernel_binary_warp_pe_eid_arrays<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (tcpt.gdata(), rp_csr, ci_csr, ri, ci, ne, edgeOffset);
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
         }
 
 
-        void affect_per_edge_level_q_async(
-            GPUArray<T> rowPtr_csr, GPUArray<T> colIndex_csr,
-            GPUArray<T> rowInd, GPUArray<T> colInd, GPUArray<T> eid, const size_t numEdges,
+        void count_moveNext_per_edge_async(
+            EidGraph_d<T>& g, const size_t numEdges,
             int level, GPUArray<bool> processed, GPUArray<int>& edgeSupport,
             GPUArray<int>& curr, GPUArray<bool> inCurr, int curr_cnt,
-            GPUArray<int>& affected, GPUArray<int>& inAffected, GPUArray<int>& affected_cnt, //next queue
             GPUArray<int>& next, GPUArray<bool>& inNext, GPUArray<int>& next_cnt, //next queue
             GPUArray <bool>& in_bucket_window_, GPUArray<uint>& bucket_buf_, GPUArray<uint>& window_bucket_buf_size_, int bucket_level_end_,
             const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
 
-            const size_t dimBlock = 32;
+            const size_t dimBlock = 256;
             const size_t ne = numEdges;
-            T* rp_csr = rowPtr_csr.gdata();
-            T* ci_csr = colIndex_csr.gdata();
+            T* rp_csr = g.rowPtr_csr;
+            T* ci_csr = g.colInd_csr;
 
-            T* ri = rowInd.gdata();
-            T* ci = colInd.gdata();
+            T* ri = g.rowInd;
+            T* ci = g.colInd;
 
             const int dimGrid = (curr_cnt - edgeOffset + (dimBlock)-1) / (dimBlock);
             const int dimGridWarp = (32 * curr_cnt + (dimBlock)-1) / (dimBlock);
-            const int dimGridBlock = (dimBlock * curr_cnt + (dimBlock)-1) / (dimBlock);
+            const int dimGridBlock = curr_cnt; //(dimBlock * curr_cnt + (dimBlock)-1) / (dimBlock);
             CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
 
 
-            CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
+            //CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
             if (kernelType == ProcessingElementEnum::Thread)
-                kernel_binary_thread_pe_level_affected<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (
-                    rp_csr, ci_csr, ri, ci, eid.gdata(), ne,
+                kernel_binary_thread_pe_level_next<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (
+                    rp_csr, ci_csr, ri, ci, g.eid, ne,
                     level, processed.gdata(), edgeSupport.gdata(),
                     curr.gdata(), inCurr.gdata(), curr_cnt,
                     next.gdata(), inNext.gdata(), *next_cnt.gdata(),
                     bucket_buf_.gdata(), in_bucket_window_.gdata(), *window_bucket_buf_size_.gdata(), bucket_level_end_);
             else if (kernelType == ProcessingElementEnum::Warp)
-                /*  kernel_binary_warp_pe_level_affected<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (
-                      rp_csr, ci_csr, ri, ci, eid.gdata(), ne,
-                      level, processed.gdata(),
-                      curr.gdata(), inCurr.gdata(), curr_cnt,
-                      affected.gdata(), inAffected.gdata(), *affected_cnt.gdata());*/
-
                 kernel_binary_warp_pe_level_next<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (
-                    rp_csr, ci_csr, ri, ci, eid.gdata(), ne,
+                    rp_csr, ci_csr, ri, ci, g.eid, ne,
                     level, processed.gdata(), edgeSupport.gdata(),
                     curr.gdata(), inCurr.gdata(), curr_cnt,
                     next.gdata(), inNext.gdata(), *next_cnt.gdata(),
                     bucket_buf_.gdata(), in_bucket_window_.gdata(), *window_bucket_buf_size_.gdata(), bucket_level_end_);
-
-
-
-            CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
-
-
+            else if (kernelType == ProcessingElementEnum::Block)
+                kernel_binary_block_pe_level_next<T, dimBlock> << <dimGridBlock, dimBlock, 0, TcBase<T>::stream_ >> > (
+                    rp_csr, ci_csr, ri, ci, g.eid, ne,
+                    level, processed.gdata(), edgeSupport.gdata(),
+                    curr.gdata(), inCurr.gdata(), curr_cnt,
+                    next.gdata(), inNext.gdata(), *next_cnt.gdata(),
+                    bucket_buf_.gdata(), in_bucket_window_.gdata(), *window_bucket_buf_size_.gdata(), bucket_level_end_);
           
 
+            //CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
         }
-
-
-
 
 
         void set_per_edge_async(GPUArray<int>& tcpt, GPUArray<T> triPointer, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)

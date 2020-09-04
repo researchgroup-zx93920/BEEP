@@ -2,28 +2,106 @@
 #include <cuda_runtime.h>
 #include "../include/utils_cuda.cuh"
 #include "../include/defs.cuh"
+#include "../include/GraphDataStructure.cuh"
 
 
+
+
+template <typename T, int BLOCK_DIM_X>
+__global__ void count_triangles_kernel(
+	uint64 *count,
+	T numNodes,
+	T numEdges,
+	T tilesPerDim,
+	T tileSize,
+	T capacity,
+	T* tileRowPtr,
+	T* rowInd,
+	T* colInd)
+{
+	unsigned int e = blockIdx.x * blockDim.x + threadIdx.x;
+	T numTriangles_e = 0;
+
+
+	if (e < numEdges) 
+	{
+		T* srcIdx = rowInd;
+		T* dstIdx = colInd;
+		T* tileSrcPtr = tileRowPtr;
+		T dst = dstIdx[e];
+		T src1 = srcIdx[e];
+		T src2 = dst;
+		T src1Tile = src1 / tileSize;
+		T src2Tile = src2 / tileSize;
+		unsigned int numTileSrcPtrs = tilesPerDim * tilesPerDim * tileSize + 1;
+
+		for (T xTile = blockIdx.y; xTile < tilesPerDim; xTile += gridDim.y)
+		{
+			T tileSrc1 = (src1Tile * tilesPerDim + xTile) * tileSize + src1 % tileSize;
+			T tileSrc2 = (src2Tile * tilesPerDim + xTile) * tileSize + src2 % tileSize;
+			T e1 = tileSrcPtr[tileSrc1];
+			T e2 = tileSrcPtr[tileSrc2];
+			T end1 = tileSrcPtr[tileSrc1 + 1];
+			T end2 = tileSrcPtr[tileSrc2 + 1];
+			while (e1 < end1 && e2 < end2)
+			{
+				T dst1 = dstIdx[e1];
+				T dst2 = dstIdx[e2];
+
+				if (dst1 < dst2) {
+					++e1;
+				}
+				else if (dst1 > dst2) {
+					++e2;
+				}
+				else 
+				{ // dst1 == dst2
+					++e1;
+					++e2;
+					++numTriangles_e;
+
+				}
+			}
+		}
+		/*if (gridDim.y == 1) {
+			info.numTriangles[e] = numTriangles_e;
+		}
+		else {
+			atomicAdd(&info.numTriangles[e], numTriangles_e);
+		}*/
+
+
+	}
+
+	typedef cub::BlockReduce<uint64, BLOCK_DIM_X> BlockReduce;
+	__shared__ typename BlockReduce::TempStorage tempStorage;
+	uint64 aggregate = BlockReduce(tempStorage).Sum(numTriangles_e);
+
+	// Add to total count
+	if (0 == threadIdx.x) {
+		atomicAdd(count, aggregate);
+	}
+}
 
 
 template<typename T>
-__global__ void init(T numEdges, T* asc, bool* keep, T *rowPtr, T* rowInd, T* colInd)
+__global__ void init(graph::COOCSRGraph_d<T> g, T* asc, bool* keep)
 {
 	uint tx = threadIdx.x;
 	uint bx = blockIdx.x;
 
 	uint ptx = tx + bx * blockDim.x;
 
-	for (uint i = ptx; i < numEdges; i += blockDim.x * gridDim.x)
+	for (uint i = ptx; i < g.numEdges; i += blockDim.x * gridDim.x)
 	{
-		const T src = rowInd[i];
-		const T dst = colInd[i];
+		const T src = g.rowInd[i];
+		const T dst = g.colInd[i];
 
-		const T srcStart = rowPtr[src];
-		const T srcStop = rowPtr[src + 1];
+		const T srcStart = g.rowPtr[src];
+		const T srcStop = g.rowPtr[src + 1];
 
-		const T dstStart = rowPtr[dst];
-		const T dstStop = rowPtr[dst + 1];
+		const T dstStart = g.rowPtr[dst];
+		const T dstStop = g.rowPtr[dst + 1];
 
 		const T dstLen = dstStop - dstStart;
 		const T srcLen = srcStop - srcStart;
@@ -49,10 +127,7 @@ __global__ void InitEid(T numEdges, T* asc, T*newSrc, T* newDst, T* rowPtr, T* c
 		T srcnode = newSrc[i];
 		T dstnode = newDst[i];
 
-		if (srcnode >= dstnode)
-		{
-			printf("Wrong \n");
-		}
+		
 
 		T olduV = asc[i];
 		T oldUv = getEdgeId(rowPtr, colInd, dstnode, srcnode); //Search for it please !!
@@ -66,16 +141,16 @@ __global__ void InitEid(T numEdges, T* asc, T*newSrc, T* newDst, T* rowPtr, T* c
 
 
 template<typename T>
-uint64 CountTriangles(std::string message, graph::TcBase<T>* tc, graph::GPUArray<T> rowPtr, graph::GPUArray<T> rowInd, graph::GPUArray<T> colInd,
-	const size_t numEdges, const size_t numRows, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+uint64 CountTriangles(std::string message, graph::TcBase<T>* tc, graph::COOCSRGraph_d<T> *g,
+	const size_t numEdges_upto, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
 {
-	tc->count_async(rowPtr, rowInd, colInd, numEdges, edgeOffset, kernelType, increasing);
+	tc->count_async(g, numEdges_upto, edgeOffset, kernelType, increasing);
 	tc->sync();
 	CUDA_RUNTIME(cudaGetLastError());
 	printf("TC = %u\n", tc->count());
 	double secs = tc->kernel_time();
 	int dev = tc->device();
-	Log(LogPriorityEnum::info, "Kernel [%s]: gpu %d kernel time %f (%f teps) \n", message.c_str(), dev, secs, numEdges / secs);
+	Log(LogPriorityEnum::info, "Kernel [%s]: gpu %d kernel time %f (%f teps) \n", message.c_str(), dev, secs, (numEdges_upto-edgeOffset) / secs);
 	cudaDeviceSynchronize();
 
 

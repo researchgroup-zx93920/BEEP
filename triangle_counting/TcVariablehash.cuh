@@ -274,12 +274,6 @@ namespace graph {
         }
 
 
-        uint64 count_sync(uint32_t* rowPtr, uint32_t* rowInd, uint32_t* colInd, const size_t edgeOffset, const size_t n) {
-            TcBase<T>::count_async(rowPtr, rowInd, colInd, edgeOffset, n);
-            TcBase<T>::sync();
-            return TcBase<T>::count();
-        }
-
 
     };
 

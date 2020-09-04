@@ -31,6 +31,9 @@
 
 #include "../include/main_support.cuh"
 
+
+
+
 using namespace std;
 
 
@@ -56,8 +59,9 @@ using namespace std;
 int main(int argc, char** argv) {
 
 	//CUDA_RUNTIME(cudaDeviceReset());
-
+	
 	printf("\033[0m");
+	printf("Welcome ---------------------\n");
 	graph::MtB_Writer mwriter;
 	auto fileSrc = argv[1];
 	auto fileDst = argv[2];
@@ -118,15 +122,66 @@ int main(int argc, char** argv) {
 	graph::CSRCOO<uint> csrcoo = graph::CSRCOO<uint>::from_edgelist(edges, full);
 	int n = csrcoo.num_rows();
 	int m = csrcoo.nnz();
-	//2) Move to GPU
-	graph::GPUArray<uint> sl("source", AllocationTypeEnum::cpuonly),
-		dl("destination", AllocationTypeEnum::cpuonly),
-		rowPtr("row pointer", AllocationTypeEnum::cpuonly);
+	graph::COOCSRGraph<uint> g;
+	g.capacity = m;
+	g.numEdges = m;
+	g.numNodes = n;
+	
+	g.rowPtr = new graph::GPUArray<uint>("Row pointer", AllocationTypeEnum::cpuonly);
+	g.rowInd= new graph::GPUArray<uint>("Src Index", AllocationTypeEnum::cpuonly);
+	g.colInd = new graph::GPUArray<uint>("Dst Index", AllocationTypeEnum::cpuonly);
+	g.rowPtr->cdata() = csrcoo.row_ptr();
+	g.rowInd->cdata() = csrcoo.row_ind();
+	g.colInd->cdata() = csrcoo.col_ind();
 
-	//2.a CPU
-	sl.cdata() = csrcoo.row_ind();
-	dl.cdata() = csrcoo.col_ind();
-	rowPtr.cdata() = csrcoo.row_ptr();
+
+
+	//No try the ew storage format
+	graph::TiledCOOCSRGraph<uint>* gtiled;
+	coo2tiledcoocsrOnDevice(g, 32,  gtiled, unified);
+	//graph::TiledCOOCSRGraph_d<uint> gtiled_d;
+	/*gtiled_d.numNodes = gtiled->numNodes;
+	gtiled_d.numNodes = gtiled->numNodes;
+	gtiled_d.tileSize = gtiled->tileSize;
+	gtiled_d.tilesPerDim = gtiled->tilesPerDim;
+	gtiled_d.tileRowPtr = gtiled->tileRowPtr->gdata();
+	gtiled_d.rowInd = gtiled->rowInd->gdata();
+	gtiled_d.colInd = gtiled->colInd->gdata();*/
+
+	unsigned int numThreadsPerBlock = 128;
+	unsigned int numBlocks = (m + numThreadsPerBlock - 1) / numThreadsPerBlock;
+
+	graph::GPUArray<uint64> c("C", unified, 1, 0);
+	c.setSingle(0, 0, true);
+
+
+	cudaDeviceSynchronize();
+
+	cudaEvent_t kernelStart_;
+	cudaEvent_t kernelStop_;
+	CUDA_RUNTIME(cudaEventCreate(&kernelStart_));
+	CUDA_RUNTIME(cudaEventCreate(&kernelStop_));
+
+
+	CUDA_RUNTIME(cudaEventRecord(kernelStart_));
+	count_triangles_kernel<uint, 128> << < dim3(numBlocks, 1), numThreadsPerBlock >> > (c.gdata(), gtiled->numNodes,
+	gtiled->numEdges,
+	gtiled->tilesPerDim,
+	gtiled->tileSize,
+	gtiled->capacity,
+	gtiled->tileRowPtr->gdata(),
+	gtiled->rowInd->gdata(),
+	gtiled->colInd->gdata());
+	CUDA_RUNTIME(cudaEventRecord(kernelStop_));
+
+	float ms;
+	CUDA_RUNTIME(cudaEventSynchronize(kernelStop_));
+	CUDA_RUNTIME(cudaEventElapsedTime(&ms, kernelStart_, kernelStop_));
+	cudaDeviceSynchronize();
+	cudaGetLastError();
+
+	printf("Tiled Count = %lu, time = %f\n", *c.gdata(), ms/1e3);
+	
 
 #ifdef Matrix_Stats
 	MatrixStats(csrcoo.nnz(), csrcoo.num_rows(), csrcoo.num_rows(), rowPtr.cdata(), dl.cdata());
@@ -136,40 +191,39 @@ int main(int argc, char** argv) {
 
 #ifdef TC
 
-	sl.switch_to_gpu(0, csrcoo.nnz());
-	dl.switch_to_gpu(0, csrcoo.nnz());
-	rowPtr.switch_to_gpu(0, csrcoo.num_rows() + 1);
+	graph::COOCSRGraph_d<uint>* gd;
+	to_csrcoo_device(g, gd); //got to device !!
 	cudaDeviceSynchronize();
 
 	//Count traingles binary-search: Thread or Warp
 	uint step = csrcoo.nnz();
 	uint st = 0;
 	uint ee = st + step; // st + 2;
-	graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(0, ee, csrcoo.num_rows());
-	graph::TcBase<uint>* tcNV = new graph::TcNvgraph<uint>(0, ee, csrcoo.num_rows());
-	graph::TcBase<uint>* tcBE = new graph::TcBinaryEncoding<uint>(0, ee, csrcoo.num_rows());
-	graph::TcBase<uint>* tc = new graph::TcSerial<uint>(0, ee, csrcoo.num_rows());
+	graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(0, ee, n);
+	graph::TcBase<uint>* tcNV = new graph::TcNvgraph<uint>(0, ee, n);
+	graph::TcBase<uint>* tcBE = new graph::TcBinaryEncoding<uint>(0, ee, n);
+	graph::TcBase<uint>* tc = new graph::TcSerial<uint>(0, ee, n);
 
 	const int divideConstant = 1;
-	graph::TcBase<uint>* tchash = new graph::TcVariableHash<uint>(0, ee, csrcoo.num_rows());
+	graph::TcBase<uint>* tchash = new graph::TcVariableHash<uint>(0, ee, n);
 
 
 	graph::BmpGpu<uint> bmp;
-	bmp.InitBMP(csrcoo.num_rows(), csrcoo.nnz(), rowPtr, dl);
-	bmp.bmpConstruct(csrcoo.num_rows(), csrcoo.nnz(), rowPtr, dl);
+	bmp.InitBMP(*gd);
+	bmp.bmpConstruct(*gd);
 
 	while (st < csrcoo.nnz())
 	{
 		printf("Edge = %d\n", st);
 		if (step == 1)
 		{
-			uint s = sl.cdata()[st];
-			uint d = dl.cdata()[st];
-			const uint srcStart = rowPtr.cdata()[s];
-			const uint srcStop = rowPtr.cdata()[s + 1];
+			uint s = g.rowInd->cdata()[st];
+			uint d = g.colInd->cdata()[st];
+			const uint srcStart = g.rowPtr->cdata()[s];
+			const uint srcStop = g.rowPtr->cdata()[s + 1];
 
-			const uint dstStart = rowPtr.cdata()[d];
-			const uint dstStop = rowPtr.cdata()[d + 1];
+			const uint dstStart = g.rowPtr->cdata()[d];
+			const uint dstStop = g.rowPtr->cdata()[d + 1];
 
 			const uint dstLen = dstStop - dstStart;
 			const uint srcLen = srcStop - srcStart;
@@ -178,30 +232,33 @@ int main(int argc, char** argv) {
 
 			printf("Source col ind = {");
 			for (int i = 0; i < srcLen; i++)
-				printf("%u,", dl.cdata()[srcStart + i]);
+				printf("%u,", g.colInd->cdata()[srcStart + i]);
 			printf("}\n");
 
 
 			printf("Destenation col ind = {");
 			for (int i = 0; i < dstLen; i++)
-				printf("%u,", dl.cdata()[dstStart + i]);
+				printf("%u,", g.colInd->cdata()[dstStart + i]);
 			printf("}\n");
 		}
 
-		//uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Thread, 0);
+		//bmp.Count(*gd);
+
+		//uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, gd, ee, st, ProcessingElementEnum::Thread, 0);
 
 		//CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
-		uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
-		uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::WarpShared, 0);
-		uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Test, 0);
+		uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, gd, ee, st, ProcessingElementEnum::Warp, 0);
+		uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee,  st, ProcessingElementEnum::WarpShared, 0);
+		uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", tcb,gd,  ee,  st, ProcessingElementEnum::Test, 0);
 
-		uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", tcb, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Queue, 0);
+		//
 
-		uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", tcBE, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
-		CountTrianglesHash<uint>(divideConstant, tchash, rowPtr, sl, dl, ee, csrcoo.num_rows(), 0, ProcessingElementEnum::Warp, 0);
-		bmp.Count(csrcoo.num_rows(), rowPtr, dl);
-
-		CountTriangles<uint>("NVGRAPH", tcNV, rowPtr, sl, dl, ee, csrcoo.num_rows());
+		////uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", tcBE, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
+		////CountTrianglesHash<uint>(divideConstant, tchash, rowPtr, sl, dl, ee, csrcoo.num_rows(), 0, ProcessingElementEnum::Warp, 0);
+	
+		uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
+	
+		//CountTriangles<uint>("NVGRAPH", tcNV, rowPtr, sl, dl, ee, csrcoo.num_rows());
 
 		/*if (serialTc != binaryTc)
 			break;*/
@@ -232,26 +289,25 @@ int main(int argc, char** argv) {
 #ifdef KTRUSS
 
 	//The problem with Ktruss that it physically changes the graph structure due to stream compaction !!
-	sl.switch_to_unified(0, csrcoo.nnz());
-	dl.switch_to_unified(0, csrcoo.nnz());
-	rowPtr.switch_to_unified(0, csrcoo.num_rows() + 1);
+	graph::COOCSRGraph_d<uint>* gd;
+	to_csrcoo_device(g, gd); //got to device !!
 
-//#define VLDB2020
+#define VLDB2020
 #ifdef VLDB2020
 	//We need unified to do stream compaction
 	graph::GPUArray<int> output("KT Output", AllocationTypeEnum::unified, m / 2, 0);
 	graph::BmpGpu<uint> bmp;
-	bmp.getEidAndEdgeList(n, m, rowPtr, dl);// EID creation
-	bmp.InitBMP(csrcoo.num_rows(), csrcoo.nnz(), rowPtr, dl);
-	bmp.bmpConstruct(csrcoo.num_rows(), csrcoo.nnz(), rowPtr, dl);
+	bmp.getEidAndEdgeList(g);// CPU
+	bmp.InitBMP(*gd);
+	bmp.bmpConstruct(*gd);
 	
-	double tc_time = bmp.Count_Set(n, m, rowPtr, dl);
+	double tc_time = bmp.Count_Set(*gd);
 	#define MAX_LEVEL  (20000)
 	auto level_start_pos = (uint*)calloc(MAX_LEVEL, sizeof(uint));
 
 	graph::PKT_cuda(
 		n, m,
-		rowPtr, dl, bmp,
+		*g.rowPtr, *g.colInd, bmp,
 		nullptr,
 		100, output, level_start_pos, 0, tc_time);
 #endif
@@ -268,38 +324,45 @@ int main(int argc, char** argv) {
 	Log(info, "MOHA %d ktruss (%f teps)", mohatruss.count(), m / time);*/
 #endif	
 
-#define OUR_NEW_KTRUSS
+//#define OUR_NEW_KTRUSS
 #ifdef OUR_NEW_KTRUSS
 	//We need to change the graph representation
-	graph::GPUArray<uint> rowIndex("Half Row Index", AllocationTypeEnum::unified, csrcoo.nnz() / 2, 0),
-		colIndex("Half Col Index", AllocationTypeEnum::unified, csrcoo.nnz() / 2, 0),
-		EID("EID", AllocationTypeEnum::unified, csrcoo.nnz(), 0),
-		asc("ASC temp", AllocationTypeEnum::unified, csrcoo.nnz(), 0);
+	graph::GPUArray<uint> rowIndex("Half Row Index", AllocationTypeEnum::unified, m / 2, 0),
+		colIndex("Half Col Index", AllocationTypeEnum::unified, m / 2, 0),
+		EID("EID", AllocationTypeEnum::unified, m, 0),
+		asc("ASC temp", AllocationTypeEnum::unified, m, 0);
 
 	Timer t_init;
-	graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, csrcoo.nnz(), 0);
+	graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, 0);
 
 
-	execKernel(init, (csrcoo.nnz() + 512 - 1) / 512, 512, false, (uint)csrcoo.nnz(), asc.gdata(), keep.gdata(), rowPtr.gdata(), sl.gdata(), dl.gdata());
+	execKernel(init, (m + 512 - 1) / 512, 512, false, *gd, asc.gdata(), keep.gdata());
 
 	CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m);
-	CUBSelect(sl.gdata(), rowIndex.gdata(), keep.gdata(), m);
-	uint newNumEdges = CUBSelect(dl.gdata(), colIndex.gdata(), keep.gdata(), m);
-	execKernel(InitEid, (newNumEdges + 512 - 1) / 512, 512, false, newNumEdges, asc.gdata(), rowIndex.gdata(), colIndex.gdata(), rowPtr.gdata(), dl.gdata(), EID.gdata());
+	CUBSelect(gd->rowInd, rowIndex.gdata(), keep.gdata(), m);
+	uint newNumEdges = CUBSelect(gd->colInd, colIndex.gdata(), keep.gdata(), m);
+	execKernel(InitEid, (newNumEdges + 512 - 1) / 512, 512, false, newNumEdges, asc.gdata(), rowIndex.gdata(), colIndex.gdata(), gd->rowPtr, gd->colInd, EID.gdata());
 	asc.freeGPU();
 	keep.freeGPU();
 	double time_init = t_init.elapsed();
 	Log(info, "Create EID (by malmasri): %f s", time_init);
 
+	graph::EidGraph_d<uint> geid;
+	geid.numNodes = n;
+	geid.capacity = m;
+	geid.numEdges = m;
+	geid.rowPtr_csr = gd->rowPtr;
+	geid.colInd_csr = gd->colInd;
+	geid.rowInd = rowIndex.gdata();
+	geid.colInd = colIndex.gdata();
+	geid.eid = EID.gdata();
 
 	graph::SingleGPU_KtrussMod<uint> mohatrussM(0);
 
 	Timer t;
-	graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(0, csrcoo.nnz(), csrcoo.num_rows(), mohatrussM.stream());
+	graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(0, m, n, mohatrussM.stream());
 
-	mohatrussM.findKtrussIncremental_sync(3, 1000, tcb, rowPtr,  dl,
-		rowIndex, colIndex, EID,
-		n, m, nullptr, nullptr, 0, 0);
+	mohatrussM.findKtrussIncremental_sync(3, 1000, tcb, geid, nullptr, nullptr, 0, 0);
 	mohatrussM.sync();
 	double time = t.elapsed();
 
@@ -441,9 +504,7 @@ int main(int argc, char** argv) {
 
 #endif
 	printf("Done ....\n");
-	sl.freeGPU();
-	dl.freeGPU();
-	rowPtr.freeGPU();
+	
 	//A.freeGPU();
 	//B.freeGPU();
 	return 0;

@@ -54,14 +54,19 @@ namespace graph
 			}
 		}
 
+		void initialize(std::string s, AllocationTypeEnum at)
+		{
+			name = s;
+			_at = at;
+		}
+
 		GPUArray(std::string s, AllocationTypeEnum at, uint size, int devId)
 		{
 			initialize(s, at, size, devId);
 		}
 
 		GPUArray(std::string s, AllocationTypeEnum at) {
-			name = s;
-			_at = at;
+			initialize(s, at);
 		}
 
 		void freeGPU()

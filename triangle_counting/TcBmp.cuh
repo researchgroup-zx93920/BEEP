@@ -12,6 +12,7 @@
 #include <cuda_runtime.h>
 #include <cuda_runtime.h>
 #include "../include/CGArray.cuh"
+#include "../include/GraphDataStructure.cuh"
 
 
 
@@ -560,9 +561,12 @@ namespace graph {
         GPUArray<Edge> idToEdge;
         GPUArray<T> eid;
 
-        void getEidAndEdgeList(int n,int m,graph::GPUArray<T> rowPtr, graph::GPUArray<T> colInd) 
+        void getEidAndEdgeList(graph::COOCSRGraph<T> g) 
         {
             Timer t;
+
+            T m = g.numEdges;
+            T n = g.numNodes;
 
             //Allocate space for eid -- size g->m
             idToEdge.initialize("id2edge", AllocationTypeEnum::unified, m / 2, 0);
@@ -580,10 +584,10 @@ namespace graph {
                 #pragma omp for
                 // Histogram (Count).
                 for (int u = 0; u < n; u++) {
-                    upper_tri_start[u] = (rowPtr.cdata()[u + 1] - rowPtr.cdata()[u] > 256)
-                        ? GallopingSearch<T>(colInd.cdata(), rowPtr.cdata()[u], rowPtr.cdata()[u + 1], u)
-                        : LinearSearch<T>(colInd.cdata(), rowPtr.cdata()[u], rowPtr.cdata()[u + 1], u);
-                    num_edges_copy[u + 1] = rowPtr.cdata()[u + 1] - upper_tri_start[u];
+                    upper_tri_start[u] = (g.rowPtr->cdata()[u + 1] - g.rowPtr->cdata()[u] > 256)
+                        ? GallopingSearch<T>(g.colInd->cdata(), g.rowPtr->cdata()[u], g.rowPtr->cdata()[u + 1], u)
+                        : LinearSearch<T>(g.colInd->cdata(), g.rowPtr->cdata()[u], g.rowPtr->cdata()[u + 1], u);
+                    num_edges_copy[u + 1] = g.rowPtr->cdata()[u + 1] - upper_tri_start[u];
                 }
                 // Scan.
                 #pragma omp single
@@ -600,11 +604,11 @@ namespace graph {
                 #pragma omp for schedule(dynamic, 6000)
                 for (int j = 0; j < m; j++) 
                 {
-                    u = FindSrc(n,m,rowPtr,colInd, u, j);
+                    u = FindSrc(n,m,*g.rowPtr,*g.colInd, u, j);
                     if (j < upper_tri_start[u]) 
                     {
-                        auto v = colInd.cdata()[j];
-                        auto offset = BranchFreeBinarySearch<T>(colInd.cdata(), rowPtr.cdata()[v], rowPtr.cdata()[v + 1], u);
+                        auto v = g.colInd->cdata()[j];
+                        auto offset = BranchFreeBinarySearch<T>(g.colInd->cdata(), g.rowPtr->cdata()[v], g.rowPtr->cdata()[v + 1], u);
                         auto eids = num_edges_copy[v] + (offset - upper_tri_start[v]);
                         eid.cdata()[j] = eids;
                         idToEdge.cdata()[eids] = std::make_pair(v, u);
@@ -632,14 +636,12 @@ namespace graph {
         }
 
         void InitBMP(
-            int n,
-            int m,
-            graph::GPUArray<T> rowPtr,
-            graph::GPUArray<T> colInd
+           graph::COOCSRGraph_d<T> g
         )
         {
             Timer t;
-
+            T m = g.numEdges;
+            T n = g.numNodes;
             CUDAContext context;
             const uint32_t elem_bits = sizeof(uint32_t) * 8; /*#bits in a bitmap element*/
             const uint32_t num_words_bmp = (n + elem_bits - 1) / elem_bits;
@@ -665,14 +667,12 @@ namespace graph {
   
 
 
-        void bmpConstruct(int n,
-            int m,
-            graph::GPUArray<T> rowPtr,
-            graph::GPUArray<T> colInd)
+        void bmpConstruct(graph::COOCSRGraph_d<T> g)
         {
             
             Timer t;
-
+            T m = g.numEdges;
+            T n = g.numNodes;
             bmp_offs.initialize("bmp offset", AllocationTypeEnum::unified, n + 1, 0);
             edge_sup_gpu.initialize("Edge Support", AllocationTypeEnum::unified, m/2, 0);
 
@@ -681,7 +681,7 @@ namespace graph {
                 (n + 127) / 128, 
                 128,
                 true, 
-                rowPtr.gdata(), colInd.gdata(), n, bmp_offs.gdata());
+                g.rowPtr, g.colInd, n, bmp_offs.gdata());
 
 
             auto word_num = CUBScanExclusive<T, T>(bmp_offs.gdata(), bmp_offs.gdata(), n);
@@ -693,7 +693,7 @@ namespace graph {
                 cudaMalloc(&bmp_word_indices, sizeof(T) * word_num);
                 cudaMalloc(&bmp_words, sizeof(T) * word_num);
                 execKernel(construct_bsr_content_per_thread, (n + 127) / 128, 128,
-                    true, rowPtr.gdata(), colInd.gdata(), n, bmp_offs.gdata(), bmp_word_indices, bmp_words);
+                    true, g.rowPtr, g.colInd, n, bmp_offs.gdata(), bmp_word_indices, bmp_words);
 
 
                 //Log(LogPriorityEnum::info, "Finish BSR construction");
@@ -709,13 +709,13 @@ namespace graph {
         }
 
 
-        double Count_Set(int n,
-            int m,
-            graph::GPUArray<T> rowPtr,
-            graph::GPUArray<T> colInd)
+        double Count_Set(graph::COOCSRGraph_d<T> g)
         {
             
             Timer t;
+            T m = g.numEdges;
+            T n = g.numNodes;
+
             const T elem_bits = sizeof(T) * 8; /*#bits in a bitmap element*/
             const T num_words_bmp = (n + elem_bits - 1) / elem_bits;
             const T num_word_bmp_idx = (num_words_bmp + BITMAP_SCALE - 1) / BITMAP_SCALE;
@@ -734,7 +734,7 @@ namespace graph {
             
             execKernelDynamicAllocation(bmp_bsr_kernel, n, t_dimension,
                 num_word_bmp_idx * sizeof(uint32_t), false,
-                rowPtr.gdata(), colInd.gdata(), d_bitmaps.gdata(), d_bitmap_states.gdata(),
+                g.rowPtr, g.colInd, d_bitmaps.gdata(), d_bitmap_states.gdata(),
                 d_vertex_count.gdata(), conc_blocks_per_SM, eid.gdata(), edge_sup_gpu.gdata(),
                 bmp_offs.gdata(), bmp_word_indices, bmp_words);
             CUDA_RUNTIME(cudaDeviceSynchronize());    // ensure the kernel execution finish
@@ -752,11 +752,12 @@ namespace graph {
         }
 
 
-        double Count(int n,
-            graph::GPUArray<T> rowPtr,
-            graph::GPUArray<T> colInd)
+        double Count(graph::COOCSRGraph_d<T> g)
         {
 
+
+            T m = g.numEdges;
+            T n = g.numNodes;
             uint64* count;
             CUDA_RUNTIME(cudaMallocManaged(&count, sizeof(*count)));
             uint32_t block_size = 512; // maximally reduce the number of bitmaps
@@ -772,7 +773,7 @@ namespace graph {
             Log<false>(LogPriorityEnum::info, "Kernel Time= ");
             execKernelDynamicAllocation(bmp_bsr_count_kernel, n, t_dimension,
                 num_word_bmp_idx * sizeof(uint32_t), true,
-                rowPtr.gdata(), colInd.gdata(), d_bitmaps.gdata(), d_bitmap_states.gdata(),
+                g.rowPtr, g.colInd, d_bitmaps.gdata(), d_bitmap_states.gdata(),
                 d_vertex_count.gdata(), conc_blocks_per_SM, eid.gdata(),
                 bmp_offs.gdata(), bmp_word_indices, bmp_words, count);
             CUDA_RUNTIME(cudaDeviceSynchronize());    // ensure the kernel execution finished

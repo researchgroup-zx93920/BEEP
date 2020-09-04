@@ -318,10 +318,9 @@ namespace graph
 
 
 		void PrepareQueues(int n, int m,
-			GPUArray<int>& next_cnt, GPUArray<int>& affected_cnt,
+			GPUArray<int>& next_cnt, 
 			GPUArray<int>& curr, GPUArray<bool>& inCurr, 
 			GPUArray<int>& next, GPUArray<bool>& inNext,
-			GPUArray<int>& affected, GPUArray<int>& inAffected,
 			GPUArray<uint>& identity_arr_asc)
 		{
 			// 1st: CSR/Eid/Edge List. --> not necessary
@@ -331,17 +330,14 @@ namespace graph
 			// 3rd: Queue Related.
 
 			next_cnt.initialize("Next Count", AllocationTypeEnum::unified, 1, 0);
-			affected_cnt.initialize("Affected Count", AllocationTypeEnum::unified, 1, 0);
+			
 
 			curr.initialize("Curr", AllocationTypeEnum::unified, edge_num, 0);
 			next.initialize("Next", AllocationTypeEnum::unified, edge_num, 0);
-			affected.initialize("Next", AllocationTypeEnum::unified, edge_num, 0);
-
 
 
 			inCurr.initialize("In Curr", AllocationTypeEnum::unified, edge_num, 0);
 			inNext.initialize("in Next", AllocationTypeEnum::unified, edge_num, 0);
-			inAffected.initialize("in Affected", AllocationTypeEnum::unified, edge_num, 0);
 
 			// 4th: Keep the edge offset mapping.
 			long grid_size = (edge_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
@@ -356,7 +352,7 @@ namespace graph
 
 		void StreamComapction(
 			int n, T& m,
-			GPUArray<T>& rowPtr, GPUArray<T>& colInd, GPUArray<T>& eid,
+			T*& rowPtr, T*& colInd, T*& eid,
 			GPUArray<bool> processed,
 			 GPUArray<bool>& edge_deleted,
 			GPUArray <T>& new_offset, GPUArray<T>& new_eid, GPUArray <T>& new_adj,
@@ -377,31 +373,30 @@ namespace graph
 			int block_size = 128;
 			// Attention: new_offset gets the histogram.
 			execKernel(warp_detect_deleted_edges, GRID_SIZE, block_size, true,
-				rowPtr.gdata(), n, eid.gdata(), processed.gdata(), new_offset.gdata(), edge_deleted.gdata());
+				rowPtr, n, eid, processed.gdata(), new_offset.gdata(), edge_deleted.gdata());
 
 			uint total = CUBScanExclusive<uint, uint>(new_offset.gdata(), new_offset.gdata(), n);
 			new_offset.gdata()[n] = total;
 			//assert(total == new_edge_num * 2);
 			cudaDeviceSynchronize();
 
-			swap_ele(rowPtr.gdata(), new_offset.gdata());
+			swap_ele(rowPtr, new_offset.gdata());
 
 			/*new adj and eid construction*/
-			CUBSelect(colInd.gdata(), new_adj.gdata(), edge_deleted.gdata(), old_edge_num * 2);
-			CUBSelect(eid.gdata(), new_eid.gdata(), edge_deleted.gdata(), old_edge_num * 2);
+			CUBSelect(colInd, new_adj.gdata(), edge_deleted.gdata(), old_edge_num * 2);
+			CUBSelect(eid, new_eid.gdata(), edge_deleted.gdata(), old_edge_num * 2);
 
-			swap_ele(colInd.gdata(), new_adj.gdata());
-			colInd.N = new_adj.N;
+			swap_ele(colInd, new_adj.gdata());
+		
 
-			swap_ele(eid.gdata(), new_eid.gdata());
-			eid.N = new_eid.N;
+			swap_ele(eid, new_eid.gdata());
+			
 
 			m = new_edge_num * 2;
 		}
 
 	public:
 		BCTYPE* gKeep, * gPrevKeep;
-		bool* gAffected;
 		uint* gReveresed;
 
 	public:
@@ -409,7 +404,6 @@ namespace graph
 			CUDA_RUNTIME(cudaSetDevice(dev_));
 			CUDA_RUNTIME(cudaStreamCreate(&stream_));
 			CUDA_RUNTIME(cudaMallocManaged(&gnumdeleted, 2 * sizeof(*gnumdeleted)));
-			CUDA_RUNTIME(cudaMallocManaged(&gnumaffected, sizeof(uint)));
 			CUDA_RUNTIME(cudaMallocManaged(&selectedOut, sizeof(*selectedOut)));
 
 
@@ -418,27 +412,23 @@ namespace graph
 			//zero_async<1>(gnumaffected, dev_, stream_); // zero on the device that will do the counting
 
 			gnumdeleted[0] = 0;
-			gnumaffected[0] = 0;
-
+		
 			CUDA_RUNTIME(cudaStreamSynchronize(stream_));
 		}
 
 		SingleGPU_KtrussMod() : SingleGPU_KtrussMod(0) {}
 
-		void findKtrussIncremental_async(int kmin, int kmax, TcBase<T>* tcCounter, GPUArray<T> rowPtr_csr, GPUArray<T> colIndex_csr,
-			GPUArray<T> rowInd, GPUArray<T> colInd, GPUArray<T> eid,
-			const size_t numNodes, T totalNumEdges, int* reverseIndex, EncodeDataType* bitMap, const size_t nodeOffset = 0, const size_t edgeOffset = 0)
+		void findKtrussIncremental_async(int kmin, int kmax, TcBase<T>* tcCounter, EidGraph_d<T>& g,
+			int* reverseIndex, EncodeDataType* bitMap, const size_t nodeOffset = 0, const size_t edgeOffset = 0)
 		{
 
-			T numEdges = totalNumEdges / 2;
+			T numEdges = g.numEdges / 2;
 
 			CUDA_RUNTIME(cudaSetDevice(dev_));
 			constexpr int dimBlock = 32; //For edges and nodes
 
 			bool firstTry = true;
 			GPUArray<BCTYPE> processed; //isDeleted
-			GPUArray<T> reversed, srcKP, destKP;
-
 
 			int level = 0;
 			int bucket_level_end_ = level;
@@ -456,28 +446,18 @@ namespace graph
 			GPUArray<T> identity_arr_asc;
 			GPUArray<int> curr, next, affected;
 			GPUArray<bool> inCurr, inNext;
-			GPUArray<int> inAffedted;
-			GPUArray<int> curr_cnt_ptr, next_cnt, affected_cnt;
+			GPUArray<int> curr_cnt_ptr, next_cnt;
 			curr_cnt_ptr.initialize("Curr Count Pointer", AllocationTypeEnum::unified, 1, 0);
 			int*& curr_cnt = curr_cnt_ptr.gdata();
-			PrepareQueues(numNodes, numEdges, next_cnt, affected_cnt, curr, inCurr, next, inNext, affected, inAffedted, identity_arr_asc);
+			PrepareQueues(g.numNodes, numEdges, next_cnt, curr, inCurr, next, inNext, identity_arr_asc);
 			
-
 			GPUArray <uint> newRowPtr;
 			GPUArray <uint> newColIndex_csr;
 			GPUArray <uint> new_eid;
-			GPUArray<int> new_EdgeSupport;
 			GPUArray <uint> new_edge_offset_origin;
-			GPUArray<bool> reversed_processed;     // Auxiliaries for shrinking graphs.
-			GPUArray<bool> edge_deleted;           // Auxiliaries for shrinking graphs.
-			GPUArray <uint> scanned_processed;     // Auxiliaries for shrinking graphs.
-
 		
-
-			//Only Pointers: no inialization
-			GPUArray<T> ptrSrc, ptrDst;
-			GPUArray<T> s1, d1, s2, d2;
-
+			GPUArray<bool> edge_deleted;           // Auxiliaries for shrinking graphs.
+		
 
 			processed.initialize("is Deleted (Processed)", unified, numEdges, 0);
 			edgeSupport.initialize("Edge Support", unified, numEdges, 0);
@@ -493,18 +473,9 @@ namespace graph
 			float percDeleted_l = 0.0;
 			bool startIndirect = false;
 
-			s1.gdata() = rowInd.gdata();
-			d1 = colInd;
-
-			s2.gdata() = srcKP.gdata();
-			d2 = destKP;
-
-			ptrSrc.gdata() = s1.gdata();
-			ptrDst.gdata() = d1.gdata();
-
-
-			tcCounter->count_per_edge_eid_async(edgeSupport, rowPtr_csr, colIndex_csr, ptrSrc, ptrDst, numEdges, 0, Warp);
+			tcCounter->count_per_edge_eid_async(edgeSupport, g, numEdges, 0, Warp);
 			tcCounter->sync();
+
 			int todo = numEdges;
 			const auto todo_original = numEdges;
 			while (todo > 0)
@@ -519,14 +490,13 @@ namespace graph
 
 				while (*curr_cnt > 0)
 				{
-
+				
 					todo -= *curr_cnt;
 					if (0 == todo) {
 						break;
 					}
 
 					*next_cnt.gdata() = 0;
-					*affected_cnt.gdata() = 0;
 					if (level == 0) 
 					{
 						auto block_size = 256;
@@ -535,17 +505,15 @@ namespace graph
 					}
 					else
 					{
-						tcCounter->affect_per_edge_level_q_async(rowPtr_csr, colIndex_csr,
-							ptrSrc, ptrDst, eid, numEdges,
+						tcCounter->count_moveNext_per_edge_async(g, numEdges,
 							level, processed,
 							edgeSupport,
 							curr, inCurr, *curr_cnt,
-							affected, inAffedted, affected_cnt, 
 							next, inNext, next_cnt,
 							in_bucket_window_, bucket_buf_, window_bucket_buf_size_, bucket_level_end_,
-							0,Block);
+							0,Warp);
 						tcCounter->sync();
-				
+
 						auto block_size = 256;
 						auto grid_size = (*curr_cnt + block_size - 1) / block_size;
 						execKernel(update_processed, grid_size, block_size, false, curr.gdata(), *curr_cnt, inCurr.gdata(), processed.gdata());
@@ -567,7 +535,7 @@ namespace graph
 				{
 					if (percDeleted_l > 0.2)
 					{
-						StreamComapction(numNodes, totalNumEdges, rowPtr_csr, colIndex_csr, eid, processed,
+						StreamComapction(g.numNodes, g.numEdges, g.rowPtr_csr, g.colInd_csr, g.eid, processed,
 							edge_deleted,
 							newRowPtr, new_eid, newColIndex_csr,
 							numEdges, todo);
@@ -582,11 +550,9 @@ namespace graph
 			k = level + 1;
 		}
 
-		uint findKtrussIncremental_sync(int kmin, int kmax, TcBase<T> *tcCounter, GPUArray<T> rowPtr_csr, GPUArray<T> colIndex_csr,
-			GPUArray<T> rowInd, GPUArray<T> colInd, GPUArray<T> eid,
-			const size_t numNodes, const size_t numEdges, int* reverseIndex, EncodeDataType* bitMap, const size_t nodeOffset = 0, const size_t edgeOffset = 0)
+		uint findKtrussIncremental_sync(int kmin, int kmax, TcBase<T> *tcCounter, EidGraph_d<T>& g, int* reverseIndex, EncodeDataType* bitMap, const size_t nodeOffset = 0, const size_t edgeOffset = 0)
 		{
-			findKtrussIncremental_async(kmin, kmax, tcCounter, rowPtr_csr, colIndex_csr, rowInd, colInd, eid, numNodes, numEdges, reverseIndex, bitMap, nodeOffset, edgeOffset);
+			findKtrussIncremental_async(kmin, kmax, tcCounter, g, reverseIndex, bitMap, nodeOffset, edgeOffset);
 			sync();
 			return count();
 		}

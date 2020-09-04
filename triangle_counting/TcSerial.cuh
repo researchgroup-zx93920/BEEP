@@ -8,21 +8,21 @@
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_serial_arrays(uint64* count, //!< [inout] the count, caller should zero
-    T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, const size_t edgeStart, int increasing = 0) {
+    graph::COOCSRGraph_d<T> g, const size_t numEdges, const size_t edgeStart, int increasing = 0) {
 
     size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
     uint64 threadCount = 0;
 
     for (size_t i = gx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x) {
-        const T src = rowInd[i];
-        const T dst = colInd[i];
+        const T src = g.rowInd[i];
+        const T dst = g.colInd[i];
 
         //assert(src < dst);
 
-        const T* srcBegin = &colInd[rowPtr[src]];
-        const T* srcEnd = &colInd[rowPtr[src + 1]];
-        const T* dstBegin = &colInd[rowPtr[dst]];
-        const T* dstEnd = &colInd[rowPtr[dst + 1]];
+        const T* srcBegin = &(g.colInd[g.rowPtr[src]]);
+        const T* srcEnd = &(g.colInd[g.rowPtr[src + 1]]);
+        const T* dstBegin = &(g.colInd[g.rowPtr[dst]]);
+        const T* dstEnd = &(g.colInd[g.rowPtr[dst + 1]]);
 
         T min = increasing == 0 ? 0 : dst;
 
@@ -454,13 +454,10 @@ namespace graph {
         TcSerial(int dev, uint64 ne, uint64 nn, cudaStream_t stream = 0) :TcBase<T>(dev, ne, nn, stream)
         {}
 
-        void count_async(GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+        void count_async(COOCSRGraph_d<T>* g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
             const size_t dimBlock = 512;
             const size_t ne = numEdges;
-            T* rp = rowPtr.gdata();
-            T* ri = rowInd.gdata();
-            T* ci = colInd.gdata();
 
             CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
 
@@ -476,9 +473,9 @@ namespace graph {
 
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
             if(kernelType == Thread)
-                kernel_serial_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, rp, ri, ci, ne, edgeOffset);
+                kernel_serial_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, *g, ne, edgeOffset);
             else if(kernelType == Warp)
-                kernel_serial_warp_arrays<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, rp, ri, ci, ne, edgeOffset);
+                kernel_serial_warp_arrays<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, g->rowPtr, g->rowInd, g->colInd, ne, edgeOffset);
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
         }
 
@@ -509,15 +506,15 @@ namespace graph {
         }
 
 
-        void count_per_edge_eid_async(GPUArray<int>& tcpt, GPUArray<T> rowPtr_csr, GPUArray<T> colIndex_csr,  GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+        void count_per_edge_eid_async(GPUArray<int>& tcpt, EidGraph_d<T> g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
             const size_t dimBlock = 512;
             const size_t ne = numEdges;
-            T* rp_csr = rowPtr_csr.gdata();
-            T* ci_csr = colIndex_csr.gdata();
+            T* rp_csr = g.rowPtr_csr;
+            T* ci_csr = g.colInd_csr;
 
-            T* ri = rowInd.gdata();
-            T* ci = colInd.gdata();
+            T* ri = g.rowInd;
+            T* ci = g.colInd;
 
             CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
 
@@ -535,85 +532,6 @@ namespace graph {
             kernel_serial_pe_eid_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (tcpt.gdata(), rp_csr, ci_csr, ri, ci, ne, edgeOffset, increasing);
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
         }
-
-
-        void count_per_edge_upto_async(int upto, GPUArray<bool> mask, GPUArray<int>& tcpt, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
-        {
-            const size_t dimBlock = 32;
-            const size_t ne = numEdges;
-            T* rp = rowPtr.gdata();
-            T* ri = rowInd.gdata();
-            T* ci = colInd.gdata();
-            const int dimGrid = (numEdges - edgeOffset + (dimBlock)-1) / (dimBlock);
-            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
-            kernel_serial_pe_upto_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (upto, mask.gdata(), tcpt.gdata(), rp, ri, ci, ne, edgeOffset, increasing);
-        }
-
-
-        void count_per_edge_level_q_async(
-            GPUArray<int>& tcpt,
-            GPUArray<T> rowPtr_csr, GPUArray<T> colIndex_csr,
-            GPUArray<T> rowInd, GPUArray<T> colInd, GPUArray<T> eid, const size_t numEdges,
-            int level, GPUArray<bool> processed, GPUArray<int>& edgeSupport,
-            GPUArray<int>& curr, int curr_cnt,
-            GPUArray<int>& affected, GPUArray<int>& inAffected, GPUArray<int>& affected_cnt, //next queue
-            GPUArray<int>& next, GPUArray<int>& inNext, GPUArray<int>& next_cnt, //next queue
-            GPUArray <bool>& in_bucket_window_, GPUArray<uint>& bucket_buf_, GPUArray<uint>& window_bucket_buf_size_, int bucket_level_end_,
-            const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
-        {
-        
-            const size_t dimBlock = 32;
-            const size_t ne = numEdges;
-            T* rp_csr = rowPtr_csr.gdata();
-            T* ci_csr = colIndex_csr.gdata();
-
-            T* ri = rowInd.gdata();
-            T* ci = colInd.gdata();
-            const int dimGrid = (numEdges - edgeOffset + (dimBlock)-1) / (dimBlock);
-            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
-
-
-            //process affetced
-           kernel_serial_pe_level_q_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (
-                tcpt.gdata(), 
-                rp_csr,ci_csr,  ri, ci, eid.gdata(), ne,
-                level, processed.gdata(),
-                affected.gdata(), *affected_cnt.gdata());
-
-        }
-
-
-        void affect_per_edge_level_q_async(
-            GPUArray<T> rowPtr_csr, GPUArray<T> colIndex_csr,
-            GPUArray<T> rowInd, GPUArray<T> colInd, GPUArray<T> eid, const size_t numEdges,
-            int level, GPUArray<bool> processed,
-            GPUArray<int>& curr, GPUArray<bool> inCurr, int curr_cnt,
-            GPUArray<int>& affected, GPUArray<int>& inAffected, GPUArray<int>& affected_cnt, //next queue
-            GPUArray<uint> reversed,
-            const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
-        {
-        
-            const size_t dimBlock = 32;
-            const size_t ne = numEdges;
-            T* rp_csr = rowPtr_csr.gdata();
-            T* ci_csr = colIndex_csr.gdata();
-
-            T* ri = rowInd.gdata();
-            T* ci = colInd.gdata();
-
-            const int dimGrid = (curr_cnt - edgeOffset + (dimBlock)-1) / (dimBlock);
-            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
-            
-            kernel_serial_pe_level_affected<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (
-                rp_csr, ci_csr, ri, ci, eid.gdata(), ne,
-                level, processed.gdata(),
-                curr.gdata(), inCurr.gdata(), curr_cnt,
-                affected.gdata(), inAffected.gdata(), *affected_cnt.gdata(), reversed.gdata());
-        
-        }
-
-
-
 
         void set_per_edge_async(GPUArray<T>& tcs, GPUArray<T> triPointer, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
