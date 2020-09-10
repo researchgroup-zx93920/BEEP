@@ -51,7 +51,7 @@ __inline__ __device__
 void process_support(
     uint32_t edge_idx, int level, int* EdgeSupport,
     int* next, int* next_cnt, bool* inNext,
-    InBucketWinType* in_bucket_window_, uint* bucket_buf_, uint32_t* window_bucket_buf_size_,
+    InBucketWinType* in_bucket_window_, int* bucket_buf_, int* window_bucket_buf_size_,
     int bucket_level_end_) 
 {
     auto cur = atomicSub(&EdgeSupport[edge_idx], 1);
@@ -85,7 +85,7 @@ void PeelTriangle(
     int level, bool* inCurr,
     int* next, int* next_cnt, bool* inNext, //next_cnt is init as 0
     int* EdgeSupport, bool* processed,
-    InBucketWinType* in_bucket_window_, uint* bucket_buf_, uint32_t* window_bucket_buf_size_,
+    InBucketWinType* in_bucket_window_, int* bucket_buf_, int* window_bucket_buf_size_,
     int bucket_level_end_,
     uint e1_idx, uint e2_idx, uint e3_idx) 
 {
@@ -143,7 +143,7 @@ void sub_level_process(
     int* next, int* next_cnt, bool* inNext, //next_cnt is init as 0
     uint* offsets, uint* adj, uint* eid,
     Edge* edge_list, int* EdgeSupport, bool* processed,
-    InBucketWinType* in_bucket_window_, uint* bucket_buf_, uint32_t* window_bucket_buf_size_,
+    InBucketWinType* in_bucket_window_, int* bucket_buf_, int* window_bucket_buf_size_,
     int bucket_level_end_) {
 
     auto tid = threadIdx.x;
@@ -397,7 +397,7 @@ void filter_window(int* edge_sup, int count, InBucketWinType* in_bucket, int low
 }
 
 __global__
-void filter_with_random_append(uint* bucket_buf, int count, int* EdgeSupport, bool* in_curr, int* curr, int* curr_cnt,
+void filter_with_random_append(int* bucket_buf, int count, int* EdgeSupport, bool* in_curr, int* curr, int* curr_cnt,
     int ref) 
 {
     auto gtid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -418,7 +418,7 @@ __global__ void bmp_bsr_update_next(uint32_t* d_offsets, uint32_t* d_dsts,
     int val_size_bitmap, int val_size_bitmap_indexes,
     uint32_t* bmp_offs, uint* bmp_word_indices, uint* bmp_words,
     int level, int* next, int* next_cnt, bool* inNext,
-    InBucketWinType* in_bucket_window_, uint* bucket_buf_, uint32_t* window_bucket_buf_size_,
+    InBucketWinType* in_bucket_window_, int* bucket_buf_, int* window_bucket_buf_size_,
     int bucket_level_end_
 ) {
     const uint32_t tid = threadIdx.x + blockDim.x * threadIdx.y; /*threads in a warp are with continuous threadIdx.x */

@@ -31,6 +31,10 @@
 
 #include "../include/main_support.cuh"
 
+#include "../kcore/kcore.cuh"
+
+
+
 
 
 
@@ -50,10 +54,11 @@ using namespace std;
 
 #define NORMAL
 //#define Matrix_Stats
-#define TC
+//#define TC
 //#define Cross_Decomposition
 //#define TriListConstruct
 //#define KTRUSS
+#define KCORE
 
 
 int main(int argc, char** argv) {
@@ -65,6 +70,10 @@ int main(int argc, char** argv) {
 	graph::MtB_Writer mwriter;
 	auto fileSrc = argv[1];
 	auto fileDst = argv[2];
+
+
+	
+
 
 #ifdef MARKET_BEL
 	mwriter.write_market_bel<uint, int>(fileSrc, fileDst, false);
@@ -95,7 +104,7 @@ int main(int argc, char** argv) {
 
 	char* matr;
 
-	matr = "D:\\graphs\\graph500-scale21-ef16_adj.bel";
+	matr = "D:\\graphs\\amazon0601_adj.bel";
 
 #ifndef __VS__
 	if (argc > 1)
@@ -164,7 +173,7 @@ int main(int argc, char** argv) {
 
 
 	CUDA_RUNTIME(cudaEventRecord(kernelStart_));
-	count_triangles_kernel<uint, 128> << < dim3(numBlocks, 1), numThreadsPerBlock >> > (c.gdata(), gtiled->numNodes,
+	count_triangles_kernel<uint, 128> << < dim3(numBlocks, 2), numThreadsPerBlock >> > (c.gdata(), gtiled->numNodes,
 	gtiled->numEdges,
 	gtiled->tilesPerDim,
 	gtiled->tileSize,
@@ -286,13 +295,29 @@ int main(int argc, char** argv) {
 	graph::GPUArray<uint> triIndex("tri Index", cpuonly);
 	ConstructTriList(triIndex, triPointer, tcb, rowPtr, sl, dl, csrcoo.nnz(), csrcoo.num_rows(), 0, ProcessingElementEnum::Warp);
 #endif
+
+
+#ifdef KCORE
+	graph::COOCSRGraph_d<uint>* gd;
+	to_csrcoo_device(g, gd); //got to device !!
+	cudaDeviceSynchronize();
+
+	graph::SingleGPU_Kcore<uint> mohacore(0);
+	Timer t;
+	mohacore.findKcoreIncremental_async(3, 1000, *gd, 0, 0);
+	mohacore.sync();
+	double time = t.elapsed();
+	Log(info, "count time %f s", time);
+	Log(info, "MOHA %d kcore (%f teps)", mohacore.count(), m / time);
+#endif
+
 #ifdef KTRUSS
 
 	//The problem with Ktruss that it physically changes the graph structure due to stream compaction !!
 	graph::COOCSRGraph_d<uint>* gd;
 	to_csrcoo_device(g, gd); //got to device !!
 
-#define VLDB2020
+//#define VLDB2020
 #ifdef VLDB2020
 	//We need unified to do stream compaction
 	graph::GPUArray<int> output("KT Output", AllocationTypeEnum::unified, m / 2, 0);
@@ -324,7 +349,7 @@ int main(int argc, char** argv) {
 	Log(info, "MOHA %d ktruss (%f teps)", mohatruss.count(), m / time);*/
 #endif	
 
-//#define OUR_NEW_KTRUSS
+#define OUR_NEW_KTRUSS
 #ifdef OUR_NEW_KTRUSS
 	//We need to change the graph representation
 	graph::GPUArray<uint> rowIndex("Half Row Index", AllocationTypeEnum::unified, m / 2, 0),
@@ -370,6 +395,9 @@ int main(int argc, char** argv) {
 	Log(info, "count time %f s", time);
 	Log(info, "MOHA %d ktruss (%f teps)", mohatrussM.count(), m / time);
 #endif
+
+
+
 
 #pragma region MyRegion
 	////Hashing tests
@@ -502,7 +530,15 @@ int main(int argc, char** argv) {
 #pragma endregion
 
 
+
+
+
+
 #endif
+
+
+
+
 	printf("Done ....\n");
 	
 	//A.freeGPU();

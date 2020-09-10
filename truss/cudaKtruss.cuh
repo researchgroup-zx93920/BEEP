@@ -30,7 +30,7 @@ namespace graph
         GPUArray<int> EdgeSupport, uint32_t edge_num, int level,
         GPUArray<int>& curr, GPUArray<bool>& inCurr, int& curr_cnt, GPUArray<uint> asc,
         GPUArray<InBucketWinType>& in_bucket_window_,
-        GPUArray<uint>& bucket_buf_, uint* &window_bucket_buf_size_, int& bucket_level_end_) 
+        GPUArray<int>& bucket_buf_, int* &window_bucket_buf_size_, int& bucket_level_end_) 
     {
         static bool is_first = true;
         if (is_first) 
@@ -106,8 +106,8 @@ namespace graph
         GPUArray <uint> new_edge_offset_origin, GPUArray<Edge> new_edge_list,
         GPUArray<bool> reversed_processed, GPUArray<bool>& edge_deleted, GPUArray<uint> scanned_processed,
         GPUArray <uint>& new_offset, GPUArray<uint>& new_eid, GPUArray <uint>& new_adj,
-        GPUArray <InBucketWinType> in_bucket_window_, GPUArray <uint> bucket_buf_, GPUArray <uint> new_bucket_buf_,
-        uint32_t& window_bucket_buf_size_,
+        GPUArray <InBucketWinType> in_bucket_window_, GPUArray <int> bucket_buf_, GPUArray <int> new_bucket_buf_,
+        int& window_bucket_buf_size_,
         uint32_t old_edge_num, uint32_t new_edge_num)
     {
         static bool shrink_first_time = true;
@@ -267,7 +267,7 @@ namespace graph
         GPUArray<int>& curr, int curr_cnt, GPUArray<bool>& inCurr,
         GPUArray<int>& next, GPUArray<int>& next_cnt, GPUArray<bool>& inNext,
         GPUArray<bool>& processed, GPUArray<InBucketWinType>& in_bucket_window_,
-        GPUArray <uint>& bucket_buf_, uint32_t* window_bucket_buf_size_, int& bucket_level_end_) 
+        GPUArray <int>& bucket_buf_, int* window_bucket_buf_size_, int& bucket_level_end_) 
     {
         int block_size = 256;
         static int shared_memory_size_per_block = block_size * sizeof(int) * 2 * 3;
@@ -307,8 +307,8 @@ namespace graph
         GPUArray<int> next, GPUArray<int> next_cnt, GPUArray<bool> inNext,
         int level,
         int num_words_bmp, int num_words_bmp_idx,
-        GPUArray <InBucketWinType> in_bucket_window_, GPUArray <uint> bucket_buf_, GPUArray <uint> new_bucket_buf_,
-        uint32_t& window_bucket_buf_size_,
+        GPUArray <InBucketWinType> in_bucket_window_, GPUArray <int> bucket_buf_, GPUArray <int> new_bucket_buf_,
+        int& window_bucket_buf_size_,
         int bucket_level_end_) 
     {
         auto block_size = 256;
@@ -421,7 +421,7 @@ namespace graph
     }
 
     void PrepareBucket(GPUArray<InBucketWinType>& in_bucket_window_,
-        GPUArray<uint>& bucket_buf_, GPUArray<uint32_t>& window_bucket_buf_size_, int todo)
+        GPUArray<int>& bucket_buf_, GPUArray<int>& window_bucket_buf_size_, int todo)
     {
         in_bucket_window_.initialize("In bucket window", gpu, (todo + sizeof(long long)), 0);
         bucket_buf_.initialize("Bucket Buffer", gpu, todo, 0);
@@ -473,9 +473,9 @@ namespace graph
         // Bucket Related.
         int bucket_level_end_ = level;
         GPUArray <InBucketWinType> in_bucket_window_;
-        GPUArray <uint> bucket_buf_;
-        GPUArray <uint> new_bucket_buf_;
-        GPUArray<uint> window_bucket_buf_size_; //should be uint* only
+        GPUArray <int> bucket_buf_;
+        GPUArray <int> new_bucket_buf_;
+        GPUArray<int> window_bucket_buf_size_; //should be uint* only
 
         #ifndef LEGACY_SCAN
         PrepareBucket(in_bucket_window_, bucket_buf_, window_bucket_buf_size_, edge_num);

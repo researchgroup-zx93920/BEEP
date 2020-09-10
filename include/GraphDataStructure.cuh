@@ -48,6 +48,8 @@ namespace graph
             g.colInd->switch_to_gpu(0, g.numEdges);
         }
 
+        cudaDeviceSynchronize();
+
         graph->rowPtr = g.rowPtr->gdata();
         graph->rowInd = g.rowInd->gdata();
         graph->colInd = g.colInd->gdata();
@@ -110,7 +112,7 @@ namespace graph
         g_shd.rowInd = new GPUArray<T>("Row Index", unified, capacity, 0);
         g_shd.colInd = new GPUArray<T>("Col Index", unified, capacity, 0);
 
-        return g_d;
+        return g_shd;
     }
 
     template<typename T=uint>

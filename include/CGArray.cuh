@@ -101,7 +101,7 @@ namespace graph
 				Log(LogPriorityEnum::critical, "At allocate_cpu: Only CPU allocation\n");
 			}
 		}
-		void switch_to_gpu(int devId, uint size=0)
+		void switch_to_gpu(int devId=0, uint size=0)
 		{
 			if (_at == AllocationTypeEnum::cpuonly)
 			{

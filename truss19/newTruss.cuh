@@ -13,7 +13,7 @@
 #include "../triangle_counting/TcBmp.cuh"
 
 #include "ourtruss19.cuh"
-
+#include "../include/GraphQueue.cuh"
 
 typedef uint64_t EncodeDataType;
 
@@ -113,97 +113,6 @@ __global__ void RebuildArraysN(uint edgeStart, uint numEdges, uint* rowPtr, uint
 
 }
 
-
-
-
-template <size_t BLOCK_DIM_X>
-__global__ void core_direct(
-	uint *edgeSupport,
-	uint* gnumdeleted, uint* gnumaffected,
-	const uint k, const size_t edgeStart, const size_t numEdges,
-	uint* rowPtr, uint* rowInd, uint* colInd, const size_t numNodes, BCTYPE* keep, bool* affected, uint* reversed, bool firstTry, const int uMax, int* reverseIndex, EncodeDataType* bitMap)
-
-{
-	// kernel call
-	size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
-	uint numberDeleted = 0;
-	uint numberAffected = 0;
-	__shared__ bool didAffectAnybody[1];
-	bool ft = firstTry; //1
-	if (0 == threadIdx.x)
-		didAffectAnybody[0] = false;
-
-	__syncthreads();
-	
-	numberDeleted = 0;
-	for (size_t i = gx + edgeStart; i < edgeStart + numEdges; i += BLOCK_DIM_X * gridDim.x)
-	{
-		uint srcNode = rowInd[i];
-		uint dstNode = colInd[i];
-		if (keep[i] && srcNode < dstNode && (affected[i] || ft))
-		{
-			affected[i] = false;
-			uint triCount = edgeSupport[i];
-
-			//////////////////////////////////////////////////////////////
-			if (triCount < (k - 2))
-			{
-				uint ir = reversed[i];
-				keep[i] = false;
-				keep[ir] = false;
-
-				uint sp = rowPtr[srcNode];
-				uint send = rowPtr[srcNode + 1];
-
-				uint dp = rowPtr[dstNode];
-				uint dend = rowPtr[dstNode + 1];
-
-				while (triCount > 0 && sp < send && dp < dend)
-				{
-					uint sv = colInd[sp];
-					uint dv = colInd[dp];
-
-					if ((sv == dv))
-					{
-						numberAffected += AffectOthers(sp, dp, keep, affected, reversed);
-					}
-					uint yy = sp + ((sv <= dv) ? 1 : 0);
-					dp = dp + ((sv >= dv) ? 1 : 0);
-					sp = yy;
-				}
-			}
-		}
-
-		if (!keep[i] && srcNode < dstNode)
-			numberDeleted++;
-	}
-
-	//Instead of reduction: hope it works
-	if (numberAffected > 0)
-		didAffectAnybody[0] = true;
-
-	__syncthreads();
-
-	if (0 == threadIdx.x)
-	{
-		if (didAffectAnybody[0])
-			*gnumaffected = 1;
-	}
-
-	// Block-wide reduction of threadCount
-	typedef cub::BlockReduce<uint, BLOCK_DIM_X> BlockReduce;
-	__shared__ typename BlockReduce::TempStorage tempStorage;
-	uint deletedByBlock = BlockReduce(tempStorage).Sum(numberDeleted);
-
-	//uint affectedByBlock = BlockReduce(tempStorage).Sum(numberAffected);
-
-	if (0 == threadIdx.x)
-	{
-		atomicAdd(gnumdeleted, deletedByBlock);
-	}
-
-}
-
 __global__
 void update_queueu(int* curr, uint32_t curr_cnt, int* inCurr) {
 	auto gtid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -276,16 +185,16 @@ namespace graph
 
 		void bucket_scan(
 			GPUArray<int> edgeSupport, uint32_t edge_num, int level,
-			GPUArray<int>& curr, GPUArray<bool>& inCurr, int& curr_cnt, 
+			GraphQueue<int, bool>& current,
 			GPUArray<uint> asc,
-			GPUArray<bool>& in_bucket_window_,
-			GPUArray<uint>& bucket_buf_, uint*& window_bucket_buf_size_, int& bucket_level_end_)
+			GraphQueue<int, bool>& bucket,
+			int& bucket_level_end_)
 		{
 			static bool is_first = true;
 			if (is_first)
 			{
-				inCurr.setAll(0, true);
-				in_bucket_window_.setAll(0, true);
+				current.mark.setAll(false, true);
+				bucket.mark.setAll(false, true);
 				is_first = false;
 			}
 
@@ -296,56 +205,38 @@ namespace graph
 
 				long grid_size = (edge_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
 				execKernel(filter_window, grid_size, BLOCK_SIZE, false,
-					edgeSupport.gdata(), edge_num, in_bucket_window_.gdata(), level, bucket_level_end_ + LEVEL_SKIP_SIZE);
+					edgeSupport.gdata(), edge_num, bucket.mark.gdata(), level, bucket_level_end_ + LEVEL_SKIP_SIZE);
 
-				*window_bucket_buf_size_ = CUBSelect(asc.gdata(), bucket_buf_.gdata(), in_bucket_window_.gdata(), edge_num);
+				bucket.count.gdata()[0] = CUBSelect(asc.gdata(), bucket.queue.gdata(), bucket.mark.gdata(), edge_num);
 				bucket_level_end_ += LEVEL_SKIP_SIZE;
 			}
 			// SCAN the window.
-			if (*window_bucket_buf_size_ != 0)
+			if (bucket.count.gdata()[0] != 0)
 			{
-				curr_cnt = 0;
-				long grid_size = (*window_bucket_buf_size_ + BLOCK_SIZE - 1) / BLOCK_SIZE;
+				current.count.gdata()[0] = 0;
+				long grid_size = (bucket.count.gdata()[0] + BLOCK_SIZE - 1) / BLOCK_SIZE;
 				execKernel(filter_with_random_append, grid_size, BLOCK_SIZE, false,
-					bucket_buf_.gdata(), *window_bucket_buf_size_, edgeSupport.gdata(), inCurr.gdata(), curr.gdata(), &curr_cnt, level);
+					bucket.queue.gdata(), bucket.count.gdata()[0], edgeSupport.gdata(), current.mark.gdata(), current.queue.gdata(), &(current.count.gdata()[0]), level);
 			}
 			else
 			{
-				curr_cnt = 0;
+				current.count.gdata()[0] = 0;
 			}
-			Log(LogPriorityEnum::info, "Level: %d, curr: %d/%d", level, curr_cnt, *window_bucket_buf_size_);
+			Log(LogPriorityEnum::info, "Level: %d, curr: %d/%d", level, current.count.gdata()[0] , bucket.count.gdata()[0]);
 		}
 
 
-		void PrepareQueues(int n, int m,
-			GPUArray<int>& next_cnt, 
-			GPUArray<int>& curr, GPUArray<bool>& inCurr, 
-			GPUArray<int>& next, GPUArray<bool>& inNext,
-			GPUArray<uint>& identity_arr_asc)
+		void AscendingGpu(int n, int m, GPUArray<uint>& identity_arr_asc)
 		{
-			// 1st: CSR/Eid/Edge List. --> not necessary
 
-			uint32_t edge_num = m;
-
-			// 3rd: Queue Related.
-
-			next_cnt.initialize("Next Count", AllocationTypeEnum::unified, 1, 0);
-			
-
-			curr.initialize("Curr", AllocationTypeEnum::unified, edge_num, 0);
-			next.initialize("Next", AllocationTypeEnum::unified, edge_num, 0);
-
-
-			inCurr.initialize("In Curr", AllocationTypeEnum::unified, edge_num, 0);
-			inNext.initialize("in Next", AllocationTypeEnum::unified, edge_num, 0);
 
 			// 4th: Keep the edge offset mapping.
-			long grid_size = (edge_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
+			long grid_size = (m + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
 
-			identity_arr_asc.initialize("Identity Array Asc", AllocationTypeEnum::unified, edge_num, 0);
+			identity_arr_asc.initialize("Identity Array Asc", AllocationTypeEnum::unified, m, 0);
 
-			execKernel(init_asc, grid_size, BLOCK_SIZE, false, identity_arr_asc.gdata(), edge_num);
+			execKernel(init_asc, grid_size, BLOCK_SIZE, false, identity_arr_asc.gdata(), m);
 		}
 
 
@@ -395,9 +286,7 @@ namespace graph
 			m = new_edge_num * 2;
 		}
 
-	public:
-		BCTYPE* gKeep, * gPrevKeep;
-		uint* gReveresed;
+
 
 	public:
 		SingleGPU_KtrussMod(int dev) : dev_(dev) {
@@ -437,20 +326,26 @@ namespace graph
 			GPUArray<bool> edge_kept; 
 
 			//Lets apply queues and buckets
-			GPUArray <bool> in_bucket_window_;
-			GPUArray <uint> bucket_buf_;
-			GPUArray<uint> window_bucket_buf_size_; //should be uint* only
-			PrepareBucket(in_bucket_window_, bucket_buf_, window_bucket_buf_size_, numEdges);
+			//GPUArray <bool> in_bucket_window_;
+			//GPUArray <uint> bucket_buf_;
+			//GPUArray<uint> window_bucket_buf_size_; //should be uint* only
+			//PrepareBucket(in_bucket_window_, bucket_buf_, window_bucket_buf_size_, numEdges);
 
+
+			graph::GraphQueue<int, bool> bucket_q;
+			bucket_q.Create(unified, numEdges, 0);
+
+			graph::GraphQueue<int, bool> current_q;
+			current_q.Create(unified, numEdges, 0);
+
+			graph::GraphQueue<int, bool> next_q;
+			next_q.Create(unified, numEdges, 0);
+
+		
 			//Queues
 			GPUArray<T> identity_arr_asc;
-			GPUArray<int> curr, next, affected;
-			GPUArray<bool> inCurr, inNext;
-			GPUArray<int> curr_cnt_ptr, next_cnt;
-			curr_cnt_ptr.initialize("Curr Count Pointer", AllocationTypeEnum::unified, 1, 0);
-			int*& curr_cnt = curr_cnt_ptr.gdata();
-			PrepareQueues(g.numNodes, numEdges, next_cnt, curr, inCurr, next, inNext, identity_arr_asc);
-			
+			AscendingGpu(g.numNodes, numEdges, identity_arr_asc);
+
 			GPUArray <uint> newRowPtr;
 			GPUArray <uint> newColIndex_csr;
 			GPUArray <uint> new_eid;
@@ -486,44 +381,44 @@ namespace graph
 				cudaDeviceSynchronize();
 
 				//1 bucket fill
-				bucket_scan(edgeSupport, todo_original, level, curr, inCurr, *curr_cnt, identity_arr_asc, in_bucket_window_, bucket_buf_, window_bucket_buf_size_.gdata(), bucket_level_end_);
+				bucket_scan(edgeSupport, todo_original, level, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
 
-				while (*curr_cnt > 0)
+				while (current_q.count.gdata()[0] > 0)
 				{
 				
-					todo -= *curr_cnt;
+					todo -= current_q.count.gdata()[0];
 					if (0 == todo) {
 						break;
 					}
 
-					*next_cnt.gdata() = 0;
+					next_q.count.gdata()[0] = 0;
 					if (level == 0) 
 					{
 						auto block_size = 256;
-						auto grid_size = (*curr_cnt + block_size - 1) / block_size;
-						execKernel(update_processed, grid_size, block_size, false, curr.gdata(), *curr_cnt, inCurr.gdata(), processed.gdata());
+						auto grid_size = (current_q.count.gdata()[0] + block_size - 1) / block_size;
+						execKernel(update_processed, grid_size, block_size, false, current_q.queue.gdata(), current_q.count.gdata()[0], current_q.mark.gdata(), processed.gdata());
 					}
 					else
 					{
 						tcCounter->count_moveNext_per_edge_async(g, numEdges,
 							level, processed,
 							edgeSupport,
-							curr, inCurr, *curr_cnt,
-							next, inNext, next_cnt,
-							in_bucket_window_, bucket_buf_, window_bucket_buf_size_, bucket_level_end_,
-							0,Warp);
+							current_q,
+							next_q,
+							bucket_q, bucket_level_end_,
+							0,Block);
 						tcCounter->sync();
 
 						auto block_size = 256;
-						auto grid_size = (*curr_cnt + block_size - 1) / block_size;
-						execKernel(update_processed, grid_size, block_size, false, curr.gdata(), *curr_cnt, inCurr.gdata(), processed.gdata());
+						auto grid_size = (current_q.count.gdata()[0] + block_size - 1) / block_size;
+						execKernel(update_processed, grid_size, block_size, false, current_q.queue.gdata(), current_q.count.gdata()[0], current_q.mark.gdata(), processed.gdata());
 					}
 
 					numDeleted_l = numEdges - todo;
 
-					swap(curr, next);
-					swap(inCurr, inNext);
-					*curr_cnt = *next_cnt.gdata();
+					swap(current_q, next_q);
+					//swap(inCurr, inNext);
+					//current_q.count.gdata()[0] = next_q.count.gdata()[0];
 				}
 
 				percDeleted_l = (numDeleted_l) * 1.0 / (numEdges);

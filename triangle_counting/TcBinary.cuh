@@ -329,20 +329,33 @@ kernel_binary_thread_pe_eid_arrays(int* count, //!< [inout] the count, caller sh
 
 }
 
+__device__ void add_to_queue_1(graph::GraphQueue_d<int, bool>& q, int element)
+{
+    auto insert_idx = atomicAdd(q.count, 1);
+    q.queue[insert_idx] = element;
+    q.mark[element] = true;
+}
+
+__device__ void add_to_queue_1_no_dup(graph::GraphQueue_d<int, bool>& q, int element)
+{
+    auto old_token = atomicCASBool(q.mark + element, InBucketFalse, InBucketTrue);
+    if (!old_token) {
+        auto insert_idx = atomicAdd(q.count, 1);
+        q.queue[insert_idx] = element;
+    }
+}
 
 
 __inline__ __device__
 void process_support2(
     uint32_t edge_idx, int level, int* EdgeSupport,
-    int* next, int& next_cnt, bool* inNext,
-    bool* in_bucket_window_, uint* bucket_buf_, uint& window_bucket_buf_size_,
+    graph::GraphQueue_d<int, bool>& next,
+    graph::GraphQueue_d<int, bool>& bucket,
     int bucket_level_end_)
 {
     auto cur = atomicSub(&EdgeSupport[edge_idx], 1);
     if (cur == (level + 1)) {
-        auto insert_idx = atomicAdd(&next_cnt, 1);
-        next[insert_idx] = edge_idx;
-        inNext[edge_idx] = true;
+        add_to_queue_1(next, edge_idx);
     }
     if (cur <= level) {
         atomicAdd(&EdgeSupport[edge_idx], 1);
@@ -351,11 +364,7 @@ void process_support2(
     // Update the Bucket.
     auto latest = cur - 1;
     if (latest > level && latest < bucket_level_end_) {
-        auto old_token = atomicCASBool(in_bucket_window_ + edge_idx, InBucketFalse, InBucketTrue);
-        if (!old_token) {
-            auto insert_idx = atomicAdd(&window_bucket_buf_size_, 1);
-            bucket_buf_[insert_idx] = edge_idx;
-        }
+        add_to_queue_1_no_dup(bucket, edge_idx);
     }
 
 }
@@ -365,8 +374,9 @@ template <typename T>
 __device__ inline void addNexBucket(T e1, T e2, T e3, bool* processed,
     int* edgeSupport, int level,
     bool* inCurr,
-    int* next, bool* inNext, int& next_cnt,
-    uint* bucket, bool* inBucket, uint& bucket_cnt, int bucket_upper_level)
+    graph::GraphQueue_d<int, bool>& next,
+    graph::GraphQueue_d<int, bool>& bucket, 
+    int bucket_upper_level)
 {
     bool is_peel_e2 = !inCurr[e2];
     bool is_peel_e3 = !inCurr[e3];
@@ -377,8 +387,8 @@ __device__ inline void addNexBucket(T e1, T e2, T e3, bool* processed,
             if (is_peel_e2 && is_peel_e3)
             {
 
-                process_support2(e2, level, edgeSupport, next, next_cnt, inNext, inBucket, bucket, bucket_cnt, bucket_upper_level);
-                process_support2(e3, level, edgeSupport, next, next_cnt, inNext, inBucket, bucket, bucket_cnt, bucket_upper_level);
+                process_support2(e2, level, edgeSupport, next, bucket, bucket_upper_level);
+                process_support2(e3, level, edgeSupport, next, bucket, bucket_upper_level);
 
 
 
@@ -386,14 +396,14 @@ __device__ inline void addNexBucket(T e1, T e2, T e3, bool* processed,
             else if (is_peel_e2)
             {
                 if (e1 < e3) {
-                    process_support2(e2, level, edgeSupport, next, next_cnt, inNext, inBucket, bucket, bucket_cnt, bucket_upper_level);
+                    process_support2(e2, level, edgeSupport, next, bucket, bucket_upper_level);
                 }
             }
             else
             {
                 if (e1 < e2)
                 {
-                    process_support2(e3, level, edgeSupport, next, next_cnt, inNext, inBucket, bucket, bucket_cnt, bucket_upper_level);
+                    process_support2(e3, level, edgeSupport, next, bucket, bucket_upper_level);
                 }
             }
         }
@@ -407,16 +417,16 @@ kernel_binary_thread_pe_level_next(
     T* rowInd, T* colInd, T* eid,
     const size_t numEdges,
     int level, bool* processed, int* edgeSupport,
-    int* curr, bool* inCurr, int curr_cnt,
-    int* next, bool* inNext, int& next_cnt,
-    T* bucket, bool* inBucket, uint& bucket_cnt, int bucket_level_end_
+    graph::GraphQueue_d<int, bool> current,
+    graph::GraphQueue_d<int, bool>& next,
+    graph::GraphQueue_d<int, bool>& bucket, 
+    int bucket_level_end_
 )
 {
-
     size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
-    for (size_t i = gx; i < curr_cnt; i += BLOCK_DIM_X * gridDim.x)
+    for (size_t i = gx; i < current.count[0]; i += BLOCK_DIM_X * gridDim.x)
     {
-        T edgeId = curr[i];
+        T edgeId = current.queue[i];
 
         T src = rowInd[edgeId];
         T dst = colInd[edgeId];
@@ -452,8 +462,7 @@ kernel_binary_thread_pe_level_next(
                 {
                     T ap_e = eid[srcStart + j];
                     T bp_e = eid[dstStart + lb];
-                    addNexBucket(edgeId, ap_e, bp_e, processed, edgeSupport, level, inCurr, next, inNext, next_cnt,
-                        bucket, inBucket, bucket_cnt, bucket_level_end_);
+                    addNexBucket(edgeId, ap_e, bp_e, processed, edgeSupport, level, current.mark, next, bucket, bucket_level_end_);
                 }
             }
             else
@@ -644,9 +653,10 @@ kernel_binary_warp_pe_level_next(
     T* rowInd, T* colInd, T* eid,
     const size_t numEdges,
     int level, bool* processed, int* edgeSupport,
-    int* curr, bool* inCurr, int curr_cnt,
-    int* next, bool* inNext, int& next_cnt,
-    T* bucket, bool* inBucket, uint& bucket_cnt, int bucket_level_end_
+    graph::GraphQueue_d<int, bool> current,
+    graph::GraphQueue_d<int, bool> next,
+    graph::GraphQueue_d<int, bool> bucket, 
+    int bucket_level_end_
 )
 {
 
@@ -667,9 +677,9 @@ kernel_binary_warp_pe_level_next(
     if (lx == 0)
         *size = 0;
 
-    for (size_t i = gwx; i < curr_cnt; i += BLOCK_DIM_X * gridDim.x / 32)
+    for (size_t i = gwx; i < *current.count; i += BLOCK_DIM_X * gridDim.x / 32)
     {
-        T edgeId = curr[i];
+        T edgeId = current.queue[i];
 
         T src = rowInd[edgeId];
         T dst = colInd[edgeId];
@@ -706,8 +716,7 @@ kernel_binary_warp_pe_level_next(
                     T e1 = e1_arr[e];
                     T e2 = e2_arr[e];
                     T e3 = e3_arr[e];
-                    addNexBucket(e1, e2, e3, processed, edgeSupport, level, inCurr, next, inNext, next_cnt,
-                        bucket, inBucket, bucket_cnt, bucket_level_end_);
+                    addNexBucket(e1, e2, e3, processed, edgeSupport, level, current.mark, next, bucket, bucket_level_end_);
 
 
                 }
@@ -757,8 +766,7 @@ kernel_binary_warp_pe_level_next(
             T e1 = e1_arr[e];
             T e2 = e2_arr[e];
             T e3 = e3_arr[e];
-            addNexBucket(e1, e2, e3, processed, edgeSupport, level, inCurr, next, inNext, next_cnt,
-                bucket, inBucket, bucket_cnt, bucket_level_end_);
+            addNexBucket(e1, e2, e3, processed, edgeSupport, level, current.mark, next, bucket, bucket_level_end_);
         }
     }
 
@@ -772,9 +780,9 @@ kernel_binary_block_pe_level_next(
     T* rowInd, T* colInd, T* eid,
     const size_t numEdges,
     int level, bool* processed, int* edgeSupport,
-    int* curr, bool* inCurr, int curr_cnt,
-    int* next, bool* inNext, int& next_cnt,
-    T* bucket, bool* inBucket, uint& bucket_cnt, int bucket_level_end_
+    graph::GraphQueue_d<int, bool> current,
+    graph::GraphQueue_d<int, bool> next,
+    graph::GraphQueue_d<int, bool> bucket, int bucket_level_end_
 )
 {
 
@@ -794,9 +802,9 @@ kernel_binary_block_pe_level_next(
 
     __syncthreads();
 
-    for (size_t i = gbx; i < curr_cnt; i += gridDim.x)
+    for (size_t i = gbx; i < current.count[0]; i += gridDim.x)
     {
-        T edgeId = curr[i];
+        T edgeId = current.queue[i];
 
         T src = rowInd[edgeId];
         T dst = colInd[edgeId];
@@ -843,10 +851,7 @@ kernel_binary_block_pe_level_next(
                     T e1 = e1_arr[e];
                     T e2 = e2_arr[e];
                     T e3 = e3_arr[e];
-                    addNexBucket(e1, e2, e3, processed, edgeSupport, level, inCurr, next, inNext, next_cnt,
-                        bucket, inBucket, bucket_cnt, bucket_level_end_);
-
-
+                    addNexBucket(e1, e2, e3, processed, edgeSupport, level, current.mark, next, bucket, bucket_level_end_);
                 }
 
                 __syncthreads();
@@ -905,8 +910,7 @@ kernel_binary_block_pe_level_next(
             T e1 = e1_arr[e];
             T e2 = e2_arr[e];
             T e3 = e3_arr[e];
-            addNexBucket(e1, e2, e3, processed, edgeSupport, level, inCurr, next, inNext, next_cnt,
-                bucket, inBucket, bucket_cnt, bucket_level_end_);
+            addNexBucket(e1, e2, e3, processed, edgeSupport, level, current.mark, next, bucket, bucket_level_end_);
         }
     }
 
@@ -1362,9 +1366,7 @@ namespace graph {
         void count_moveNext_per_edge_async(
             EidGraph_d<T>& g, const size_t numEdges,
             int level, GPUArray<bool> processed, GPUArray<int>& edgeSupport,
-            GPUArray<int>& curr, GPUArray<bool> inCurr, int curr_cnt,
-            GPUArray<int>& next, GPUArray<bool>& inNext, GPUArray<int>& next_cnt, //next queue
-            GPUArray <bool>& in_bucket_window_, GPUArray<uint>& bucket_buf_, GPUArray<uint>& window_bucket_buf_size_, int bucket_level_end_,
+            GraphQueue<int, bool>& current, GraphQueue<int, bool>& next, GraphQueue<int, bool>& bucket, int bucket_level_end_,
             const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
 
@@ -1376,10 +1378,13 @@ namespace graph {
             T* ri = g.rowInd;
             T* ci = g.colInd;
 
-            const int dimGrid = (curr_cnt - edgeOffset + (dimBlock)-1) / (dimBlock);
-            const int dimGridWarp = (32 * curr_cnt + (dimBlock)-1) / (dimBlock);
-            const int dimGridBlock = curr_cnt; //(dimBlock * curr_cnt + (dimBlock)-1) / (dimBlock);
+            const int dimGrid = (current.count.gdata()[0] - edgeOffset + (dimBlock)-1) / (dimBlock);
+            const int dimGridWarp = (32 * current.count.gdata()[0] + (dimBlock)-1) / (dimBlock);
+            const int dimGridBlock = current.count.gdata()[0]; //(dimBlock * curr_cnt + (dimBlock)-1) / (dimBlock);
             CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
+
+
+
 
 
             //CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
@@ -1387,23 +1392,26 @@ namespace graph {
                 kernel_binary_thread_pe_level_next<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (
                     rp_csr, ci_csr, ri, ci, g.eid, ne,
                     level, processed.gdata(), edgeSupport.gdata(),
-                    curr.gdata(), inCurr.gdata(), curr_cnt,
-                    next.gdata(), inNext.gdata(), *next_cnt.gdata(),
-                    bucket_buf_.gdata(), in_bucket_window_.gdata(), *window_bucket_buf_size_.gdata(), bucket_level_end_);
+                    current.device_queue->gdata()[0],
+                    next.device_queue->gdata()[0],
+                    bucket.device_queue->gdata()[0],
+                    bucket_level_end_);
             else if (kernelType == ProcessingElementEnum::Warp)
                 kernel_binary_warp_pe_level_next<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (
                     rp_csr, ci_csr, ri, ci, g.eid, ne,
                     level, processed.gdata(), edgeSupport.gdata(),
-                    curr.gdata(), inCurr.gdata(), curr_cnt,
-                    next.gdata(), inNext.gdata(), *next_cnt.gdata(),
-                    bucket_buf_.gdata(), in_bucket_window_.gdata(), *window_bucket_buf_size_.gdata(), bucket_level_end_);
+                    current.device_queue->gdata()[0],
+                    next.device_queue->gdata()[0],
+                    bucket.device_queue->gdata()[0],
+                    bucket_level_end_);
             else if (kernelType == ProcessingElementEnum::Block)
                 kernel_binary_block_pe_level_next<T, dimBlock> << <dimGridBlock, dimBlock, 0, TcBase<T>::stream_ >> > (
                     rp_csr, ci_csr, ri, ci, g.eid, ne,
                     level, processed.gdata(), edgeSupport.gdata(),
-                    curr.gdata(), inCurr.gdata(), curr_cnt,
-                    next.gdata(), inNext.gdata(), *next_cnt.gdata(),
-                    bucket_buf_.gdata(), in_bucket_window_.gdata(), *window_bucket_buf_size_.gdata(), bucket_level_end_);
+                    current.device_queue->gdata()[0],
+                    next.device_queue->gdata()[0],
+                    bucket.device_queue->gdata()[0],
+                    bucket_level_end_);
           
 
             //CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));

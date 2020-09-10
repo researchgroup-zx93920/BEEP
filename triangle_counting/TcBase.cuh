@@ -4,6 +4,7 @@
 #include "../include/TriCountPrim.cuh"
 #include "../include/CGArray.cuh"
 #include "../include/GraphDataStructure.cuh"
+#include "../include/GraphQueue.cuh"
 
 struct Edge1
 {
@@ -92,9 +93,7 @@ namespace graph {
         virtual void count_moveNext_per_edge_async(
             EidGraph_d<T>& g, const size_t numEdges,
             int level, GPUArray<bool> processed, GPUArray<int>&  edgeSupport,
-            GPUArray<int>& curr, GPUArray<bool> inCurr, int curr_cnt,
-            GPUArray<int>& next, GPUArray<bool>& inNext, GPUArray<int>& next_cnt, //next queue
-            GPUArray <bool>& in_bucket_window_, GPUArray<uint>& bucket_buf_, GPUArray<uint>& window_bucket_buf_size_, int bucket_level_end_,
+            GraphQueue<int,bool>& current, GraphQueue<int, bool>& next, GraphQueue<int, bool>& bucket, int bucket_level_end_,
             const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {}
 
