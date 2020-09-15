@@ -104,7 +104,7 @@ int main(int argc, char** argv) {
 
 	char* matr;
 
-	matr = "D:\\graphs\\graph500-scale21-ef16_adj.bel";
+	matr = "D:\\graphs\\graph500-scale18-ef16_adj.bel";
 
 #ifndef __VS__
 	if (argc > 1)
@@ -315,12 +315,12 @@ int main(int argc, char** argv) {
 
 		
 
-		//uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", tcBE, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
+		uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", tcBE, gd, ee, st, ProcessingElementEnum::Warp, 0);
 		CountTrianglesHash<uint>(divideConstant, tchash, gd, ee,  0, ProcessingElementEnum::Warp, 0);
 	
-		//uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
+		uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
 	
-		//CountTriangles<uint>("NVGRAPH", tcNV, rowPtr, sl, dl, ee, csrcoo.num_rows());
+		//CountTriangles<uint>("NVGRAPH", tcNV, gd, ee);
 
 		/*if (serialTc != binaryTc)
 			break;*/

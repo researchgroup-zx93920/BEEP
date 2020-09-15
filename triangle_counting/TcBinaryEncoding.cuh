@@ -213,19 +213,19 @@ namespace graph {
         {}
 
 
-        void count_async(GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int limit = 0)
+        void count_async(COOCSRGraph_d<T>* g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int limit = 0)
         {
             const size_t dimBlock = 128;
             const size_t ne = numEdges;
-            T* rp = rowPtr.gdata();
-            T* ri = rowInd.gdata();
-            T* ci = colInd.gdata();
+            T* rp = g->rowPtr;
+            T* ri = g->rowInd;
+            T* ci = g->colInd;
 
             unsigned short* reversed;
             CUDA_RUNTIME(cudaMallocManaged((void**)&reversed, sizeof(unsigned short) * TcBase<T>::numNodes));
 
             int longRowCount = 0;
-            EncodeDataType *bitMap = encodeLargeRows(TcBase<T>::numNodes, rowPtr.cdata(), colInd.cdata(), reversed, &longRowCount);
+            EncodeDataType *bitMap = encodeLargeRows(TcBase<T>::numNodes, rp, ci, reversed, &longRowCount);
 
 
             CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));

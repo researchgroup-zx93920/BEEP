@@ -11,14 +11,14 @@ namespace graph {
         TcNvgraph(int dev, uint64 ne, uint64 nn, cudaStream_t stream = 0) :TcBase<T>(dev, ne, nn, stream)
         {}
 
-        void count_async(GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+        void count_async(COOCSRGraph_d<T>* g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
          
-           /*int* rp = (int*)rowPtr.gdata();
-            int* ri = (int*)rowInd.gdata();
-            int* ci = (int*)colInd.gdata();
+           int* rp = (int*)g->rowPtr;
+            int* ri = (int*)g->rowInd;
+            int* ci = (int*)g->colInd;
 
-            CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
+          /* CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
 
 
 
