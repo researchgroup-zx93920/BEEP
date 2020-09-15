@@ -43,7 +43,7 @@ void process_degree(
 
 
 template<typename T>
-__global__ void getNodeDegree(int* nodeDegree, graph::COOCSRGraph_d<T> g)
+__global__ void getNodeDegree_kernel(int* nodeDegree, graph::COOCSRGraph_d<T> g)
 {
 	int gtid = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -151,6 +151,75 @@ kernel_warp_level_next(
 }
 
 
+
+template <typename T, int BD, int P>
+__global__ void
+kernel_partition_level_next(
+	graph::COOCSRGraph_d<T> g,
+	int level, bool* processed, int* nodeDegree,
+	graph::GraphQueue_d<int, bool> current,
+	graph::GraphQueue_d<int, bool>& next,
+	graph::GraphQueue_d<int, bool>& bucket,
+	int bucket_level_end_
+)
+{
+	const size_t partitionsPerBlock = BD / P;
+	const size_t lx = threadIdx.x % P;
+	const int warpIdx = threadIdx.x / P; // which warp in thread block
+	const size_t gwx = (blockDim.x * blockIdx.x + threadIdx.x) / P;
+
+	__shared__ T q[partitionsPerBlock][P * 2];
+	__shared__ int sizes[partitionsPerBlock];
+	T* e1_arr = &q[warpIdx][0];
+	int* size = &sizes[warpIdx];
+
+	if (lx == 0)
+		*size = 0;
+
+	for (size_t i = gwx; i < current.count[0]; i += blockDim.x * gridDim.x / P)
+	{
+		T nodeId = current.queue[i];
+
+		T srcStart = g.rowPtr[nodeId];
+		T srcStop = g.rowPtr[nodeId + 1];
+
+		for (int j = srcStart + lx; j < (srcStop + P-1) / P * P; j += P)
+		{
+			__syncwarp();
+			if (*size >= P)
+			{
+				for (int e = lx; e < *size; e += P)
+				{
+					T e1 = e1_arr[e];
+					if (!current.mark[e1])
+						process_degree(e1, level, nodeDegree, next, bucket, bucket_level_end_);
+				}
+				__syncwarp();
+				if (lx == 0)
+					*size = 0;
+				__syncwarp();
+			}
+
+			if (j < srcStop)
+			{
+				T affectedNode = g.colInd[j];
+				auto pos = atomicAdd(size, 1);
+				e1_arr[pos] = affectedNode;
+			}
+		}
+
+		__syncwarp();
+		for (int e = lx; e < *size; e += P)
+		{
+			T e1 = e1_arr[e];
+			if (!current.mark[e1])
+				process_degree(e1, level, nodeDegree, next, bucket, bucket_level_end_);
+		}
+	}
+}
+
+
+
 template <typename T, int BLOCK_DIM_X>
 __global__ void
 kernel_block_level_next(
@@ -232,6 +301,7 @@ namespace graph
 		//Outputs:
 		//Max k of a complete ktruss kernel
 		int k;
+		
 
 		//Percentage of deleted edges for a specific k
 		float percentage_deleted_k;
@@ -276,7 +346,7 @@ namespace graph
 			{
 				current.count.gdata()[0] = 0;
 			}
-			Log(LogPriorityEnum::info, "Level: %d, curr: %d/%d", level, current.count.gdata()[0], bucket.count.gdata()[0]);
+			//Log(LogPriorityEnum::info, "Level: %d, curr: %d/%d", level, current.count.gdata()[0], bucket.count.gdata()[0]);
 		}
 
 
@@ -334,9 +404,11 @@ namespace graph
 			m = new_edge_num * 2;
 		}
 
-
-
 	public:
+
+
+		GPUArray<int> nodeDegree;
+
 		SingleGPU_Kcore(int dev) : dev_(dev) {
 			CUDA_RUNTIME(cudaSetDevice(dev_));
 			CUDA_RUNTIME(cudaStreamCreate(&stream_));
@@ -344,6 +416,17 @@ namespace graph
 		}
 
 		SingleGPU_Kcore() : SingleGPU_Kcore(0) {}
+
+
+		void getNodeDegree(COOCSRGraph_d<T>& g,
+			const size_t nodeOffset = 0, const size_t edgeOffset = 0)
+		{
+			const int dimBlock = 256;
+			nodeDegree.initialize("Edge Support", unified, g.numNodes, 0);
+			uint dimGridNodes = (g.numNodes + dimBlock - 1) / dimBlock;
+			execKernel(getNodeDegree_kernel<T>, dimGridNodes, dimBlock, false, nodeDegree.gdata(), g);
+
+		}
 
 		void findKcoreIncremental_async(int kmin, int kmax, COOCSRGraph_d<T>& g,
 			const size_t nodeOffset = 0, const size_t edgeOffset = 0)
@@ -356,7 +439,7 @@ namespace graph
 			int level = 0;
 			int bucket_level_end_ = level;
 
-			GPUArray<int> nodeDegree;
+		
 			GPUArray<bool> node_kept;
 
 			//Lets apply queues and buckets
@@ -380,7 +463,7 @@ namespace graph
 
 
 			processed.initialize("is Deleted (Processed)", unified, g.numNodes, 0);
-			nodeDegree.initialize("Edge Support", unified, g.numNodes, 0);
+			
 			processed.setAll(false, false);
 			
 
@@ -390,8 +473,8 @@ namespace graph
 			float minPercentage = 0.8;
 			float percDeleted_l = 0.0;
 
-			uint dimGridNodes = (g.numNodes + dimBlock - 1) / dimBlock;
-			execKernel(getNodeDegree<T>, dimGridNodes, dimBlock, false, nodeDegree.gdata(), g);
+			
+			getNodeDegree(g);
 
 
 			int todo = g.numNodes;
@@ -436,7 +519,7 @@ namespace graph
 						auto grid_size = (current_q.count.gdata()[0] + block_size - 1) / block_size;
 						auto grid_warp_size = (32*current_q.count.gdata()[0] + block_size - 1) / block_size;
 						auto grid_block_size = current_q.count.gdata()[0];
-						if (level < 16)
+						if (level < 4)
 						{
 							execKernel((kernel_thread_level_next<T>), grid_size, block_size, false,
 								g,
@@ -446,9 +529,12 @@ namespace graph
 								bucket_q.device_queue->gdata()[0],
 								bucket_level_end_);
 						}
-						else if(level < 64)
+						else if (level <= 16)
 						{
-							execKernel((kernel_warp_level_next<T, 256>), grid_warp_size, block_size, false,
+							const int P = 16;
+							auto gridSize = (P * current_q.count.gdata()[0] + block_size - 1) / block_size;
+
+							execKernel((kernel_partition_level_next<T, 256, P>), gridSize, block_size, false,
 								g,
 								level, processed.gdata(), nodeDegree.gdata(),
 								current_q.device_queue->gdata()[0],
@@ -456,6 +542,41 @@ namespace graph
 								bucket_q.device_queue->gdata()[0],
 								bucket_level_end_);
 						}
+						else if(level <= 32)
+						{
+							execKernel((kernel_partition_level_next<T, 256, 32>), grid_warp_size, block_size, false,
+								g,
+								level, processed.gdata(), nodeDegree.gdata(),
+								current_q.device_queue->gdata()[0],
+								next_q.device_queue->gdata()[0],
+								bucket_q.device_queue->gdata()[0],
+								bucket_level_end_);
+						}
+					/*	else if (level <= 64)
+						{
+							const int P = 64;
+							auto gridSize = (P * current_q.count.gdata()[0] + block_size - 1) / block_size;
+							execKernel((kernel_partition_level_next<T, 256, P>), gridSize, block_size, false,
+								g,
+								level, processed.gdata(), nodeDegree.gdata(),
+								current_q.device_queue->gdata()[0],
+								next_q.device_queue->gdata()[0],
+								bucket_q.device_queue->gdata()[0],
+								bucket_level_end_);
+						}
+
+						else if (level <= 128)
+						{
+							const int P = 128;
+							auto gridSize = (P * current_q.count.gdata()[0] + block_size - 1) / block_size;
+							execKernel((kernel_partition_level_next<T, 256, P>), gridSize, block_size, false,
+								g,
+								level, processed.gdata(), nodeDegree.gdata(),
+								current_q.device_queue->gdata()[0],
+								next_q.device_queue->gdata()[0],
+								bucket_q.device_queue->gdata()[0],
+								bucket_level_end_);
+						}*/
 						else
 						{
 							execKernel((kernel_block_level_next<T, 256>), grid_block_size, block_size, false,
@@ -477,7 +598,7 @@ namespace graph
 					//swap(inCurr, inNext);
 					//current_q.count.gdata()[0] = next_q.count.gdata()[0];
 				}
-				printf("Level %d took %d iterations \n", level, iterations);
+				//printf("Level %d took %d iterations \n", level, iterations);
 
 				percDeleted_l = (numDeleted_l) * 1.0 / (g.numNodes);
 				if (percDeleted_l >= 1.0)
@@ -500,7 +621,14 @@ namespace graph
 				level++;
 			}
 
+			processed.freeGPU();
+			current_q.free();
+			next_q.free();
+			bucket_q.free();
+
 			k = level;
+
+			printf("Max Core = %d\n", k - 1);
 		}
 
 		uint findKtrussIncremental_sync(int kmin, int kmax, TcBase<T>* tcCounter, EidGraph_d<T>& g, int* reverseIndex, EncodeDataType* bitMap, const size_t nodeOffset = 0, const size_t edgeOffset = 0)

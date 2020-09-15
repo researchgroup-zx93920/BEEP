@@ -53,6 +53,15 @@ namespace graph
 			d = device_queue->gdata();
 		}
 
+		void free()
+		{
+			device_queue->freeGPU();
+			count.freeGPU();
+			queue.freeGPU();
+			mark.freeGPU();
+			
+		}
+
 
 
 

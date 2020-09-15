@@ -182,15 +182,15 @@ namespace graph {
         TcVariableHash(int dev, uint64 ne, uint64 nn, cudaStream_t stream = 0) :TcBase<T>(dev, ne, nn, stream)
         {}
 
-        void count_hash_async(const int divideConstant, GPUArray<T> rowPtr, GPUArray<T> rowInd,
+        void count_hash_async(const int divideConstant, COOCSRGraph_d<T>* g,
             GPUArray<T> hashedColInd,
             GPUArray<T> hashPointer, GPUArray<T> hashBinStart,
             const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
             const size_t dimBlock = 512;
             const size_t ne = numEdges;
-            T* rp = rowPtr.gdata();
-            T* ri = rowInd.gdata();
+            T* rp = g->rowPtr;
+            T* ri = g->rowInd;
 
             T* hci = hashedColInd.gdata();
             T* hp = hashPointer.gdata();

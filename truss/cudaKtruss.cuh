@@ -679,7 +679,7 @@ namespace graph
         Log(LogPriorityEnum::info,"TC stat: %s", ss2.str().c_str());
         Log(LogPriorityEnum::info,"Update processed time: %.4f s.", process_update_time);
 
-        Log(LogPriorityEnum::info, "Complete Time: %.4f s.", completeTime);
+        Log(LogPriorityEnum::info, "Complete Time: %.4f s.", completeTime + tc_time);
 
     }
 };

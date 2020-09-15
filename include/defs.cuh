@@ -29,4 +29,5 @@ typedef unsigned long long int uint64;
 enum ProcessingElementEnum { Thread, Warp, Block, Grid, WarpShared, Test, Queue };
 enum AllocationTypeEnum { cpuonly, gpu, unified, zerocopy };
 enum LogPriorityEnum { critical, warn, error, info, debug, none };
+enum OrientGraphByEnum {None, Upper, Lower, Degree, Degeneracy };
 

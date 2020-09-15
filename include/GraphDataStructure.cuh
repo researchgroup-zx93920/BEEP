@@ -1,7 +1,5 @@
 #pragma once
-#include "utils.cuh"
-#include "utils_cuda.cuh"
-//#include "main_support.cuh"
+#include "cub_wrappers.cuh"
 
 namespace graph
 {
@@ -54,6 +52,17 @@ namespace graph
         graph->rowInd = g.rowInd->gdata();
         graph->colInd = g.colInd->gdata();
     }
+
+   template<typename T>
+   void free_csrcoo_device(COOCSRGraph<T>& g)
+   {
+       g.rowPtr->freeGPU();
+       g.rowInd->freeGPU();
+       g.colInd->freeGPU();
+       g.capacity = 0; 
+       g.numEdges = 0;
+       g.numNodes = 0;
+   }
 
 
 

@@ -4,7 +4,7 @@
 #include "../include/defs.cuh"
 #include "../include/GraphDataStructure.cuh"
 
-
+__host__ __device__ uint hash1(uint val, uint div) { return (val / 11) % div; };
 
 
 template <typename T, int BLOCK_DIM_X>
@@ -113,6 +113,145 @@ __global__ void init(graph::COOCSRGraph_d<T> g, T* asc, bool* keep)
 	}
 }
 
+
+template<typename T>
+__global__ void init(graph::COOCSRGraph_d<T> g, T* asc, bool* keep, int* degeneracy)
+{
+	uint tx = threadIdx.x;
+	uint bx = blockIdx.x;
+
+	uint ptx = tx + bx * blockDim.x;
+
+	for (uint i = ptx; i < g.numEdges; i += blockDim.x * gridDim.x)
+	{
+		const T src = g.rowInd[i];
+		const T dst = g.colInd[i];
+
+		const T srcStart = g.rowPtr[src];
+		const T srcStop = g.rowPtr[src + 1];
+
+		const T dstStart = g.rowPtr[dst];
+		const T dstStop = g.rowPtr[dst + 1];
+
+		const T dstLen = dstStop - dstStart;
+		const T srcLen = srcStop - srcStart;
+
+		keep[i] = false;
+		if (degeneracy[src] < degeneracy[dst])
+			keep[i] = true;
+		else if (degeneracy[src] == degeneracy[dst] && dstLen < srcLen)
+			keep[i] = true;
+		else if (degeneracy[src] == degeneracy[dst] && dstLen == srcLen && src < dst)
+			keep[i] = true;
+
+
+		asc[i] = i;
+	}
+}
+
+
+
+template<typename T>
+__global__ void createHashPointer2(graph::COOCSRGraph_d<T> g, T* hashPointer, int minLen, int maxLen, int divideConstant)
+{
+	uint tx = threadIdx.x;
+	uint bx = blockIdx.x;
+
+	uint ptx = tx + bx * blockDim.x;
+
+	for (uint i = ptx; i < g.numNodes; i += blockDim.x * gridDim.x)
+	{
+		const T srcStart = g.rowPtr[i];
+		const T srcStop = g.rowPtr[i + 1];
+		const T srcLen = srcStop - srcStart;
+		if (srcLen >= minLen && srcLen < maxLen)
+			hashPointer[i] = srcLen / divideConstant + 1;
+		else
+			hashPointer[i] = 0;
+	}
+}
+
+template<typename T>
+__global__ void createHashStartBin(graph::COOCSRGraph_d<T> g, T* hashPointer, T *hashStart, int minLen, int maxLen, int divideConstant)
+{
+	uint tx = threadIdx.x;
+	uint bx = blockIdx.x;
+
+	uint ptx = tx + bx * blockDim.x;
+
+	for (uint i = ptx; i < g.numNodes; i += blockDim.x * gridDim.x)
+	{
+		const T srcStart = g.rowPtr[i];
+		const T srcStop = g.rowPtr[i + 1];
+		const T srcLen = srcStop - srcStart;
+
+		uint bin_start = hashPointer[i];
+		uint bin_end = hashPointer[i + 1];
+
+		if (bin_end > bin_start)
+		{
+			uint numBins = srcLen / divideConstant;
+
+
+			for (int j = srcStart; j < srcStop; j++)
+			{
+				uint val = g.colInd[j];
+				uint bin = hash1(val, numBins);
+
+				hashStart[bin_start + bin + 1] += 1;
+			}
+
+
+			for (int j = bin_start; j < bin_end - 1; j++)
+				hashStart[j + 1] += hashStart[j];
+
+
+			/*if (hashStart[bin_end] != srcLen)
+				printf("%u, %u, at %d\n", hashStart[bin_end], srcLen, i);*/
+		}
+		
+	}
+}
+
+
+
+
+//Overloaded form Ktruss
+__global__
+void warp_detect_deleted_edges(
+	uint* rowPtr, uint32_t numRows,
+	bool* keep,
+	uint* histogram)
+{
+
+	__shared__ uint32_t cnts[WARPS_PER_BLOCK];
+
+	auto gtid = threadIdx.x + blockIdx.x * blockDim.x;
+	auto gtnum = blockDim.x * gridDim.x;
+	auto gwid = gtid >> WARP_BITS;
+	auto gwnum = gtnum >> WARP_BITS;
+	auto lane = threadIdx.x & WARP_MASK;
+	auto lwid = threadIdx.x >> WARP_BITS;
+
+	for (auto u = gwid; u < numRows; u += gwnum) {
+		if (0 == lane) 
+			cnts[lwid] = 0;
+		__syncwarp();
+
+		auto start = rowPtr[u];
+		auto end = rowPtr[u + 1];
+		for (auto v_idx = start + lane; v_idx < end; v_idx += WARP_SIZE) 
+		{
+			if (keep[v_idx])
+				atomicAdd(&cnts[lwid], 1);
+		}
+		__syncwarp();
+
+		if (0 == lane) 
+			histogram[u] = cnts[lwid];
+	}
+}
+
 template<typename T>
 __global__ void InitEid(T numEdges, T* asc, T*newSrc, T* newDst, T* rowPtr, T* colInd, T* eid)
 {
@@ -158,85 +297,50 @@ uint64 CountTriangles(std::string message, graph::TcBase<T>* tc, graph::COOCSRGr
 }
 
 template<typename T>
-void CountTrianglesHash(const int divideConstant, graph::TcBase<T>* tc, graph::GPUArray<T> rowPtr, graph::GPUArray<T> rowInd, graph::GPUArray<T> colInd,
-	const size_t numEdges, const size_t numRows, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+void CountTrianglesHash(const int divideConstant, graph::TcBase<T>* tc, graph::COOCSRGraph_d<T>* g,
+	const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
 {
 
-	const int minRowLen = 8 * 1024;
+	const int minRowLen = 16*1024;
 	const int maxRowLen = 32 * 1024;
 	const int cNumBins = 512; //not used
 
 	//Construct
-	auto hash1 = [](uint val, uint div) { return (val / 11) % div; };
-	graph::GPUArray<uint> htp("hash table pointer", AllocationTypeEnum::gpu, numRows + 1, 0);
+	
+	graph::GPUArray<uint> htp("hash table pointer", AllocationTypeEnum::unified, g->numNodes + 1, 0);
 	graph::GPUArray<uint> htd("hash table", AllocationTypeEnum::gpu, numEdges - edgeOffset, 0);
 
-	htp.cdata()[0] = 0;
-	for (int i = 0; i < numRows; i++)
-	{
-		uint s = rowPtr.cdata()[i];
-		uint e = rowPtr.cdata()[i + 1];
+	execKernel(createHashPointer2, (g->numNodes + 128 - 1) / 128, 128, false, *g, htp.gdata(), minRowLen, maxRowLen, divideConstant);
 
-		if ((e - s) >= minRowLen && (e - s) < maxRowLen)
-			htp.cdata()[i + 1] = (e - s) / divideConstant + 1;
-		else
-			htp.cdata()[i + 1] = 0;
-	}
 
-	//reduce
-	for (int i = 0; i < numRows + 1; i++)
-	{
-		htp.cdata()[i + 1] += htp.cdata()[i];//will implement on GPU, do not worry
-	}
+	//for (int i = 0; i < 100; i++)
+	//	printf("%u, ", htp.gdata()[i]);
+	//printf("\n");
 
-	uint totalBins = htp.cdata()[numRows];
-	graph::GPUArray<uint> hts("bins start per row", AllocationTypeEnum::gpu, totalBins, 0);
+
+	T total = CUBScanExclusive(htp.gdata(), htp.gdata(), g->numNodes);
+	htp.gdata()[g->numNodes] = total;
+
+	uint totalBins = htp.gdata()[g->numNodes];
+
+
+
+	//for (int i = 0; i < 100; i++)
+	//	printf("%u, ", htp.gdata()[i]);
+	//printf("\n");
+
+
+	graph::GPUArray<uint> hts("bins start per row", AllocationTypeEnum::unified, totalBins, 0);
 	hts.setAll(0, true);
-	hts.copytocpu(0);
-	//Foreach row count
-	for (int i = 0; i < numRows; i++)
-	{
-		uint s = rowPtr.cdata()[i];
-		uint e = rowPtr.cdata()[i + 1];
+	execKernel(createHashStartBin, (g->numNodes + 128 - 1) / 128, 128, false, *g, htp.gdata(), hts.gdata(), minRowLen, maxRowLen, divideConstant);
 
-		uint bin_start = htp.cdata()[i];
-		uint bin_end = htp.cdata()[i + 1];
 
-		if (bin_end > bin_start)
-		{
-			uint numBins = (e - s) / divideConstant;
-			for (int j = s; j < e; j++)
-			{
-				uint val = colInd.cdata()[j];
-				uint bin = hash1(val, numBins);
-
-				hts.cdata()[bin_start + bin + 1] += 1;
-			}
-		}
-	}
-
-	//now reduce per row
-	for (int i = 0; i < numRows; i++)
-	{
-		uint s = rowPtr.cdata()[i];
-		uint e = rowPtr.cdata()[i + 1];
-
-		uint bin_start = htp.cdata()[i];
-		uint bin_end = htp.cdata()[i + 1];
-
-		uint numBins = (e - s) / divideConstant;
-		if (bin_end - bin_start > 0)
-		{
-			for (int j = bin_start; j < bin_end - 1; j++)
-				hts.cdata()[j + 1] += hts.cdata()[j];
-		}
-	}
 
 	//Mode data to hash tables
-	for (int i = 0; i < numRows; i++)
+	for (int i = 0; i < g->numNodes; i++)
 	{
-		const uint s = rowPtr.cdata()[i];
-		const uint e = rowPtr.cdata()[i + 1];
+		const uint s = g->rowPtr[i];
+		const uint e = g->rowPtr[i + 1];
 
 		uint bin_start = htp.cdata()[i];
 		uint bin_end = htp.cdata()[i + 1];
@@ -248,11 +352,15 @@ void CountTrianglesHash(const int divideConstant, graph::TcBase<T>* tc, graph::G
 				binCounter[n] = 0;
 			for (int j = s; j < e; j++)
 			{
-				uint val = colInd.cdata()[j];
+				uint val = g->colInd[j];
 				uint bin = hash1(val, numBins);
 				uint elementBinStart = hts.cdata()[bin_start + bin];
 				uint nextBinStart = hts.cdata()[bin_start + bin + 1];
 				htd.cdata()[s + elementBinStart + binCounter[bin]] = val;
+
+				if (s + elementBinStart + binCounter[bin] > e)
+					printf("Shit\n");
+
 				binCounter[bin]++;
 			}
 		}
@@ -260,19 +368,16 @@ void CountTrianglesHash(const int divideConstant, graph::TcBase<T>* tc, graph::G
 		{
 			for (int j = s; j < e; j++)
 			{
-				htd.cdata()[j] = colInd.cdata()[j];
+				htd.cdata()[j] = g->colInd[j];
 			}
 		}
 	}
 
-
-	htp.switch_to_gpu(0);
-	hts.switch_to_gpu(0);
 	htd.switch_to_gpu(0);
 
 
 
-	tc->count_hash_async(divideConstant, rowPtr, rowInd, htd, htp, hts, numEdges, edgeOffset, kernelType, increasing);
+	tc->count_hash_async(divideConstant, g, htd, htp, hts, numEdges, edgeOffset, kernelType, increasing);
 	tc->sync();
 	CUDA_RUNTIME(cudaGetLastError());
 	printf("TC Hash = %d\n", tc->count());

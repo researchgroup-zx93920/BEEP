@@ -1,6 +1,9 @@
 #pragma once
 #include "TcBase.cuh"
 
+#include <cooperative_groups.h>
+using namespace cooperative_groups;
+namespace cg = cooperative_groups;
 
 template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
@@ -56,12 +59,14 @@ kernel_binary_enqueue_arrays(uint64* count, //!< [inout] the count, caller shoul
     ) {
 
     size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
+    const size_t gbx = (BLOCK_DIM_X * blockIdx.x + threadIdx.x) / BLOCK_DIM_X;
+
     int tid = threadIdx.x;
     int lx = threadIdx.x % 32;
     uint64 threadCount = 0;
 
-    __shared__ T sharedWarpQ[BLOCK_DIM_X];
-    __shared__ T sharedBlockQ[BLOCK_DIM_X];
+    __shared__ T sharedWarpQ[2*BLOCK_DIM_X];
+    __shared__ T sharedBlockQ[2*BLOCK_DIM_X];
 
     __shared__ int swc, sbc;
     __shared__ int startWarpQueue, startBlockQueue, global;
@@ -78,58 +83,85 @@ kernel_binary_enqueue_arrays(uint64* count, //!< [inout] the count, caller shoul
         sbc = 0;
     __syncthreads();
 
-    int i = gx + edgeStart;
-    if(i < numEdges)
+    for (size_t b = gbx; b < (numEdges + BLOCK_DIM_X-1)/ BLOCK_DIM_X; b += gridDim.x)
     {
-         T src = g.rowInd[i];
-         T dst = g.colInd[i];
+        int i = b * BLOCK_DIM_X + tid;
 
-      T srcStart = g.rowPtr[src];
-         T srcStop = g.rowPtr[src + 1];
-
-         T dstStart = g.rowPtr[dst];
-         T dstStop = g.rowPtr[dst + 1];
-
-         T dstLen = dstStop - dstStart;
-         T srcLen = srcStop - srcStart;
-
-        if (srcLen > dstLen)
+        if (i < numEdges)
         {
-            swap_ele(srcStart, dstStart);
-            swap_ele(srcStop, dstStop);
-            swap_ele(srcLen, dstLen);
+            T src = g.rowInd[i];
+            T dst = g.colInd[i];
+
+            T srcStart = g.rowPtr[src];
+            T srcStop = g.rowPtr[src + 1];
+
+            T dstStart = g.rowPtr[dst];
+            T dstStop = g.rowPtr[dst + 1];
+
+            T dstLen = dstStop - dstStart;
+            T srcLen = srcStop - srcStart;
+
+            if (srcLen > dstLen)
+            {
+                swap_ele(srcStart, dstStart);
+                swap_ele(srcStop, dstStop);
+                swap_ele(srcLen, dstLen);
+            }
+
+            if (srcLen < 4)
+            {
+                threadCount += graph::thread_sorted_count_binary<T>(&(g.colInd[srcStart]), srcLen,
+                    &(g.colInd[dstStart]), dstLen);
+            }
+            else if (srcLen >= 4 && srcLen < 128)
+            {
+                auto prev = atomicAdd(&swc, 1);
+                sharedWarpQ[prev] = i;
+            }
+            else if (srcLen >= 128)
+            {
+                auto prev = atomicAdd(&sbc, 1);
+                sharedBlockQ[prev] = i;
+            }
         }
 
-        if (srcLen >= 8 && srcLen < 64)
+        __syncthreads();
+        if (tid == 0)
         {
-            auto prev = atomicAdd(&swc, 1);
-            sharedWarpQ[prev] = i;
+            if (swc > 0)
+            {
+                startWarpQueue = atomicAdd(wc, swc);
+            }
         }
-        else if(srcLen >= 64)
+        if (tid == 1)
         {
-            auto prev = atomicAdd(&sbc, 1);
-            sharedBlockQ[prev] = i;
+            if (sbc > 0)
+                startBlockQueue = atomicAdd(bc, sbc);
         }
+        __syncthreads();
+        for (int q = tid; q < swc; q += BLOCK_DIM_X)
+            wq[startWarpQueue + q] = sharedWarpQ[q];
+
+        for (int q = tid; q < sbc; q += BLOCK_DIM_X)
+            bq[startBlockQueue + q] = sharedBlockQ[q];
+
+        __syncthreads();
+        if (tid == 0)
+        {
+            swc = 0;
+        }
+        if (tid == 1)
+        {
+            sbc = 0;
+        }
+
     }
-    __syncthreads();
-    if (tid == 0)
-    {
-        if (swc > 0)
-        {
-            startWarpQueue = atomicAdd(wc, swc);
-        }
-    }
-    if (tid == 1)
-    {
-        if (sbc > 0)
-            startBlockQueue = atomicAdd(bc, sbc);
-    }
-    __syncthreads();
-    for (int q = tid; q < swc; q+= BLOCK_DIM_X)
-        wq[startWarpQueue + q] = sharedWarpQ[q];
 
-    for (int q = tid; q < sbc; q+= BLOCK_DIM_X)
-        bq[startBlockQueue + q] = sharedBlockQ[q];
+    typedef cub::BlockReduce<uint64_t, BLOCK_DIM_X> BlockReduce;
+    __shared__ typename BlockReduce::TempStorage tempStorage;
+    uint64_t aggregate = BlockReduce(tempStorage).Sum(threadCount);
+    if (threadIdx.x == 0)
+        atomicAdd(count, aggregate);
 }
 
 
@@ -147,38 +179,6 @@ kernel_binary_dequeue_arrays(uint64* count, //!< [inout] the count, caller shoul
     int tid = threadIdx.x;
     int lx = threadIdx.x % 32;
     uint64 threadCount = 0;
-
-    int i = gx + edgeStart;
-    if (i < numEdges)
-    {
-        T src = g.rowInd[i];
-        T dst = g.colInd[i];
-
-        T srcStart = g.rowPtr[src];
-        T srcStop = g.rowPtr[src + 1];
-
-        T dstStart = g.rowPtr[dst];
-        T dstStop = g.rowPtr[dst + 1];
-
-        T dstLen = dstStop - dstStart;
-        T srcLen = srcStop - srcStart;
-
-
-        if (srcLen > dstLen)
-        {
-            swap_ele(srcStart, dstStart);
-            swap_ele(srcStop, dstStop);
-            swap_ele(srcLen, dstLen);
-        }
-
-        if (srcLen < 8)
-        {
-            threadCount += graph::thread_sorted_count_binary<T>(&(g.colInd[srcStart]), srcLen,
-                &(g.colInd[dstStart]), dstLen);
-        }
-        
-    }
-    __syncthreads();
     //Now :1 Warp
     constexpr size_t warpsPerBlock = BLOCK_DIM_X / 32;
     gx = gx / 32;
@@ -1271,16 +1271,22 @@ namespace graph {
                 GPUArray<T> warpCount("Warp Count", AllocationTypeEnum::unified, 1, 0);
                 GPUArray<T> blockCount("block Count", AllocationTypeEnum::unified, 1, 0);
 
+                /// This will launch a grid that can maximally fill the GPU, on the default stream with kernel arguments
+                
+                CUDAContext c;
+                auto num_SMs = c.num_SMs;
+                auto conc_blocks_per_SM = c.GetConCBlocks(dimBlock);
+               
+
               kernel_binary_enqueue_arrays<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, *g, ne, edgeOffset,
-                    
                     warpQueue.gdata(), warpCount.gdata(), blockQueue.gdata(), blockCount.gdata()
                     );
 
 
                 cudaDeviceSynchronize();
 
-                /*printf("Warp Queue = %u elements\n", warpCount.gdata()[0]);
-                printf("Block Queue = %u elements\n", blockCount.gdata()[0]);*/
+                printf("Warp Queue = %u elements\n", warpCount.gdata()[0]);
+                printf("Block Queue = %u elements\n", blockCount.gdata()[0]);
 
 
                kernel_binary_dequeue_arrays<T, dimBlock> << < (32 * warpCount.gdata()[0] + dimBlock -1) / (dimBlock) , dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, *g, ne, edgeOffset,
