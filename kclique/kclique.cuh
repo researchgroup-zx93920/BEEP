@@ -115,10 +115,10 @@ kernel_block_level_kclique_count(
 
 		while (level_count[l - 2] > level_index[l-2])
 		{
-			if (tid == 0)
+			/*if (tid == 0)
 			{
 				printf("Level = %u, Index = %u, %u\n", l, level_index[l - 2], level_count[l - 2]);
-			}
+			}*/
 
 			//(1) Randomly Select an element from current level: Later
 			/*for (int k = 0; k < srcLenBlocks; k++)
@@ -161,7 +161,7 @@ kernel_block_level_kclique_count(
 					if (current_level[index] == l)
 					{
 
-						printf("%u, %u, %u\n", index, threadData, g.colInd[index]);
+						//printf("%u, %u, %u\n", index, threadData, g.colInd[index]);
 
 						filter_level[srcStart + accumAggData + threadData] = g.colInd[index];
 						filter_scan[srcStart + accumAggData + threadData] = index;
@@ -192,7 +192,7 @@ kernel_block_level_kclique_count(
 			const T dstStop = g.rowPtr[current_node_index + 1];
 			const T dstLen = dstStop - dstStart;
 
-			if (tid == 0)
+			/*if (tid == 0)
 			{
 				printf("Adj of %u is: ", dst);
 				for (int tt = dstStart; tt < dstStop; tt++)
@@ -200,7 +200,7 @@ kernel_block_level_kclique_count(
 					printf("%u, ", g.colInd[tt]);
 				}
 				printf("\n");
-			}
+			}*/
 
 
 			
@@ -218,18 +218,20 @@ kernel_block_level_kclique_count(
 			__syncthreads();
 			if (tid == 0)
 			{
+				new_level = l;
 				//1
 				if (blockCount > 0 && l + 1 == kclique)
 					clique_count += blockCount;
 				else if (blockCount > 0 && l + 1 < kclique)
 				{
 					l++;
+					new_level++;
 					level_count[l - 2] = blockCount;
 					level_index[l - 2] = 0;
 				}
-				else if (blockCount == 0)
+				else if (blockCount == 0 && l > 2)
 				{ 
-					new_level = l - 1;
+					//new_level = l - 1;
 				}
 
 				while (new_level > 2 && level_index[new_level - 2] >= level_count[new_level - 2])
@@ -239,7 +241,7 @@ kernel_block_level_kclique_count(
 			}
 
 			__syncthreads();
-			if (new_level != l)
+			if (new_level < l)
 			{
 				for (int k = 0; k < srcLenBlocks; k++)
 				{
@@ -247,17 +249,19 @@ kernel_block_level_kclique_count(
 					if (index < srcStop && current_level[index] > new_level)
 						current_level[index] = new_level;
 				}
+
+				l = new_level;
 			}
 			__syncthreads();
 
-			if (tid == 0)
+			/*if (tid == 0)
 			{
 				printf("Chosen Node Index = %u, Agg = %u of %u: TC Count = %u, level = %u\n", current_node_index, aggreagtedData, srcLen, blockCount, l);
 				printf("Now Print all current_level:\n");
 				for (int ii = 0; ii < srcLen; ii++)
 					printf("%u, ", current_level[srcStart + ii]);
 				printf("\n");
-			}
+			}*/
 			
 		}
 
@@ -322,7 +326,7 @@ namespace graph
 
 		//Same Function for any comutation
 		void bucket_scan(
-			GPUArray<int> nodeDegree, uint32_t node_num, int level,
+			GPUArray<int> nodeDegree, uint32_t node_num, int level, int span,
 			GraphQueue<int, bool>& current,
 			GPUArray<uint> asc,
 			GraphQueue<int, bool>& bucket,
@@ -354,7 +358,7 @@ namespace graph
 				current.count.gdata()[0] = 0;
 				long grid_size = (bucket.count.gdata()[0] + BLOCK_SIZE - 1) / BLOCK_SIZE;
 				execKernel(filter_with_random_append, grid_size, BLOCK_SIZE, false,
-					bucket.queue.gdata(), bucket.count.gdata()[0], nodeDegree.gdata(), current.mark.gdata(), current.queue.gdata(), &(current.count.gdata()[0]), level);
+					bucket.queue.gdata(), bucket.count.gdata()[0], nodeDegree.gdata(), current.mark.gdata(), current.queue.gdata(), &(current.count.gdata()[0]), level, span);
 			}
 			else
 			{
@@ -451,6 +455,7 @@ namespace graph
 			GPUArray<BCTYPE> processed; //isDeleted
 
 			int level = 0;
+			int span = 32;
 			int bucket_level_end_ = level;
 
 
@@ -507,6 +512,13 @@ namespace graph
 
 			int todo = g.numNodes;
 			const auto todo_original = g.numNodes;
+
+			bucket_scan(nodeDegree, todo_original, 0, kcount, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
+			todo -= current_q.count.gdata()[0];
+			current_q.count.gdata()[0] = 0;
+			level = kcount;
+			bucket_level_end_ = level;
+
 			while (todo > 0)
 			{
 				//	//printf("k=%d\n", k);
@@ -515,10 +527,7 @@ namespace graph
 				cudaDeviceSynchronize();
 
 				//1 bucket fill
-				bucket_scan(nodeDegree, todo_original, level, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
-
-				
-
+				bucket_scan(nodeDegree, todo_original, level, span, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
 
 				todo -= current_q.count.gdata()[0];
 
@@ -527,18 +536,9 @@ namespace graph
 					break;
 				}
 
-
-				if (level < kcount)
-				{
-					level++;
-					continue;
-				}
-
-				
-
 				if (current_q.count.gdata()[0] > 0)
 				{
-					current_q.count.gdata()[0] = 1;
+					//current_q.count.gdata()[0] = 1;
 
 					const auto block_size = 256;
 					auto grid_block_size = current_q.count.gdata()[0];
@@ -556,7 +556,7 @@ namespace graph
 
 				printf("Level = %d, Counter = %ul -------------------------------------------------------------------\n", level, counter.gdata()[0]);
 
-				level++;
+				level += span;
 			}
 
 			processed.freeGPU();

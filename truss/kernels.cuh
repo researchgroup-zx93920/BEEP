@@ -4,7 +4,7 @@
 #include "../include/defs.cuh"
 
 #define INT_INVALID  (INT32_MAX)
-#define LEVEL_SKIP_SIZE (16)
+#define LEVEL_SKIP_SIZE (64)
 
 #define INBUCKET_BOOL
 #ifndef INBUCKET_BOOL
@@ -404,6 +404,22 @@ void filter_with_random_append(int* bucket_buf, int count, int* EdgeSupport, boo
     if (gtid < count) {
         auto edge_off = bucket_buf[gtid];
         if (EdgeSupport[edge_off] == ref) {
+            in_curr[edge_off] = true;
+            auto insert_idx = atomicAdd(curr_cnt, 1);
+            curr[insert_idx] = edge_off;
+        }
+    }
+}
+
+
+__global__
+void filter_with_random_append(int* bucket_buf, int count, int* EdgeSupport, bool* in_curr, int* curr, int* curr_cnt,
+    int ref, int span)
+{
+    auto gtid = threadIdx.x + blockIdx.x * blockDim.x;
+    if (gtid < count) {
+        auto edge_off = bucket_buf[gtid];
+        if (EdgeSupport[edge_off] >= ref && EdgeSupport[edge_off] < ref + span) {
             in_curr[edge_off] = true;
             auto insert_idx = atomicAdd(curr_cnt, 1);
             curr[insert_idx] = edge_off;
