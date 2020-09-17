@@ -4,10 +4,10 @@
 #include "utils.cuh"
 
 template<typename T>
-__global__ void setelements(T* arr, int count, T val)
+__global__ void setelements(T* arr, T count, T val)
 {
-	int gtx = threadIdx.x + blockDim.x * blockIdx.x;
-	for (int i = gtx; i < count; i += blockDim.x * gridDim.x)
+	T gtx = threadIdx.x + blockDim.x * blockIdx.x;
+	for (T i = gtx; i < count; i += blockDim.x * gridDim.x)
 	{
 		arr[i] = val;
 	}
@@ -178,14 +178,14 @@ namespace graph
 				
 				memset(cpu_data, val, N * sizeof(T));
 				CUDA_RUNTIME(cudaSetDevice(_deviceId));
-				CUDA_RUNTIME(cudaMemset(gpu_data, val, N * sizeof(T)));
+				setelements<T> << <(N+512-1)/512, 512, 0, _stream >> > (gpu_data, N, val);
 				if (sync)
 					CUDA_RUNTIME(cudaStreamSynchronize(_stream));
 			}
 			else if (_at == AllocationTypeEnum::unified)
 			{
 				CUDA_RUNTIME(cudaSetDevice(_deviceId));
-				CUDA_RUNTIME(cudaMemset(gpu_data, val, N * sizeof(T)));
+				setelements<T> << <(N + 512 - 1)/512, 512, 0, _stream >> > (gpu_data, N, val);
 				if (sync)
 					CUDA_RUNTIME(cudaStreamSynchronize(_stream));
 			}

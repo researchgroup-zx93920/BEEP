@@ -1186,8 +1186,6 @@ kernel_binary_warp_shared_colab_arrays(uint64* count,                //!< [inout
             startIndex = (wx - 1) * pwMaxSize;
         }
 
-
-
         const T par = (dstLen + colabMaxSize - 1) / (colabMaxSize);
         const T numElements = dstLen < colabMaxSize ? dstLen : (dstLen + par - 1) / par;
 

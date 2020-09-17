@@ -852,10 +852,75 @@ namespace graph
        
     }
 
+    template <size_t BLOCK_DIM_X, typename T, bool reduce = true>
+    __device__ uint64_t block_sorted_count_and_set_binary(const T* const A, //!< [in] array A
+        const size_t aSz, //!< [in] the number of elements in A
+        const T* const B, //!< [in] array B
+        const size_t bSz,  //!< [in] the number of elements in B
+
+        bool AisMaster,
+        T startIndex,
+        T* current_level,
+        T* filter_scan,
+        T new_level,
+        T clique_number
+
+
+    ) {
+
+        uint64_t threadCount = 0;
+        T lastIndex = 0;
+
+        // cover entirety of A with block
+        for (size_t i = threadIdx.x; i < aSz; i += BLOCK_DIM_X)
+        {
+            // one element of A per thread, just search for A into B
+            const T searchVal = A[i];
+            const T leftValue = B[lastIndex];
+
+            if (searchVal >= leftValue)
+            {
+                const T lb = graph::binary_search<T>(B, lastIndex, bSz, searchVal);
+                if (lb < bSz)
+                {
+                    if (B[lb] == searchVal)
+                    {
+                        threadCount++;
+
+                        //////////////////////////////Device function ///////////////////////
+                        if (new_level < clique_number)
+                        {
+                            T level_index = filter_scan[startIndex + (AisMaster ? i : lb)];
+                            current_level[level_index] = new_level;
+                        }
+                        /////////////////////////////////////////////////////////////////////
+                    }
+                }
+
+                lastIndex = lb;
+            }
+        }
+
+        if (reduce)
+        {
+            __syncthreads();
+
+            typedef cub::BlockReduce<uint64_t, BLOCK_DIM_X> BlockReduce;
+            __shared__ typename BlockReduce::TempStorage tempStorage;
+            uint64_t aggregate = BlockReduce(tempStorage).Sum(threadCount);
+            return aggregate;
+        }
+        else return threadCount;
 
 
 
-    ///////////////////////////////////////SERIAL ENTERSECTION //////////////////////////////////////////////
+    }
+
+
+
+
+
+    ///////////////////////////////////////SERIAL INTERSECTION //////////////////////////////////////////////
     template <typename T>
     __host__ __device__ static size_t serial_sorted_count_linear(T min, const T* const A, //!< beginning of a
         const size_t aSz,

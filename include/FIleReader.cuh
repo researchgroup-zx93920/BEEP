@@ -324,7 +324,7 @@ namespace graph
             mfp.Set(symmetric, skew, array, pattern);
 
             long long ll_nodes_x, ll_nodes_y, ll_edges;
-            int items_scanned = sscanf(line.c_str(), "%lld %lld %lld", &ll_nodes_x, &ll_nodes_y, &ll_edges);
+            unsigned long long items_scanned = sscanf(line.c_str(), "%lld %lld %lld", &ll_nodes_x, &ll_nodes_y, &ll_edges);
 
             if (array && items_scanned == 2) {
                 ll_edges = ll_nodes_x * ll_nodes_y;
@@ -517,7 +517,7 @@ namespace graph
 
             std::vector<EdgeTy<T>> ptr;
             bool succeed = true;
-            for (int i = 0; i < edges; ++i) 
+            for (unsigned long long i = 0; i < edges; ++i)
             {
                 succeed = true;
                 std::string line;
@@ -608,8 +608,8 @@ namespace graph
 
             unsigned long long* l;
             l = (unsigned long long*)malloc(3 * edges * sizeof(unsigned long long));
-            int elementCounter = 0;
-            for (int i = 0; i < edges; i++)
+            unsigned long long elementCounter = 0;
+            for (unsigned long long i = 0; i < edges; i++)
             {
                 EdgeTy<T> p = ptr[i];
 
@@ -620,7 +620,7 @@ namespace graph
             }
 
 
-            const size_t numWritten = fwrite(l, 8, 3 * edges, writer);
+            const unsigned long long numWritten = fwrite(l, 8, 3 * edges, writer);
 
             fclose(writer);
             free(l);
@@ -657,8 +657,8 @@ namespace graph
 
             unsigned long long* l;
             l = (unsigned long long*)malloc(3 * n * sizeof(unsigned long long));
-            int elementCounter = 0;
-            for (int i = 0; i < n; i++)
+            unsigned long long elementCounter = 0;
+            for (unsigned long long i = 0; i < n; i++)
             {
                 EdgeTy<T> p = fileEdges[i];
 
@@ -704,8 +704,8 @@ namespace graph
                 }
             } while (numread == 3);
 
-            int m = fileEdges.size();
-            int n = fileEdges[m - 1].first;
+            unsigned long long m = fileEdges.size();
+            unsigned long long n = fileEdges[m - 1].first;
 
 
             std::fstream file;
@@ -714,7 +714,7 @@ namespace graph
             file << "%%MatrixMarket matrix coordinate general" << std::endl;
             file << n << " " << n << " " << m << std::endl;
 
-            for (int i = 0; i < m; i++)
+            for (unsigned long long i = 0; i < m; i++)
             {
                 file << fileEdges[i].first << " " << fileEdges[i].second <<" " << weights[i] << std::endl;
             }
@@ -761,8 +761,8 @@ namespace graph
                 }
             } while (numRead > 0);
 
-            int m = fileEdges.size();
-            int n = fileEdges[m - 1].first;
+            unsigned long long m = fileEdges.size();
+            unsigned long long n = fileEdges[m - 1].first;
 
 
             std::fstream file;
@@ -771,7 +771,7 @@ namespace graph
             file << "%%MatrixMarket matrix coordinate general" << std::endl;
             file << n << " " << n << " " << m << std::endl;
 
-            for (int i = 0; i < m; i++)
+            for (unsigned long long i = 0; i < m; i++)
             {
                 file << fileEdges[i].first << " " << fileEdges[i].second << " " << weights[i] << std::endl;
             }

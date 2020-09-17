@@ -32,7 +32,7 @@
 #include "../include/main_support.cuh"
 
 #include "../kcore/kcore.cuh"
-
+#include "../kclique/kclique.cuh"
 
 
 
@@ -54,11 +54,12 @@ using namespace std;
 
 #define NORMAL
 //#define Matrix_Stats
-#define TC
+//#define TC
 //#define Cross_Decomposition
 //#define TriListConstruct
 //#define KTRUSS
 //#define KCORE
+#define KCLIQUE
 
 
 int main(int argc, char** argv) {
@@ -68,8 +69,8 @@ int main(int argc, char** argv) {
 	printf("\033[0m");
 	printf("Welcome ---------------------\n");
 	graph::MtB_Writer mwriter;
-	auto fileSrc = argv[1];
-	auto fileDst = argv[2];
+	auto fileSrc = "D:\\graphs\\as-Skitter.mtx"; //argv[1];
+	auto fileDst = "D:\\graphs\\as-Skitter.bel";//argv[2];
 
 
 	
@@ -104,7 +105,7 @@ int main(int argc, char** argv) {
 
 	char* matr;
 
-	matr = "D:\\graphs\\graph500-scale18-ef16_adj.bel";
+	matr = "D:\\graphs\\as-Skitter.bel";
 
 #ifndef __VS__
 	if (argc > 1)
@@ -132,7 +133,7 @@ int main(int argc, char** argv) {
 
 
 	//Importatnt
-	OrientGraphByEnum orientBy = None;
+	OrientGraphByEnum orientBy = Degree;
 
 	graph::CSRCOO<uint> csrcoo;
 	if(orientBy == Upper)
@@ -190,13 +191,6 @@ int main(int argc, char** argv) {
 		keep.freeGPU();
 		free_csrcoo_device(g);
 
-
-		//for (int i = 0; i < n; i++)
-		//{
-		//	if (mohacore.nodeDegree.gdata()[i] > 690)
-		//		printf("Below zeor at %d\n", i);
-		//}
-
 		m = m / 2;
 
 		g.capacity = m;
@@ -211,6 +205,29 @@ int main(int argc, char** argv) {
 		double time_init = t_init.elapsed();
 		Log(info, "Create EID (by malmasri): %f s", time_init);
 	}
+
+
+
+	//Just need to verify some new storage format
+	//graph::GPUArray<uint> countCont("Half Row Index", AllocationTypeEnum::unified, m, 0);
+	//for (int i = 0; i < g.numNodes; i++)
+	//{
+	//	uint s = g.rowPtr->cdata()[i];
+	//	uint e = g.rowPtr->cdata()[i + 1];
+	//	for (int j = s; j < e; j++)
+	//	{
+	//		uint v = g.colInd->cdata()[j];
+
+	//		uint s2 = g.rowPtr->cdata()[v];
+	//		uint e2 = g.rowPtr->cdata()[v + 1];
+
+	//		if (e2 - s2 < e - s)
+	//			printf("What !!!!\n");
+
+	//	}
+	//}
+
+
 
 	/*double time = t.elapsed();
 	Log(info, "count time %f s", time);
@@ -309,16 +326,16 @@ int main(int argc, char** argv) {
 		//uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, gd, ee, st, ProcessingElementEnum::Thread, 0);
 
 		////CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
-		//uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, gd, ee, st, ProcessingElementEnum::Warp, 0);
+		uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, gd, ee, st, ProcessingElementEnum::Warp, 0);
 		//uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee,  st, ProcessingElementEnum::WarpShared, 0);
 		//uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", tcb,gd,  ee,  st, ProcessingElementEnum::Test, 0);
 
-		
+		//
 
-		uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", tcBE, gd, ee, st, ProcessingElementEnum::Warp, 0);
-		CountTrianglesHash<uint>(divideConstant, tchash, gd, ee,  0, ProcessingElementEnum::Warp, 0);
+		//uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", tcBE, gd, ee, st, ProcessingElementEnum::Warp, 0);
+		//CountTrianglesHash<uint>(divideConstant, tchash, gd, ee,  0, ProcessingElementEnum::Warp, 0);
 	
-		uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
+		//uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
 	
 		//CountTriangles<uint>("NVGRAPH", tcNV, gd, ee);
 
@@ -363,6 +380,18 @@ int main(int argc, char** argv) {
 	Log(info, "count time %f s", time);
 	Log(info, "MOHA %d kcore (%f teps)", mohacore.count(), m / time);
 #endif
+
+#ifdef KCLIQUE
+	graph::SingleGPU_Kclique<uint> mohacore(0);
+	Timer t;
+	mohacore.findKclqueIncremental_async(5, *gd, 0, 0);
+	mohacore.sync();
+	double time = t.elapsed();
+	Log(info, "count time %f s", time);
+	Log(info, "MOHA %d kcore (%f teps)", mohacore.count(), m / time);
+
+#endif
+
 
 #ifdef KTRUSS
 
