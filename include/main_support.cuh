@@ -286,7 +286,10 @@ uint64 CountTriangles(std::string message, graph::TcBase<T>* tc, graph::COOCSRGr
 	tc->count_async(g, numEdges_upto, edgeOffset, kernelType, increasing);
 	tc->sync();
 	CUDA_RUNTIME(cudaGetLastError());
-	printf("TC = %u\n", tc->count());
+	
+	std::cout.imbue(std::locale(""));
+	cout << "TC = " << tc->count() << "\n";
+
 	double secs = tc->kernel_time();
 	int dev = tc->device();
 	Log(LogPriorityEnum::info, "Kernel [%s]: gpu %d kernel time %f (%f teps) \n", message.c_str(), dev, secs, (numEdges_upto-edgeOffset) / secs);

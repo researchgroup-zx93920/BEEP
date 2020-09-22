@@ -4,7 +4,7 @@
 #include "../include/defs.cuh"
 
 #define INT_INVALID  (INT32_MAX)
-#define LEVEL_SKIP_SIZE (64)
+#define LEVEL_SKIP_SIZE (1024)
 
 #define INBUCKET_BOOL
 #ifndef INBUCKET_BOOL

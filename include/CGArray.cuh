@@ -4,10 +4,10 @@
 #include "utils.cuh"
 
 template<typename T>
-__global__ void setelements(T* arr, T count, T val)
+__global__ void setelements(T* arr, uint64 count, T val)
 {
-	T gtx = threadIdx.x + blockDim.x * blockIdx.x;
-	for (T i = gtx; i < count; i += blockDim.x * gridDim.x)
+	uint64 gtx = threadIdx.x + blockDim.x * blockIdx.x;
+	for (uint64 i = gtx; i < count; i += blockDim.x * gridDim.x)
 	{
 		arr[i] = val;
 	}

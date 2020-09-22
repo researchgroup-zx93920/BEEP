@@ -708,6 +708,9 @@ namespace graph
             unsigned long long n = fileEdges[m - 1].first;
 
 
+
+
+
             std::fstream file;
             file.open(outputPath, std::ios::out);
 
@@ -779,6 +782,85 @@ namespace graph
             //closing the file
             file.close();
         }
+
+
+        template <typename T, typename ValueT = int>
+        void write_txt_bel(
+            const std::string path,
+            const std::string outputPath,
+            bool makeFull,
+            int numCol = 3,
+            int srcIndex = 1
+        ) {
+
+            FILE* fp_;
+            fp_ = fopen(path.c_str(), "r");
+            std::vector<EdgeTy<T>> fileEdges;
+            int numread = 0;
+            long long unsigned a, b, weight;
+            do 
+            {
+                if (numCol == 3)
+                    numread = fscanf(fp_, "%llu %llu %llu", &a, &b, &weight);
+                else if (numCol == 2)
+                    numread = fscanf(fp_, "%llu %llu", &a, &b);
+
+                if (numread == numCol)
+                {
+                    long long unsigned src, dst;
+
+                    if (srcIndex == 0)
+                    {
+                        src = a;
+                        dst = b;
+                    }
+                    else
+                    {
+                        src = b;
+                        dst = a;
+                    }
+                    fileEdges.push_back(std::make_pair(src, dst));
+                    if (makeFull)
+                        fileEdges.push_back(std::make_pair(dst, src));
+                }
+            }
+            while (numread == numCol);
+
+            std::sort(fileEdges.begin(), fileEdges.end(), [](const EdgeTy<T>& a, const EdgeTy<T>& b) -> bool
+                {
+                    return a.first < b.first || (a.first == b.first && a.second < b.second);
+                });
+
+
+            
+            int n = fileEdges.size();
+            FILE* writer = fopen(outputPath.c_str(), "wb");
+
+            if (writer == nullptr) {
+
+                return;
+            }
+
+            unsigned long long* l;
+            l = (unsigned long long*)malloc(3 * n * sizeof(unsigned long long));
+            unsigned long long elementCounter = 0;
+            for (unsigned long long i = 0; i < n; i++)
+            {
+                EdgeTy<T> p = fileEdges[i];
+
+                //in TSV (d, s, w)
+                l[elementCounter++] = p.second;
+                l[elementCounter++] = p.first;
+                l[elementCounter++] = 0;
+            }
+
+
+            const size_t numWritten = fwrite(l, 8, 3 * n, writer);
+
+            fclose(writer);
+            free(l);
+        }
+
 
     };
 

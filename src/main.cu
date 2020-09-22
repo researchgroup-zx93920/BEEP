@@ -50,11 +50,12 @@ using namespace std;
 //#define MARKET_BEL
 //#define TSV_BEL
 //#define BEL_MARKET
+#define TXT_BEL
 
 
-#define NORMAL
+//#define NORMAL
 //#define Matrix_Stats
-//#define TC
+#define TC
 //#define Cross_Decomposition
 //#define TriListConstruct
 //#define KTRUSS
@@ -69,8 +70,8 @@ int main(int argc, char** argv) {
 	printf("\033[0m");
 	printf("Welcome ---------------------\n");
 	graph::MtB_Writer mwriter;
-	auto fileSrc = "D:\\graphs\\as-Skitter.mtx"; //argv[1];
-	auto fileDst = "D:\\graphs\\as-Skitter.bel";//argv[2];
+	auto fileSrc = "D:\\graphs\\com-orkut.ungraph.txt"; //argv[1];
+	auto fileDst = "D:\\graphs\\com-orkut.ungraph.bel";//argv[2];
 
 
 	
@@ -96,6 +97,11 @@ int main(int argc, char** argv) {
 	return;
 #endif
 
+#ifdef TXT_BEL
+	mwriter.write_txt_bel<uint, uint>(fileSrc, fileDst, true, 2, 0);
+	return;
+#endif
+
 #ifndef NORMAL
 	return;
 #endif
@@ -105,7 +111,7 @@ int main(int argc, char** argv) {
 
 	char* matr;
 
-	matr = "D:\\graphs\\as-Skitter.bel";
+	matr = "D:\\graphs\\as-Skitter2.bel";
 
 #ifndef __VS__
 	if (argc > 1)
@@ -161,11 +167,11 @@ int main(int argc, char** argv) {
 	///Now we need to orient the graph
 	graph::COOCSRGraph_d<uint>* gd;
 	to_csrcoo_device(g, gd); //got to device !!
-
+	graph::SingleGPU_Kcore<uint> mohacore(0);
 	if (orientBy == Degree || orientBy == Degeneracy)
 	{
 		Timer t_init;
-		graph::SingleGPU_Kcore<uint> mohacore(0);
+		
 		Timer t;
 		if (orientBy == Degeneracy)
 			mohacore.findKcoreIncremental_async(3, 1000, *gd, 0, 0);
@@ -326,7 +332,7 @@ int main(int argc, char** argv) {
 		//uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, gd, ee, st, ProcessingElementEnum::Thread, 0);
 
 		////CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
-		uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, gd, ee, st, ProcessingElementEnum::Warp, 0);
+		//uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, gd, ee, st, ProcessingElementEnum::Block , 0);
 		//uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee,  st, ProcessingElementEnum::WarpShared, 0);
 		//uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", tcb,gd,  ee,  st, ProcessingElementEnum::Test, 0);
 
@@ -382,13 +388,13 @@ int main(int argc, char** argv) {
 #endif
 
 #ifdef KCLIQUE
-	graph::SingleGPU_Kclique<uint> mohacore(0);
+	graph::SingleGPU_Kclique<uint> mohaclique(0);
 	Timer t;
-	mohacore.findKclqueIncremental_async(5, *gd, 0, 0);
-	mohacore.sync();
+	mohaclique.findKclqueIncremental_async(6, *gd, 0, 0);
+	mohaclique.sync();
 	double time = t.elapsed();
 	Log(info, "count time %f s", time);
-	Log(info, "MOHA %d kcore (%f teps)", mohacore.count(), m / time);
+	Log(info, "MOHA %d kcore (%f teps)", mohaclique.count(), m / time);
 
 #endif
 
