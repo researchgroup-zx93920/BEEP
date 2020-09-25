@@ -387,14 +387,27 @@ void warp_detect_deleted_edges(
 //    }
 //}
 //
+
+template<typename T>
 __global__
-void filter_window(int* edge_sup, int count, InBucketWinType* in_bucket, int low, int high) {
+void filter_window(T* edge_sup, int count, InBucketWinType* in_bucket, int low, int high) {
     auto gtid = threadIdx.x + blockIdx.x * blockDim.x;
     if (gtid < count) {
         auto v = edge_sup[gtid];
         in_bucket[gtid] = (v >= low && v < high);
     }
 }
+
+
+__global__
+void filter_pointer_window(uint* edge_sup, int count, InBucketWinType* in_bucket, int low, int high) {
+    auto gtid = threadIdx.x + blockIdx.x * blockDim.x;
+    if (gtid < count) {
+        auto v = edge_sup[gtid+1] - edge_sup[gtid];
+        in_bucket[gtid] = (v >= low && v < high);
+    }
+}
+
 
 __global__
 void filter_with_random_append(int* bucket_buf, int count, int* EdgeSupport, bool* in_curr, int* curr, int* curr_cnt,
@@ -413,13 +426,31 @@ void filter_with_random_append(int* bucket_buf, int count, int* EdgeSupport, boo
 
 
 __global__
-void filter_with_random_append(int* bucket_buf, int count, int* EdgeSupport, bool* in_curr, int* curr, int* curr_cnt,
+void filter_with_random_append(int* bucket_buf, int count, uint* EdgeSupport, bool* in_curr, int* curr, int* curr_cnt,
     int ref, int span)
 {
     auto gtid = threadIdx.x + blockIdx.x * blockDim.x;
     if (gtid < count) {
         auto edge_off = bucket_buf[gtid];
         if (EdgeSupport[edge_off] >= ref && EdgeSupport[edge_off] < ref + span) {
+            in_curr[edge_off] = true;
+            auto insert_idx = atomicAdd(curr_cnt, 1);
+            curr[insert_idx] = edge_off;
+        }
+    }
+}
+
+template<typename T>
+__global__
+void filter_with_random_append_pointer(int* bucket_buf, int count, T* EdgeSupport, bool* in_curr, int* curr, int* curr_cnt,
+    int ref, int span)
+{
+    auto gtid = threadIdx.x + blockIdx.x * blockDim.x;
+    if (gtid < count) {
+        auto edge_off = bucket_buf[gtid];
+        auto v = EdgeSupport[edge_off + 1] - EdgeSupport[edge_off];
+
+        if (v >= ref && v < ref + span) {
             in_curr[edge_off] = true;
             auto insert_idx = atomicAdd(curr_cnt, 1);
             curr[insert_idx] = edge_off;

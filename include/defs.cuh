@@ -22,6 +22,8 @@ template <typename NodeTy, typename WeightTy> using WEdgeTy = std::tuple<NodeTy,
 
 
 #define __VERBOSE__
+#define __VS__ //visual studio debug
+
 
 typedef unsigned long long int uint64;
 
@@ -31,3 +33,17 @@ enum AllocationTypeEnum { cpuonly, gpu, unified, zerocopy };
 enum LogPriorityEnum { critical, warn, error, info, debug, none };
 enum OrientGraphByEnum {None, Upper, Lower, Degree, Degeneracy };
 
+enum MAINTASK {
+    CONV_TSV_MTX,
+    CONV_MTX_BEL,
+    CONV_TSV_BEL,
+    CONV_BEL_MTX,
+    CONV_TXT_BEL,
+
+    TC,
+    KCORE,
+    KTRUSS,
+    KCLIQUE,
+    CROSSDECOMP
+
+};

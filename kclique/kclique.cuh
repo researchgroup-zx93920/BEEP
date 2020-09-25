@@ -58,7 +58,7 @@ __global__ void try_block_scan(T count,  T* output)
 
 
 template <typename T, int BLOCK_DIM_X>
-__global__ void init_edge_ptr(int* nodeDegree, graph::COOCSRGraph_d<T> g, T* edgePtr)
+__global__ void init_edge_ptr(graph::COOCSRGraph_d<T> g, T* edgePtr)
 {
 	const T gtid = (BLOCK_DIM_X * blockIdx.x + threadIdx.x);
 
@@ -67,12 +67,24 @@ __global__ void init_edge_ptr(int* nodeDegree, graph::COOCSRGraph_d<T> g, T* edg
 		T src = g.rowInd[gtid];
 		T dst = g.colInd[gtid];
 
-		T srcDeg = nodeDegree[src];
-		T dstDeg = nodeDegree[dst];
+		T srcDeg = g.rowPtr[src + 1] - g.rowPtr[src];
+		T dstDeg = g.rowPtr[dst + 1] - g.rowPtr[dst];
 
 		edgePtr[gtid] = srcDeg < dstDeg ? srcDeg : dstDeg;
 	}
 
+}
+
+
+template<typename T>
+__global__ void getNodeDegree_kernel(T* nodeDegree, graph::COOCSRGraph_d<T> g)
+{
+	int gtid = threadIdx.x + blockIdx.x * blockDim.x;
+
+	for (int i = gtid; i < g.numNodes; i += blockDim.x * gridDim.x)
+	{
+		nodeDegree[i] = g.rowPtr[i + 1] - g.rowPtr[i];
+	}
 }
 
 
@@ -194,7 +206,6 @@ kernel_block_level_kclique_count0(
 
 				accumAggData += aggreagtedData;
 				__syncthreads();
-
 			}
 
 			__syncthreads();
@@ -522,7 +533,7 @@ kernel_block_level_kclique_count(
 	char* current_level,
 	T* filter_level,
 	T* filter_scan,
-	int* nodeDegree
+	T* nodeDegree
 )
 {
 	T threadData = 0;
@@ -620,11 +631,11 @@ kernel_block_level_kclique_count(
 				if (dstLen > srcLen)
 				{
 					blockCount += graph::block_sorted_count_and_set_binary2<BLOCK_DIM_X, T, true>(&g.colInd[srcStart], srcLen,
-						&g.colInd[dstStart], dstLen, true, srcStart, cl, filter_scan, l + 1, kclique);
+						&g.colInd[dstStart], dstLen, true, srcStart, cl, l + 1, kclique);
 				}
 				else {
 					blockCount += graph::block_sorted_count_and_set_binary2<BLOCK_DIM_X, T, true>(&g.colInd[dstStart], dstLen,
-						&g.colInd[srcStart], srcLen, false, srcStart, cl, filter_scan, l + 1, kclique);
+						&g.colInd[srcStart], srcLen, false, srcStart, cl, l + 1, kclique);
 				}
 
 				__syncthreads();
@@ -648,13 +659,12 @@ kernel_block_level_kclique_count(
 
 				}
 
-				__syncthreads();
+				//__syncthreads();
 			}
 
 			__syncthreads();
 			if (tid == 0)
 			{
-
 				while (new_level > 2 && level_index[new_level - 2] >= level_count[new_level - 2])
 				{
 					new_level--;
@@ -700,9 +710,7 @@ kernel_block_level_kclique_edge_count(
 	int level,
 	graph::GraphQueue_d<int, bool> current,
 	char* current_level,
-	T* filter_level,
-	T* filter_scan,
-	int* nodeDegree
+	T* edgePointer
 )
 {
 	T threadData = 0;
@@ -723,9 +731,6 @@ kernel_block_level_kclique_edge_count(
 	__shared__ T l;
 	__shared__ T new_level;
 
-
-
-
 	if (tid == 0)
 		clique_count = 0;
 
@@ -733,16 +738,42 @@ kernel_block_level_kclique_edge_count(
 
 	for (size_t i = gbx; i < current.count[0]; i += gridDim.x)
 	{
-		const T nodeId = current.queue[i];
-		const T srcStart = g.rowPtr[nodeId];
-		const T srcStop = g.rowPtr[nodeId + 1];
+		const T edgeId = current.queue[i];
+
+		T src = g.rowInd[edgeId];
+		T src2 = g.colInd[edgeId];
+
+		T epStart = edgePointer[edgeId];
+		T epEnd = edgePointer[edgeId + 1];
+		T epSpace = epEnd - epStart;
+
+		const T srcStart = g.rowPtr[src];
+		const T srcStop = g.rowPtr[src + 1];
 		const T srcLen = srcStop - srcStart;
-		const T srcLenBlocks = (srcLen + BLOCK_DIM_X - 1) / BLOCK_DIM_X;
+		
+
+		const T src2Start = g.rowPtr[src2];
+		const T src2Stop = g.rowPtr[src2 + 1];
+		const T src2Len = src2Stop - src2Start;
+
+		const T refStart = src2Len > srcLen ? srcStart : src2Start;
+		const T srcLenBlocks = (epSpace + BLOCK_DIM_X - 1) / BLOCK_DIM_X;
 
 
-		char* cl = &current_level[srcStart];
+		assert(epSpace == (src2Len > srcLen ? srcLen : src2Len));
+
+
+		char* cl = &current_level[epStart];
 		if (srcLen < 4 * BLOCK_DIM_X)
 			cl = current_level_s;
+
+		if (tid == 0)
+		{
+			l = 2;
+			level_count[l - 2] = epSpace;
+			current_node_index = UINT_MAX;
+		}
+		__syncthreads();
 
 		if (tid < 10)
 		{
@@ -756,22 +787,55 @@ kernel_block_level_kclique_edge_count(
 		current_level_s[tid + BLOCK_DIM_X * 2] = 2; // (tid + BLOCK_DIM_X * 2) < srcLen&& nodeDegree[g.colInd[srcStart + tid + BLOCK_DIM_X * 2]] < kclique - 1 ? 0 : 2;
 		current_level_s[tid + BLOCK_DIM_X * 3] = 2; // (tid + BLOCK_DIM_X * 3) < srcLen&& nodeDegree[g.colInd[srcStart + tid + BLOCK_DIM_X * 3]] < kclique - 1 ? 0 : 2;
 
-		//__syncthreads();
-
-		if (tid == 0)
-		{
-			l = 2;
-			level_count[l - 2] = srcLen;
-			current_node_index = UINT_MAX;
-		}
 		__syncthreads();
+
+		uint64 blockCount = 0;
+		if (src2Len >= kclique - l)
+		{
+			if (src2Len > srcLen)
+			{
+				blockCount += graph::block_sorted_count_and_set_binary2<BLOCK_DIM_X, T, true>(&g.colInd[srcStart], srcLen,
+					&g.colInd[src2Start], src2Len, true, srcStart, cl, l + 1, kclique);
+			}
+			else {
+				blockCount += graph::block_sorted_count_and_set_binary2<BLOCK_DIM_X, T, true>(&g.colInd[src2Start], src2Len,
+					&g.colInd[srcStart], srcLen, true, srcStart, cl, l + 1, kclique);
+			}
+
+			__syncthreads();
+			if (blockCount > 0)
+			{
+				if (l + 1 == kclique && tid == 0)
+					clique_count += blockCount;
+				else if (l + 1 < kclique)
+				{
+					if (tid == 0)
+					{
+						l++;
+						new_level++;
+						level_count[l - 2] = blockCount;
+						level_index[l - 2] = 0;
+						level_prev_index[l - 2] = 0;
+					}
+				}
+
+			}
+
+			__syncthreads();
+		}
+
+
+		__syncthreads();
+
+
+		assert(epSpace >= level_count[l - 2]);
 
 		while (level_count[l - 2] > level_index[l - 2])
 		{
 			for (int k = 0; k < srcLenBlocks; k++)
 			{
 				T index = level_prev_index[l - 2] + k * BLOCK_DIM_X + tid;
-				if (index < srcLen && cl[index] == l)
+				if (index < epSpace && cl[index] == l)
 				{
 					atomicMin(&current_node_index, index);
 				}
@@ -791,25 +855,24 @@ kernel_block_level_kclique_edge_count(
 			__syncthreads();
 
 			uint64 blockCount = 0;
-			const T dst = g.colInd[current_node_index + srcStart];
+			const T dst = g.colInd[current_node_index + refStart];
+
 			const T dstStart = g.rowPtr[dst];
 			const T dstStop = g.rowPtr[dst + 1];
 			const T dstLen = dstStop - dstStart;
 			if (dstLen >= kclique - l)
 			{
-				if (dstLen > srcLen)
+				if (dstLen > epSpace)
 				{
-					blockCount += graph::block_sorted_count_and_set_binary2<BLOCK_DIM_X, T, true>(&g.colInd[srcStart], srcLen,
-						&g.colInd[dstStart], dstLen, true, srcStart, cl, filter_scan, l + 1, kclique);
+					blockCount += graph::block_sorted_count_and_set_binary2<BLOCK_DIM_X, T, true>(&g.colInd[refStart], epSpace,
+						&g.colInd[dstStart], dstLen, true, srcStart, cl, l + 1, kclique);
 				}
 				else {
 					blockCount += graph::block_sorted_count_and_set_binary2<BLOCK_DIM_X, T, true>(&g.colInd[dstStart], dstLen,
-						&g.colInd[srcStart], srcLen, false, srcStart, cl, filter_scan, l + 1, kclique);
+						&g.colInd[refStart], epSpace, false, srcStart, cl, l + 1, kclique);
 				}
 
 				__syncthreads();
-
-
 				if (blockCount > 0)
 				{
 					if (l + 1 == kclique && tid == 0)
@@ -835,7 +898,7 @@ kernel_block_level_kclique_edge_count(
 			if (tid == 0)
 			{
 
-				while (new_level > 2 && level_index[new_level - 2] >= level_count[new_level - 2])
+				while (new_level > 3 && level_index[new_level - 2] >= level_count[new_level - 2])
 				{
 					new_level--;
 				}
@@ -891,7 +954,7 @@ namespace graph
 
 		//Same Function for any comutation
 		void bucket_scan(
-			GPUArray<int> nodeDegree, uint32_t node_num, int level, int span,
+			GPUArray<T> nodeDegree, uint32_t node_num, int level, int span,
 			GraphQueue<int, bool>& current,
 			GPUArray<uint> asc,
 			GraphQueue<int, bool>& bucket,
@@ -936,6 +999,52 @@ namespace graph
 		}
 
 
+		//Same Function for any comutation
+		void bucket_edge_scan(
+			GPUArray<T> nodeDegree, uint32_t node_num, int level, int span,
+			GraphQueue<int, bool>& current,
+			GPUArray<uint> asc,
+			GraphQueue<int, bool>& bucket,
+			int& bucket_level_end_)
+		{
+			static bool is_first = true;
+			static int multi = 1;
+			if (is_first)
+			{
+				current.mark.setAll(false, true);
+				bucket.mark.setAll(false, true);
+				is_first = false;
+			}
+
+			if (level == bucket_level_end_)
+			{
+				// Clear the bucket_removed_indicator
+
+
+				long grid_size = (node_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
+				execKernel(filter_pointer_window, grid_size, BLOCK_SIZE, false,
+					nodeDegree.gdata(), node_num, bucket.mark.gdata(), level, bucket_level_end_ + LEVEL_SKIP_SIZE);
+
+				multi++;
+
+				bucket.count.gdata()[0] = CUBSelect(asc.gdata(), bucket.queue.gdata(), bucket.mark.gdata(), node_num);
+				bucket_level_end_ += LEVEL_SKIP_SIZE;
+			}
+			// SCAN the window.
+			if (bucket.count.gdata()[0] != 0)
+			{
+				current.count.gdata()[0] = 0;
+				long grid_size = (bucket.count.gdata()[0] + BLOCK_SIZE - 1) / BLOCK_SIZE;
+				execKernel(filter_with_random_append_pointer, grid_size, BLOCK_SIZE, false,
+					bucket.queue.gdata(), bucket.count.gdata()[0], nodeDegree.gdata(), current.mark.gdata(), current.queue.gdata(), &(current.count.gdata()[0]), level, span);
+			}
+			else
+			{
+				current.count.gdata()[0] = 0;
+			}
+			//Log(LogPriorityEnum::info, "Level: %d, curr: %d/%d", level, current.count.gdata()[0], bucket.count.gdata()[0]);
+		}
+
 		void AscendingGpu(int n, GPUArray<uint>& identity_arr_asc)
 		{
 			long grid_size = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
@@ -943,57 +1052,10 @@ namespace graph
 			execKernel(init_asc, grid_size, BLOCK_SIZE, false, identity_arr_asc.gdata(), n);
 		}
 
-
-
-		void StreamComapction(
-			int n, T& m,
-			T*& rowPtr, T*& colInd, T*& eid,
-			GPUArray<bool> processed,
-			GPUArray<bool>& edge_deleted,
-			GPUArray <T>& new_offset, GPUArray<T>& new_eid, GPUArray <T>& new_adj,
-			T old_edge_num, T new_edge_num)
-		{
-			static bool shrink_first_time = true;
-			if (shrink_first_time) { //shrink first time, allocate the buffers
-				shrink_first_time = false;
-				Timer alloc_timer;
-				new_adj.initialize("New Adj", gpu, new_edge_num * 2, 0);
-				new_eid.initialize("New EID", gpu, new_edge_num * 2, 0);
-				new_offset.initialize("New Row Pointer", unified, (n + 1), 0);
-				edge_deleted.initialize("Edge deleted", gpu, old_edge_num * 2, 0);
-			}
-
-
-			/*2. construct new CSR (offsets, adj) and rebuild the eid*/
-			int block_size = 128;
-			// Attention: new_offset gets the histogram.
-			execKernel(warp_detect_deleted_edges, GRID_SIZE, block_size, true,
-				rowPtr, n, eid, processed.gdata(), new_offset.gdata(), edge_deleted.gdata());
-
-			uint total = CUBScanExclusive<uint, uint>(new_offset.gdata(), new_offset.gdata(), n);
-			new_offset.gdata()[n] = total;
-			//assert(total == new_edge_num * 2);
-			cudaDeviceSynchronize();
-
-			swap_ele(rowPtr, new_offset.gdata());
-
-			/*new adj and eid construction*/
-			CUBSelect(colInd, new_adj.gdata(), edge_deleted.gdata(), old_edge_num * 2);
-			CUBSelect(eid, new_eid.gdata(), edge_deleted.gdata(), old_edge_num * 2);
-
-			swap_ele(colInd, new_adj.gdata());
-
-
-			swap_ele(eid, new_eid.gdata());
-
-
-			m = new_edge_num * 2;
-		}
-
 	public:
 
 
-		GPUArray<int> nodeDegree;
+		GPUArray<T> nodeDegree;
 
 		SingleGPU_Kclique(int dev) : dev_(dev) {
 			CUDA_RUNTIME(cudaSetDevice(dev_));
@@ -1013,7 +1075,7 @@ namespace graph
 			execKernel(getNodeDegree_kernel<T>, dimGridNodes, dimBlock, false, nodeDegree.gdata(), g);
 		}
 
-		void findKclqueIncremental_async(int kcount, COOCSRGraph_d<T>& g,
+		void findKclqueIncremental_node_async(int kcount, COOCSRGraph_d<T>& g,
 			const size_t nodeOffset = 0, const size_t edgeOffset = 0)
 		{
 			CUDA_RUNTIME(cudaSetDevice(dev_));
@@ -1056,18 +1118,6 @@ namespace graph
 			current_level.setAll(2, true);
 			getNodeDegree(g);
 			int todo = g.numNodes;
-
-
-
-			GPUArray<T> edgePtr("Temp Edge Ptr", unified, g.numEdges + 1, 0);
-
-			execKernel((init_edge_ptr<T, 128>), (g.numEdges + 128 - 1) / 128, 128, false, nodeDegree.gdata(), g, edgePtr.gdata());
-			T total = CUBScanExclusive(edgePtr.gdata(), edgePtr.gdata(), g.numEdges);
-			
-			GPUArray<char> freeSpace("Temp Edge Space", unified, total, 0);
-
-
-
 			bucket_scan(nodeDegree, g.numNodes, 0, kcount - 1, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
 			todo -= current_q.count.gdata()[0];
 			current_q.count.gdata()[0] = 0;
@@ -1129,6 +1179,106 @@ namespace graph
 
 			printf("Max Core = %d\n", k - 1);
 		}
+
+
+
+		void findKclqueIncremental_edge_async(int kcount, COOCSRGraph_d<T>& g,
+			const size_t nodeOffset = 0, const size_t edgeOffset = 0)
+		{
+			CUDA_RUNTIME(cudaSetDevice(dev_));
+			constexpr int dimBlock = 128; //For edges and nodes
+
+			int level = 0;
+			int span = 1024;
+			int bucket_level_end_ = level;
+
+			//Lets apply queues and buckets
+			graph::GraphQueue<int, bool> bucket_q;
+			bucket_q.Create(unified, g.numEdges, 0);
+
+			graph::GraphQueue<int, bool> current_q;
+			current_q.Create(unified, g.numEdges, 0);
+
+			GPUArray<T> identity_arr_asc;
+			AscendingGpu(g.numEdges, identity_arr_asc);
+
+
+			GPUArray <uint64> counter("Temp level Counter", unified, 1, 0);
+			
+			counter.setSingle(0, 0, true);
+			CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+			int todo = g.numEdges;
+
+			GPUArray<T> edgePtr("Temp Edge Ptr", unified, g.numEdges + 1, 0);
+			execKernel((init_edge_ptr<T, 128>), (g.numEdges + 128 - 1) / 128, 128, false, g, edgePtr.gdata());
+			T total = CUBScanExclusive(edgePtr.gdata(), edgePtr.gdata(), g.numEdges);
+			edgePtr.gdata()[g.numEdges] = total;
+			GPUArray<char> freeSpace("Temp Edge Space", unified, total, 0);
+			freeSpace.setAll(2, true);
+
+
+			bucket_edge_scan(edgePtr, g.numEdges, 0, kcount - 1, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
+			todo -= current_q.count.gdata()[0];
+			current_q.count.gdata()[0] = 0;
+			level = kcount - 1;
+			bucket_level_end_ = level;
+
+
+			while (todo > 0)
+			{
+
+				CUDA_RUNTIME(cudaGetLastError());
+				cudaDeviceSynchronize();
+
+				//1 bucket fill
+				bucket_edge_scan(edgePtr, g.numEdges, level, span, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
+
+				/*	int newSpan = span;
+					if (current_q.count.gdata()[0] < 10000)
+						newSpan *= 4;*/
+
+
+				todo -= current_q.count.gdata()[0];
+				if (current_q.count.gdata()[0] > 0)
+				{
+					//printf("Queue = %d\n", current_q.count.gdata()[0]);
+
+					//current_q.count.gdata()[0] = 1100;
+
+					const auto block_size = 64;
+					auto grid_block_size = current_q.count.gdata()[0];
+
+					execKernel((kernel_block_level_kclique_edge_count<T, block_size>), grid_block_size, block_size, false,
+						counter.gdata(),
+						g,
+						kcount,
+						level,
+						current_q.device_queue->gdata()[0],
+						freeSpace.gdata(), edgePtr.gdata());
+
+
+					std::cout.imbue(std::locale(""));
+					std::cout << "------------- Level = " << level << " Nodes = " << current_q.count.gdata()[0] << " Counter = " << counter.gdata()[0] << "\n";
+				}
+
+				/*std::cout.imbue(std::locale(""));
+				std::cout <<"Level = "<< level << " Nodes = " << current_q.count.gdata()[0] << " Counter = " << counter.gdata()[0] << "\n";*/
+
+				//printf("Level = %d, Counter = %'ul -------------------------------------------------------------------\n", level, counter.gdata()[0]);
+
+				level += span;
+				/*if (span < 256)
+					span = newSpan;*/
+			}
+
+			current_q.free();
+			bucket_q.free();
+
+			k = level;
+
+			printf("Max Core = %d\n", k - 1);
+		}
+
 
 		uint findKtrussIncremental_sync(int kmin, int kmax, TcBase<T>* tcCounter, EidGraph_d<T>& g, int* reverseIndex, EncodeDataType* bitMap, const size_t nodeOffset = 0, const size_t edgeOffset = 0)
 		{

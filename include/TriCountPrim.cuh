@@ -928,7 +928,6 @@ namespace graph
         bool AisMaster,
         T startIndex,
         char* current_level,
-        T* filter_scan,
         T new_level,
         T clique_number
 
