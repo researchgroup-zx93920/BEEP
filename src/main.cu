@@ -35,89 +35,51 @@
 #include "../kclique/kclique.cuh"
 
 
-
+#include "../include/Config.h"
 
 
 using namespace std;
-
-
-
-
-#define __VS__ //visual studio debug
-
-///*File Conversion */
-//#define TSV_MARKET
-//#define MARKET_BEL
-//#define TSV_BEL
-//#define BEL_MARKET
-#define TXT_BEL
-
-
-//#define NORMAL
-//#define Matrix_Stats
-#define TC
-//#define Cross_Decomposition
 //#define TriListConstruct
-//#define KTRUSS
-//#define KCORE
-#define KCLIQUE
-
 
 int main(int argc, char** argv) {
 
 	//CUDA_RUNTIME(cudaDeviceReset());
-	
+	Config config = parseArgs(argc, argv);
 	printf("\033[0m");
 	printf("Welcome ---------------------\n");
 	graph::MtB_Writer mwriter;
-	auto fileSrc = "D:\\graphs\\com-orkut.ungraph.txt"; //argv[1];
-	auto fileDst = "D:\\graphs\\com-orkut.ungraph.bel";//argv[2];
+	auto fileSrc = config.srcGraph;
+	auto fileDst = config.dstGraph;
+	if (config.mt == CONV_MTX_BEL) {
+		mwriter.write_market_bel<uint, int>(fileSrc, fileDst, false);
+		return;
+	}
 
+	if (config.mt == CONV_TSV_BEL) {
+		mwriter.write_tsv_bel<uint, uint>(fileSrc, fileDst);
+		return;
+	}
 
-	
+	if (config.mt == CONV_TSV_MTX) {
+		mwriter.write_tsv_market<uint, int>(fileSrc, fileDst);
+		return;
+	}
 
+	if (config.mt == CONV_BEL_MTX) {
+		mwriter.write_bel_market<uint, int>(fileSrc, fileDst);
+		return;
+	}
 
-#ifdef MARKET_BEL
-	mwriter.write_market_bel<uint, int>(fileSrc, fileDst, false);
-	return;
-#endif
+	if (config.mt == CONV_TXT_BEL) {
+		mwriter.write_txt_bel<uint, uint>(fileSrc, fileDst, true, 2, 0);
+		return;
+	}
 
-#ifdef TSV_BEL
-	mwriter.write_tsv_bel<uint, uint>(fileSrc, fileDst);
-	return;
-#endif
-
-#ifdef TSV_MARKET
-	mwriter.write_tsv_market<uint, int>(fileSrc, fileDst);
-	return;
-#endif
-
-#ifdef BEL_MARKET
-	mwriter.write_bel_market<uint, int>(fileSrc, fileDst);
-	return;
-#endif
-
-#ifdef TXT_BEL
-	mwriter.write_txt_bel<uint, uint>(fileSrc, fileDst, true, 2, 0);
-	return;
-#endif
-
-#ifndef NORMAL
-	return;
-#endif
 
 //HERE is the normal program !!
 	//1) Read File to EdgeList
 
-	char* matr;
-
-	matr = "D:\\graphs\\as-Skitter2.bel";
-
-#ifndef __VS__
-	if (argc > 1)
-		matr = argv[1];
-#endif
-
+	const char* matr = config.srcGraph;
 	graph::EdgeListFile f(matr);
 	std::vector<EdgeTy<uint>> edges;
 	std::vector<EdgeTy<uint>> fileEdges;
@@ -131,20 +93,17 @@ int main(int argc, char** argv) {
 		edges.insert(edges.end(), fileEdges.begin(), fileEdges.end());
 	}
 
-	bool sort = false;
-	if (sort)
+	if (config.sortEdges)
 	{
 		f.sort_edges(edges);
 	}
 
 
 	//Importatnt
-	OrientGraphByEnum orientBy = Degree;
-
 	graph::CSRCOO<uint> csrcoo;
-	if(orientBy == Upper)
+	if(config.orient == Upper)
 		csrcoo  = graph::CSRCOO<uint>::from_edgelist(edges, upperTriangular);
-	else if (orientBy == Lower)
+	else if (config.orient == Lower)
 		csrcoo = graph::CSRCOO<uint>::from_edgelist(edges, lowerTriangular);
 	else
 		csrcoo = graph::CSRCOO<uint>::from_edgelist(edges, full);
@@ -168,14 +127,14 @@ int main(int argc, char** argv) {
 	graph::COOCSRGraph_d<uint>* gd;
 	to_csrcoo_device(g, gd); //got to device !!
 	graph::SingleGPU_Kcore<uint> mohacore(0);
-	if (orientBy == Degree || orientBy == Degeneracy)
+	if (config.orient == Degree || config.orient == Degeneracy)
 	{
 		Timer t_init;
 		
 		Timer t;
-		if (orientBy == Degeneracy)
+		if (config.orient == Degeneracy)
 			mohacore.findKcoreIncremental_async(3, 1000, *gd, 0, 0);
-		else if (orientBy == Degree)
+		else if (config.orient == Degree)
 			mohacore.getNodeDegree(*gd);
 		mohacore.sync();
 
@@ -240,6 +199,12 @@ int main(int argc, char** argv) {
 	Log(info, "MOHA %d kcore (%f teps)", mohacore.count(), m / time);*/
 
 
+	if (config.printStats) {
+		MatrixStats(m, n, n, g.rowPtr->cdata(), g.colInd->cdata());
+		PrintMtarixStruct(m, n, n, g.rowPtr->cdata(), g.colInd->cdata());
+	}
+
+
 
 	//No try the ew storage format
 	//graph::TiledCOOCSRGraph<uint>* gtiled;
@@ -273,94 +238,95 @@ int main(int argc, char** argv) {
 	//printf("Tiled Count = %lu, time = %f\n", *c.gdata(), ms/1e3);
 	
 
-#ifdef Matrix_Stats
-	MatrixStats(csrcoo.nnz(), csrcoo.num_rows(), csrcoo.num_rows(), rowPtr.cdata(), dl.cdata());
-	PrintMtarixStruct(csrcoo.nnz(), csrcoo.num_rows(), csrcoo.num_rows(), rowPtr.cdata(), dl.cdata());
-#endif
 
 
-#ifdef TC
-	//Count traingles binary-search: Thread or Warp
-	uint step = m;
-	uint st = 0;
-	uint ee = st + step; // st + 2;
-	graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(0, ee, n);
-	graph::TcBase<uint>* tcNV = new graph::TcNvgraph<uint>(0, ee, n);
-	graph::TcBase<uint>* tcBE = new graph::TcBinaryEncoding<uint>(0, ee, n);
-	graph::TcBase<uint>* tc = new graph::TcSerial<uint>(0, ee, n);
-
-	const int divideConstant = 5;
-	graph::TcBase<uint>* tchash = new graph::TcVariableHash<uint>(0, ee, n);
-
-
-	graph::BmpGpu<uint> bmp;
-	bmp.InitBMP(*gd);
-	bmp.bmpConstruct(*gd);
-
-	while (st < m)
+	if (config.mt == TC)
 	{
-		printf("Edge = %d\n", st);
-		if (step == 1)
+		//Count traingles binary-search: Thread or Warp
+		uint step = m;
+		uint st = 0;
+		uint ee = st + step; // st + 2;
+		graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(0, ee, n);
+		graph::TcBase<uint>* tcNV = new graph::TcNvgraph<uint>(0, ee, n);
+		graph::TcBase<uint>* tcBE = new graph::TcBinaryEncoding<uint>(0, ee, n);
+		graph::TcBase<uint>* tc = new graph::TcSerial<uint>(0, ee, n);
+
+		const int divideConstant = 5;
+		graph::TcBase<uint>* tchash = new graph::TcVariableHash<uint>(0, ee, n);
+
+
+		graph::BmpGpu<uint> bmp;
+		bmp.InitBMP(*gd);
+		bmp.bmpConstruct(*gd);
+
+		while (st < m)
 		{
-			uint s = g.rowInd->cdata()[st];
-			uint d = g.colInd->cdata()[st];
-			const uint srcStart = g.rowPtr->cdata()[s];
-			const uint srcStop = g.rowPtr->cdata()[s + 1];
+			printf("Edge = %d\n", st);
+			if (step == 1)
+			{
+				uint s = g.rowInd->cdata()[st];
+				uint d = g.colInd->cdata()[st];
+				const uint srcStart = g.rowPtr->cdata()[s];
+				const uint srcStop = g.rowPtr->cdata()[s + 1];
 
-			const uint dstStart = g.rowPtr->cdata()[d];
-			const uint dstStop = g.rowPtr->cdata()[d + 1];
+				const uint dstStart = g.rowPtr->cdata()[d];
+				const uint dstStop = g.rowPtr->cdata()[d + 1];
 
-			const uint dstLen = dstStop - dstStart;
-			const uint srcLen = srcStop - srcStart;
+				const uint dstLen = dstStop - dstStart;
+				const uint srcLen = srcStop - srcStart;
 
-			printf("S = (%u, %u, %u, %u) / D = (%u, %u, %u, %u)\n", s, srcStart, srcStop, srcLen, d, dstStart, dstStop, dstLen);
+				printf("S = (%u, %u, %u, %u) / D = (%u, %u, %u, %u)\n", s, srcStart, srcStop, srcLen, d, dstStart, dstStop, dstLen);
 
-			printf("Source col ind = {");
-			for (int i = 0; i < srcLen; i++)
-				printf("%u,", g.colInd->cdata()[srcStart + i]);
-			printf("}\n");
+				printf("Source col ind = {");
+				for (int i = 0; i < srcLen; i++)
+					printf("%u,", g.colInd->cdata()[srcStart + i]);
+				printf("}\n");
 
 
-			printf("Destenation col ind = {");
-			for (int i = 0; i < dstLen; i++)
-				printf("%u,", g.colInd->cdata()[dstStart + i]);
-			printf("}\n");
+				printf("Destenation col ind = {");
+				for (int i = 0; i < dstLen; i++)
+					printf("%u,", g.colInd->cdata()[dstStart + i]);
+				printf("}\n");
+			}
+
+			bmp.Count(*gd);
+
+			uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, gd, ee, st, ProcessingElementEnum::Thread, 0);
+
+			////CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
+			//uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, gd, ee, st, ProcessingElementEnum::Block , 0);
+			//uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee,  st, ProcessingElementEnum::WarpShared, 0);
+			//uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", tcb,gd,  ee,  st, ProcessingElementEnum::Test, 0);
+
+			//
+
+			//uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", tcBE, gd, ee, st, ProcessingElementEnum::Warp, 0);
+			//CountTrianglesHash<uint>(divideConstant, tchash, gd, ee,  0, ProcessingElementEnum::Warp, 0);
+
+			//uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
+
+			//CountTriangles<uint>("NVGRAPH", tcNV, gd, ee);
+
+			/*if (serialTc != binaryTc)
+				break;*/
+			st += step;
+			ee += step;
+
+			printf("------------------------------\n");
+
+			break;
 		}
-
-		//bmp.Count(*gd);
-
-		//uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, gd, ee, st, ProcessingElementEnum::Thread, 0);
-
-		////CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
-		//uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, gd, ee, st, ProcessingElementEnum::Block , 0);
-		//uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee,  st, ProcessingElementEnum::WarpShared, 0);
-		//uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", tcb,gd,  ee,  st, ProcessingElementEnum::Test, 0);
-
-		//
-
-		//uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", tcBE, gd, ee, st, ProcessingElementEnum::Warp, 0);
-		//CountTrianglesHash<uint>(divideConstant, tchash, gd, ee,  0, ProcessingElementEnum::Warp, 0);
-	
-		//uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
-	
-		//CountTriangles<uint>("NVGRAPH", tcNV, gd, ee);
-
-		/*if (serialTc != binaryTc)
-			break;*/
-		st += step;
-		ee += step;
-
-		printf("------------------------------\n");
-
-		break;
 	}
-#endif
-#ifdef Cross_Decomposition
-	sl.switch_to_gpu(0, csrcoo.nnz());
-	dl.switch_to_gpu(0, csrcoo.nnz());
-	rowPtr.switch_to_gpu(0, csrcoo.num_rows() + 1);
-	Thanos<uint> t(rowPtr, sl, dl, csrcoo.nnz(), csrcoo.num_rows());
-#endif
+	else if (config.mt == CROSSDECOMP)
+	{
+		//Update Please
+	/*	sl.switch_to_gpu(0, csrcoo.nnz());
+		dl.switch_to_gpu(0, csrcoo.nnz());
+		rowPtr.switch_to_gpu(0, csrcoo.num_rows() + 1);
+		Thanos<uint> t(rowPtr, sl, dl, csrcoo.nnz(), csrcoo.num_rows());*/
+	}
+
+	//Not needed anymore
 #ifdef TriListConstruct
 	sl.switch_to_gpu(0, csrcoo.nnz());
 	dl.switch_to_gpu(0, csrcoo.nnz());
@@ -373,119 +339,121 @@ int main(int argc, char** argv) {
 #endif
 
 
-#ifdef KCORE
-	graph::COOCSRGraph_d<uint>* gd;
-	to_csrcoo_device(g, gd); //got to device !!
-	cudaDeviceSynchronize();
+	if (config.mt == KCORE)
+	{
+		graph::COOCSRGraph_d<uint>* gd;
+		to_csrcoo_device(g, gd); //got to device !!
+		cudaDeviceSynchronize();
 
-	graph::SingleGPU_Kcore<uint> mohacore(0);
-	Timer t;
-	mohacore.findKcoreIncremental_async(3, 1000, *gd, 0, 0);
-	mohacore.sync();
-	double time = t.elapsed();
-	Log(info, "count time %f s", time);
-	Log(info, "MOHA %d kcore (%f teps)", mohacore.count(), m / time);
-#endif
+		graph::SingleGPU_Kcore<uint> mohacore(0);
+		Timer t;
+		mohacore.findKcoreIncremental_async(3, 1000, *gd, 0, 0);
+		mohacore.sync();
+		double time = t.elapsed();
+		Log(info, "count time %f s", time);
+		Log(info, "MOHA %d kcore (%f teps)", mohacore.count(), m / time);
+	}
 
-#ifdef KCLIQUE
-	graph::SingleGPU_Kclique<uint> mohaclique(0);
-	Timer t;
-	mohaclique.findKclqueIncremental_async(6, *gd, 0, 0);
-	mohaclique.sync();
-	double time = t.elapsed();
-	Log(info, "count time %f s", time);
-	Log(info, "MOHA %d kcore (%f teps)", mohaclique.count(), m / time);
+	if (config.mt == KCLIQUE)
+	{
+		graph::SingleGPU_Kclique<uint> mohaclique(0);
+		Timer t;
+		mohaclique.findKclqueIncremental_edge_async(config.k, *gd, 0, 0);
+		mohaclique.sync();
+		double time = t.elapsed();
+		Log(info, "count time %f s", time);
+		Log(info, "MOHA %d kcore (%f teps)", mohaclique.count(), m / time);
 
-#endif
+	}
 
 
-#ifdef KTRUSS
+	if (config.mt == KTRUSS)
+	{
+		//The problem with Ktruss that it physically changes the graph structure due to stream compaction !!
+		graph::COOCSRGraph_d<uint>* gd;
+		to_csrcoo_device(g, gd); //got to device !!
 
-	//The problem with Ktruss that it physically changes the graph structure due to stream compaction !!
-	graph::COOCSRGraph_d<uint>* gd;
-	to_csrcoo_device(g, gd); //got to device !!
-
-//#define VLDB2020
+	//#define VLDB2020
 #ifdef VLDB2020
 	//We need unified to do stream compaction
-	graph::GPUArray<int> output("KT Output", AllocationTypeEnum::unified, m / 2, 0);
-	graph::BmpGpu<uint> bmp;
-	bmp.getEidAndEdgeList(g);// CPU
-	bmp.InitBMP(*gd);
-	bmp.bmpConstruct(*gd);
-	
-	double tc_time = bmp.Count_Set(*gd);
-	#define MAX_LEVEL  (20000)
-	auto level_start_pos = (uint*)calloc(MAX_LEVEL, sizeof(uint));
+		graph::GPUArray<int> output("KT Output", AllocationTypeEnum::unified, m / 2, 0);
+		graph::BmpGpu<uint> bmp;
+		bmp.getEidAndEdgeList(g);// CPU
+		bmp.InitBMP(*gd);
+		bmp.bmpConstruct(*gd);
 
-	graph::PKT_cuda(
-		n, m,
-		*g.rowPtr, *g.colInd, bmp,
-		nullptr,
-		100, output, level_start_pos, 0, tc_time);
+		double tc_time = bmp.Count_Set(*gd);
+#define MAX_LEVEL  (20000)
+		auto level_start_pos = (uint*)calloc(MAX_LEVEL, sizeof(uint));
+
+		graph::PKT_cuda(
+			n, m,
+			*g.rowPtr, *g.colInd, bmp,
+			nullptr,
+			100, output, level_start_pos, 0, tc_time);
 #endif
 
-//#define OUR2019
+		//#define OUR2019
 #ifdef OUR2019
-	graph::SingleGPU_Ktruss<uint> mohatruss(0);
-	Timer t;
-	mohatruss.findKtrussIncremental_sync(3, 1000, rowPtr, sl, dl,
-		n, m, nullptr, nullptr, 0, 0);
-	mohatruss.sync();
-	double time = t.elapsed();
-	Log(info, "count time %f s", time);
-	Log(info, "MOHA %d ktruss (%f teps)", mohatruss.count(), m / time);*/
+		graph::SingleGPU_Ktruss<uint> mohatruss(0);
+		Timer t;
+		mohatruss.findKtrussIncremental_sync(3, 1000, rowPtr, sl, dl,
+			n, m, nullptr, nullptr, 0, 0);
+		mohatruss.sync();
+		double time = t.elapsed();
+		Log(info, "count time %f s", time);
+		Log(info, "MOHA %d ktruss (%f teps)", mohatruss.count(), m / time); */
 #endif	
 
 #define OUR_NEW_KTRUSS
 #ifdef OUR_NEW_KTRUSS
-	//We need to change the graph representation
-	graph::GPUArray<uint> rowIndex("Half Row Index", AllocationTypeEnum::unified, m / 2, 0),
-		colIndex("Half Col Index", AllocationTypeEnum::unified, m / 2, 0),
-		EID("EID", AllocationTypeEnum::unified, m, 0),
-		asc("ASC temp", AllocationTypeEnum::unified, m, 0);
+			//We need to change the graph representation
+			graph::GPUArray<uint> rowIndex("Half Row Index", AllocationTypeEnum::unified, m / 2, 0),
+			colIndex("Half Col Index", AllocationTypeEnum::unified, m / 2, 0),
+			EID("EID", AllocationTypeEnum::unified, m, 0),
+			asc("ASC temp", AllocationTypeEnum::unified, m, 0);
 
-	Timer t_init;
-	graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, 0);
-
-
-	execKernel(init, (m + 512 - 1) / 512, 512, false, *gd, asc.gdata(), keep.gdata());
-
-	CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m);
-	CUBSelect(gd->rowInd, rowIndex.gdata(), keep.gdata(), m);
-	uint newNumEdges = CUBSelect(gd->colInd, colIndex.gdata(), keep.gdata(), m);
-	execKernel(InitEid, (newNumEdges + 512 - 1) / 512, 512, false, newNumEdges, asc.gdata(), rowIndex.gdata(), colIndex.gdata(), gd->rowPtr, gd->colInd, EID.gdata());
-	asc.freeGPU();
-	keep.freeGPU();
-	double time_init = t_init.elapsed();
-	Log(info, "Create EID (by malmasri): %f s", time_init);
-
-	graph::EidGraph_d<uint> geid;
-	geid.numNodes = n;
-	geid.capacity = m;
-	geid.numEdges = m;
-	geid.rowPtr_csr = gd->rowPtr;
-	geid.colInd_csr = gd->colInd;
-	geid.rowInd = rowIndex.gdata();
-	geid.colInd = colIndex.gdata();
-	geid.eid = EID.gdata();
-
-	graph::SingleGPU_KtrussMod<uint> mohatrussM(0);
-
-	Timer t;
-	graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(0, m, n, mohatrussM.stream());
-
-	mohatrussM.findKtrussIncremental_sync(3, 1000, tcb, geid, nullptr, nullptr, 0, 0);
-	mohatrussM.sync();
-	double time = t.elapsed();
+		Timer t_init;
+		graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, 0);
 
 
-	Log(info, "count time %f s", time);
-	Log(info, "MOHA %d ktruss (%f teps)", mohatrussM.count(), m / time);
+		execKernel(init, (m + 512 - 1) / 512, 512, false, *gd, asc.gdata(), keep.gdata());
+
+		CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m);
+		CUBSelect(gd->rowInd, rowIndex.gdata(), keep.gdata(), m);
+		uint newNumEdges = CUBSelect(gd->colInd, colIndex.gdata(), keep.gdata(), m);
+		execKernel(InitEid, (newNumEdges + 512 - 1) / 512, 512, false, newNumEdges, asc.gdata(), rowIndex.gdata(), colIndex.gdata(), gd->rowPtr, gd->colInd, EID.gdata());
+		asc.freeGPU();
+		keep.freeGPU();
+		double time_init = t_init.elapsed();
+		Log(info, "Create EID (by malmasri): %f s", time_init);
+
+		graph::EidGraph_d<uint> geid;
+		geid.numNodes = n;
+		geid.capacity = m;
+		geid.numEdges = m;
+		geid.rowPtr_csr = gd->rowPtr;
+		geid.colInd_csr = gd->colInd;
+		geid.rowInd = rowIndex.gdata();
+		geid.colInd = colIndex.gdata();
+		geid.eid = EID.gdata();
+
+		graph::SingleGPU_KtrussMod<uint> mohatrussM(0);
+
+		Timer t;
+		graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(0, m, n, mohatrussM.stream());
+
+		mohatrussM.findKtrussIncremental_sync(3, 1000, tcb, geid, nullptr, nullptr, 0, 0);
+		mohatrussM.sync();
+		double time = t.elapsed();
+
+
+		Log(info, "count time %f s", time);
+		Log(info, "MOHA %d ktruss (%f teps)", mohatrussM.count(), m / time);
 #endif
 
 
-
+	}
 
 #pragma region MyRegion
 	////Hashing tests
@@ -617,12 +585,6 @@ int main(int argc, char** argv) {
 
 #pragma endregion
 
-
-
-
-
-
-#endif
 
 
 
