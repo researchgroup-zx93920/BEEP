@@ -23,10 +23,7 @@ kernel_serial_arrays(uint64* count, //!< [inout] the count, caller should zero
         const T* srcEnd = &(g.colInd[g.rowPtr[src + 1]]);
         const T* dstBegin = &(g.colInd[g.rowPtr[dst]]);
         const T* dstEnd = &(g.colInd[g.rowPtr[dst + 1]]);
-
-        T min = increasing == 0 ? 0 : dst;
-
-        threadCount += graph::serial_sorted_count_linear<T>(min, srcBegin, srcEnd, dstBegin, dstEnd);
+        threadCount += graph::serial_sorted_count_linear<T>(0, srcBegin, srcEnd, dstBegin, dstEnd);
     }
 
     // Block-wide reduction of threadCount

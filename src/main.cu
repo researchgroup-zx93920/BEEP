@@ -45,8 +45,11 @@ int main(int argc, char** argv) {
 
 	//CUDA_RUNTIME(cudaDeviceReset());
 	Config config = parseArgs(argc, argv);
+
 	printf("\033[0m");
 	printf("Welcome ---------------------\n");
+	printConfig(config);
+
 	graph::MtB_Writer mwriter;
 	auto fileSrc = config.srcGraph;
 	auto fileDst = config.dstGraph;
@@ -56,7 +59,7 @@ int main(int argc, char** argv) {
 	}
 
 	if (config.mt == CONV_TSV_BEL) {
-		mwriter.write_tsv_bel<uint, uint>(fileSrc, fileDst);
+		mwriter.write_tsv_bel<uint64, uint64>(fileSrc, fileDst);
 		return;
 	}
 
@@ -76,8 +79,8 @@ int main(int argc, char** argv) {
 	}
 
 
-//HERE is the normal program !!
-	//1) Read File to EdgeList
+	//HERE is the normal program !!
+		//1) Read File to EdgeList
 
 	const char* matr = config.srcGraph;
 	graph::EdgeListFile f(matr);
@@ -101,36 +104,42 @@ int main(int argc, char** argv) {
 
 	//Importatnt
 	graph::CSRCOO<uint> csrcoo;
-	if(config.orient == Upper)
-		csrcoo  = graph::CSRCOO<uint>::from_edgelist(edges, upperTriangular);
-	else if (config.orient == Lower)
+	if (config.orient == Upper)
 		csrcoo = graph::CSRCOO<uint>::from_edgelist(edges, lowerTriangular);
+	else if (config.orient == Lower)
+		csrcoo = graph::CSRCOO<uint>::from_edgelist(edges, upperTriangular);
 	else
 		csrcoo = graph::CSRCOO<uint>::from_edgelist(edges, full);
 
-	int n = csrcoo.num_rows();
-	int m = csrcoo.nnz();
+	uint n = csrcoo.num_rows();
+	uint m = csrcoo.nnz();
+
+
 	graph::COOCSRGraph<uint> g;
 	g.capacity = m;
 	g.numEdges = m;
 	g.numNodes = n;
-	
+
 	g.rowPtr = new graph::GPUArray<uint>("Row pointer", AllocationTypeEnum::cpuonly);
-	g.rowInd= new graph::GPUArray<uint>("Src Index", AllocationTypeEnum::cpuonly);
+	g.rowInd = new graph::GPUArray<uint>("Src Index", AllocationTypeEnum::cpuonly);
 	g.colInd = new graph::GPUArray<uint>("Dst Index", AllocationTypeEnum::cpuonly);
+
+
+
 	g.rowPtr->cdata() = csrcoo.row_ptr();
 	g.rowInd->cdata() = csrcoo.row_ind();
 	g.colInd->cdata() = csrcoo.col_ind();
 
 
+
 	///Now we need to orient the graph
 	graph::COOCSRGraph_d<uint>* gd;
 	to_csrcoo_device(g, gd); //got to device !!
-	graph::SingleGPU_Kcore<uint> mohacore(0);
+	graph::SingleGPU_Kcore<uint, PeelType> mohacore(0);
 	if (config.orient == Degree || config.orient == Degeneracy)
 	{
 		Timer t_init;
-		
+
 		Timer t;
 		if (config.orient == Degeneracy)
 			mohacore.findKcoreIncremental_async(3, 1000, *gd, 0, 0);
@@ -143,11 +152,11 @@ int main(int argc, char** argv) {
 			new_rowPtr("New", AllocationTypeEnum::unified, n + 1, 0),
 			asc("ASC temp", AllocationTypeEnum::unified, m, 0);
 		graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, 0);
-		execKernel(init, (m + 512 - 1) / 512, 512, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata());
+		execKernel((init<uint, PeelType>), (m + 512 - 1) / 512, 512, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata());
 		CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m);
 		CUBSelect(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m);
 		uint newNumEdges = CUBSelect(gd->colInd, colInd_half.gdata(), keep.gdata(), m);
-		execKernel(warp_detect_deleted_edges, (32 * n + 128 - 1) / 128, 128, false, gd->rowPtr, n, keep.gdata(), new_rowPtr.gdata());
+		execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, false, gd->rowPtr, n, keep.gdata(), new_rowPtr.gdata());
 		uint total = CUBScanExclusive<uint, uint>(new_rowPtr.gdata(), new_rowPtr.gdata(), n);
 		new_rowPtr.gdata()[n] = total;
 		//assert(total == new_edge_num * 2);
@@ -170,8 +179,6 @@ int main(int argc, char** argv) {
 		double time_init = t_init.elapsed();
 		Log(info, "Create EID (by malmasri): %f s", time_init);
 	}
-
-
 
 	//Just need to verify some new storage format
 	//graph::GPUArray<uint> countCont("Half Row Index", AllocationTypeEnum::unified, m, 0);
@@ -207,41 +214,45 @@ int main(int argc, char** argv) {
 
 
 	//No try the ew storage format
-	//graph::TiledCOOCSRGraph<uint>* gtiled;
-	//coo2tiledcoocsrOnDevice(g, 32,  gtiled, unified);
-	//unsigned int numThreadsPerBlock = 128;
-	//unsigned int numBlocks = (m + numThreadsPerBlock - 1) / numThreadsPerBlock;
-	//graph::GPUArray<uint64> c("C", unified, 1, 0);
-	//c.setSingle(0, 0, true);
-	//cudaDeviceSynchronize();
-	//cudaEvent_t kernelStart_;
-	//cudaEvent_t kernelStop_;
-	//CUDA_RUNTIME(cudaEventCreate(&kernelStart_));
-	//CUDA_RUNTIME(cudaEventCreate(&kernelStop_));
-	//CUDA_RUNTIME(cudaEventRecord(kernelStart_));
-	//count_triangles_kernel<uint, 128> << < dim3(numBlocks, 2), numThreadsPerBlock >> > (c.gdata(), gtiled->numNodes,
-	//	gtiled->numEdges,
-	//	gtiled->tilesPerDim,
-	//	gtiled->tileSize,
-	//	gtiled->capacity,
-	//	gtiled->tileRowPtr->gdata(),
-	//	gtiled->rowInd->gdata(),
-	//	gtiled->colInd->gdata());
-	//CUDA_RUNTIME(cudaEventRecord(kernelStop_));
 
-	//float ms;
-	//CUDA_RUNTIME(cudaEventSynchronize(kernelStop_));
-	//CUDA_RUNTIME(cudaEventElapsedTime(&ms, kernelStart_, kernelStop_));
-	//cudaDeviceSynchronize();
-	//cudaGetLastError();
 
-	//printf("Tiled Count = %lu, time = %f\n", *c.gdata(), ms/1e3);
-	
 
 
 
 	if (config.mt == TC)
 	{
+
+		graph::TiledCOOCSRGraph<uint>* gtiled;
+		coo2tiledcoocsrOnDevice(g, 16, gtiled, unified);
+		unsigned int numThreadsPerBlock = 128;
+		unsigned int numBlocks = (m + numThreadsPerBlock - 1) / numThreadsPerBlock;
+		graph::GPUArray<uint64> c("C", unified, 1, 0);
+		c.setSingle(0, 0, true);
+		cudaDeviceSynchronize();
+		cudaEvent_t kernelStart_;
+		cudaEvent_t kernelStop_;
+		CUDA_RUNTIME(cudaEventCreate(&kernelStart_));
+		CUDA_RUNTIME(cudaEventCreate(&kernelStop_));
+		CUDA_RUNTIME(cudaEventRecord(kernelStart_));
+		count_triangles_kernel<uint, 128> << < dim3(numBlocks, 16), numThreadsPerBlock >> > (c.gdata(), gtiled->numNodes,
+			gtiled->numEdges,
+			gtiled->tilesPerDim,
+			gtiled->tileSize,
+			gtiled->capacity,
+			gtiled->tileRowPtr->gdata(),
+			gtiled->rowInd->gdata(),
+			gtiled->colInd->gdata());
+		CUDA_RUNTIME(cudaEventRecord(kernelStop_));
+
+		float ms;
+		CUDA_RUNTIME(cudaEventSynchronize(kernelStop_));
+		CUDA_RUNTIME(cudaEventElapsedTime(&ms, kernelStart_, kernelStop_));
+		cudaDeviceSynchronize();
+		cudaGetLastError();
+
+		printf("Tiled Count = %lu, time = %f\n", *c.gdata(), ms / 1e3);
+
+
 		//Count traingles binary-search: Thread or Warp
 		uint step = m;
 		uint st = 0;
@@ -251,7 +262,7 @@ int main(int argc, char** argv) {
 		graph::TcBase<uint>* tcBE = new graph::TcBinaryEncoding<uint>(0, ee, n);
 		graph::TcBase<uint>* tc = new graph::TcSerial<uint>(0, ee, n);
 
-		const int divideConstant = 5;
+		const int divideConstant = 10;
 		graph::TcBase<uint>* tchash = new graph::TcVariableHash<uint>(0, ee, n);
 
 
@@ -294,18 +305,18 @@ int main(int argc, char** argv) {
 			uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, gd, ee, st, ProcessingElementEnum::Thread, 0);
 
 			////CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
-			//uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, gd, ee, st, ProcessingElementEnum::Block , 0);
-			//uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee,  st, ProcessingElementEnum::WarpShared, 0);
-			//uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", tcb,gd,  ee,  st, ProcessingElementEnum::Test, 0);
+			uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, gd, ee, st, ProcessingElementEnum::Block, 0);
+			uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee, st, ProcessingElementEnum::WarpShared, 0);
+			uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee, st, ProcessingElementEnum::Test, 0);
 
-			//
 
-			//uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", tcBE, gd, ee, st, ProcessingElementEnum::Warp, 0);
-			//CountTrianglesHash<uint>(divideConstant, tchash, gd, ee,  0, ProcessingElementEnum::Warp, 0);
 
-			//uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
+			uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", tcBE, gd, ee, st, ProcessingElementEnum::Warp, 0);
+			CountTrianglesHash<uint>(divideConstant, tchash, gd, ee, 0, ProcessingElementEnum::Warp, 0);
 
-			//CountTriangles<uint>("NVGRAPH", tcNV, gd, ee);
+			uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
+
+			CountTriangles<uint>("NVGRAPH", tcNV, gd, ee);
 
 			/*if (serialTc != binaryTc)
 				break;*/
@@ -345,7 +356,7 @@ int main(int argc, char** argv) {
 		to_csrcoo_device(g, gd); //got to device !!
 		cudaDeviceSynchronize();
 
-		graph::SingleGPU_Kcore<uint> mohacore(0);
+		graph::SingleGPU_Kcore<uint, PeelType> mohacore(0);
 		Timer t;
 		mohacore.findKcoreIncremental_async(3, 1000, *gd, 0, 0);
 		mohacore.sync();
@@ -356,13 +367,16 @@ int main(int argc, char** argv) {
 
 	if (config.mt == KCLIQUE)
 	{
+		if (config.orient == None)
+			Log(warn,"Redundunt K-cliques, Please orient the graph\n");
+
 		graph::SingleGPU_Kclique<uint> mohaclique(0);
 		Timer t;
 		mohaclique.findKclqueIncremental_edge_async(config.k, *gd, 0, 0);
 		mohaclique.sync();
 		double time = t.elapsed();
 		Log(info, "count time %f s", time);
-		Log(info, "MOHA %d kcore (%f teps)", mohaclique.count(), m / time);
+		Log(info, "MOHA %d k-clique (%f teps)", mohaclique.count(), m / time);
 
 	}
 
@@ -438,10 +452,10 @@ int main(int argc, char** argv) {
 		geid.colInd = colIndex.gdata();
 		geid.eid = EID.gdata();
 
-		graph::SingleGPU_KtrussMod<uint> mohatrussM(0);
+		graph::SingleGPU_KtrussMod<uint, PeelType> mohatrussM(0);
 
 		Timer t;
-		graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(0, m, n, mohatrussM.stream());
+		graph::TcBase<uint, PeelType>* tcb = new graph::TcBinary<uint, PeelType>(0, m, n, mohatrussM.stream());
 
 		mohatrussM.findKtrussIncremental_sync(3, 1000, tcb, geid, nullptr, nullptr, 0, 0);
 		mohatrussM.sync();
@@ -590,7 +604,7 @@ int main(int argc, char** argv) {
 
 
 	printf("Done ....\n");
-	
+
 	//A.freeGPU();
 	//B.freeGPU();
 	return 0;

@@ -163,7 +163,7 @@ __global__ void  update_support(int* count,
 
 namespace graph
 {
-	template<typename T>
+	template<typename T, typename PeelT>
 	class SingleGPU_KtrussMod
 	{
 	private:
@@ -184,11 +184,11 @@ namespace graph
 
 
 		void bucket_scan(
-			GPUArray<int> edgeSupport, uint32_t edge_num, int level,
-			GraphQueue<int, bool>& current,
-			GPUArray<uint> asc,
-			GraphQueue<int, bool>& bucket,
-			int& bucket_level_end_)
+			GPUArray<PeelT> edgeSupport, T edge_num, T level,
+			GraphQueue<T, bool>& current,
+			GPUArray<T> asc,
+			GraphQueue<T, bool>& bucket,
+			T& bucket_level_end_)
 		{
 			static bool is_first = true;
 			if (is_first)
@@ -203,8 +203,8 @@ namespace graph
 				// Clear the bucket_removed_indicator
 				
 
-				long grid_size = (edge_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
-				execKernel(filter_window, grid_size, BLOCK_SIZE, false,
+				auto grid_size = (edge_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
+				execKernel((filter_window<T, PeelT>), grid_size, BLOCK_SIZE, false,
 					edgeSupport.gdata(), edge_num, bucket.mark.gdata(), level, bucket_level_end_ + LEVEL_SKIP_SIZE);
 
 				bucket.count.gdata()[0] = CUBSelect(asc.gdata(), bucket.queue.gdata(), bucket.mark.gdata(), edge_num);
@@ -263,7 +263,7 @@ namespace graph
 			/*2. construct new CSR (offsets, adj) and rebuild the eid*/
 			int block_size = 128;
 			// Attention: new_offset gets the histogram.
-			execKernel(warp_detect_deleted_edges, GRID_SIZE, block_size, true,
+			execKernel((warp_detect_deleted_edges<T>), GRID_SIZE, block_size, true,
 				rowPtr, n, eid, processed.gdata(), new_offset.gdata(), edge_deleted.gdata());
 
 			uint total = CUBScanExclusive<uint, uint>(new_offset.gdata(), new_offset.gdata(), n);
@@ -319,10 +319,10 @@ namespace graph
 			bool firstTry = true;
 			GPUArray<BCTYPE> processed; //isDeleted
 
-			int level = 0;
-			int bucket_level_end_ = level;
+			T level = 0;
+			T bucket_level_end_ = level;
 
-			GPUArray<int> edgeSupport;
+			GPUArray<PeelT> edgeSupport;
 			GPUArray<bool> edge_kept; 
 
 			//Lets apply queues and buckets
@@ -332,13 +332,13 @@ namespace graph
 			//PrepareBucket(in_bucket_window_, bucket_buf_, window_bucket_buf_size_, numEdges);
 
 
-			graph::GraphQueue<int, bool> bucket_q;
+			graph::GraphQueue<T, bool> bucket_q;
 			bucket_q.Create(unified, numEdges, 0);
 
-			graph::GraphQueue<int, bool> current_q;
+			graph::GraphQueue<T, bool> current_q;
 			current_q.Create(unified, numEdges, 0);
 
-			graph::GraphQueue<int, bool> next_q;
+			graph::GraphQueue<T, bool> next_q;
 			next_q.Create(unified, numEdges, 0);
 
 		
@@ -396,7 +396,7 @@ namespace graph
 					{
 						auto block_size = 256;
 						auto grid_size = (current_q.count.gdata()[0] + block_size - 1) / block_size;
-						execKernel(update_processed, grid_size, block_size, false, current_q.queue.gdata(), current_q.count.gdata()[0], current_q.mark.gdata(), processed.gdata());
+						execKernel((update_processed<T>), grid_size, block_size, false, current_q.queue.gdata(), current_q.count.gdata()[0], current_q.mark.gdata(), processed.gdata());
 					}
 					else
 					{
@@ -419,6 +419,9 @@ namespace graph
 					swap(current_q, next_q);
 					//swap(inCurr, inNext);
 					//current_q.count.gdata()[0] = next_q.count.gdata()[0];
+
+
+					
 				}
 
 				percDeleted_l = (numDeleted_l) * 1.0 / (numEdges);

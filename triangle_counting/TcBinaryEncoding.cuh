@@ -213,7 +213,7 @@ namespace graph {
         {}
 
 
-        void count_async(COOCSRGraph_d<T>* g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int limit = 0)
+        void count_async(COOCSRGraph_d<T>* g, const T numEdges, const T edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int limit = 0)
         {
             const size_t dimBlock = 128;
             const size_t ne = numEdges;
@@ -235,6 +235,8 @@ namespace graph {
             const int dimGridWarp = (32 * (numEdges - edgeOffset) + (dimBlock)-1) / (dimBlock);
             const int dimGridBlock = (dimBlock * numEdges + (dimBlock)-1) / (dimBlock);
 
+
+          
             assert(TcBase<T>::count_);
             Log(LogPriorityEnum::debug, "device = %d, blocks = %d, threads = %d\n", TcBase<T>::dev_, dimGrid, dimBlock);
             CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));

@@ -13,7 +13,7 @@ struct Edge1
 };
 
 namespace graph {
-    template<typename T>
+    template<typename T, typename PeelT=int>
     class TcBase {
     public:
         int dev_;
@@ -92,9 +92,9 @@ namespace graph {
 
         virtual void count_moveNext_per_edge_async(
             EidGraph_d<T>& g, const size_t numEdges,
-            int level, GPUArray<bool> processed, GPUArray<int>&  edgeSupport,
-            GraphQueue<int,bool>& current, GraphQueue<int, bool>& next, GraphQueue<int, bool>& bucket, int bucket_level_end_,
-            const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+            T level, GPUArray<bool> processed, GPUArray<PeelT>&  edgeSupport,
+            GraphQueue<T,bool>& current, GraphQueue<T, bool>& next, GraphQueue<T, bool>& bucket, T bucket_level_end_,
+            const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, T increasing = 0)
         {}
 
 

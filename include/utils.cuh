@@ -97,27 +97,27 @@ void swap_ele(T& a, T& b) {
 
 
 template<typename T>
-void MatrixStats(int nnz, int nr, int nc, T* csrRowPointers, T* csrColumns)
+void MatrixStats(T nnz, T nr, T nc, T* csrRowPointers, T* csrColumns)
 {
-	std::map<int, int> dictionary;
+	std::map<T, T> dictionary;
 
-	int minRow = 0;
-	int maxRow = 1;
-	int totalRow = 0;
-	int median = 0;
+	T minRow = 0;
+	T maxRow = 1;
+	T totalRow = 0;
+	T median = 0;
 
-	int countMin = 0;
-	int countMax = 0;
-	int countMedian = 0;
+	T countMin = 0;
+	T countMax = 0;
+	T countMedian = 0;
 	double sq_sum = 0;
 
-	int _nr = nr;
+	T _nr = nr;
 
-	for (int i = 0; i < nr; i++)
+	for (uint64 i = 0; i < nr; i++)
 	{
-		int start = csrRowPointers[i] - 1;
-		int end = csrRowPointers[i + 1] - 1;
-		int rowCount = (end - start);
+		T start = csrRowPointers[i] - 1;
+		T end = csrRowPointers[i + 1] - 1;
+		T rowCount = (end - start);
 
 		if (dictionary.count(rowCount) < 1)
 			dictionary[rowCount] = 1;
@@ -128,8 +128,8 @@ void MatrixStats(int nnz, int nr, int nc, T* csrRowPointers, T* csrColumns)
 			_nr--;
 	}
 
-	typedef std::map<int, int>::iterator it_type;
-	for (it_type iterator = dictionary.begin(); iterator != dictionary.end(); iterator++) 
+	typedef typename std::map< T,  T>::iterator it_type;
+	for ( it_type iterator = dictionary.begin(); iterator != dictionary.end(); iterator++) 
 	{
 		if (iterator->first == 0)
 			continue;
@@ -155,11 +155,11 @@ void MatrixStats(int nnz, int nr, int nc, T* csrRowPointers, T* csrColumns)
 	double mean = 1.0 * totalRow / nr;
 	//double sd = std::sqrt( (sq_sum / nr) - (mean * mean));
 	double sd = 0;
-	for (int i = 0; i < nr; i++)
+	for (uint64 i = 0; i < nr; i++)
 	{
-		int start = csrRowPointers[i];
-		int end = csrRowPointers[i + 1];
-		int rowCount = (end - start);
+		T start = csrRowPointers[i];
+		T end = csrRowPointers[i + 1];
+		T rowCount = (end - start);
 
 		double diff = rowCount - mean;
 		sd += diff * diff;
@@ -169,42 +169,42 @@ void MatrixStats(int nnz, int nr, int nc, T* csrRowPointers, T* csrColumns)
 	sd = std::sqrt(variance);
 
 
-	printf("%d,%d,%d,%d,%.1f,%.1f,%d,%d,%d,%d,%d\n",
+	printf("%u,%u,%u,%u,%.1f,%.1f,%u,%u,%u,%u,%u\n",
 		nnz, nr, nc, minRow, mean, sd, median, maxRow, countMin, countMedian, countMax);
 }
 
 
 template<typename T>
-void PrintMtarixStruct(int nnz, int nr, int nc, T* csrRowPointer, T* csrColumns)
+void PrintMtarixStruct(T nnz, T nr, T nc, T* csrRowPointer, T* csrColumns)
 {
 	const int resolution = 20;
 	float st[resolution][resolution];
-	for (int i = 0; i < resolution; i++)
-		for (int j = 0; j < resolution; j++)
+	for (uint64 i = 0; i < resolution; i++)
+		for (uint64 j = 0; j < resolution; j++)
 			st[i][j] = 0.0;
 
-	int rowUnit = (int)std::ceil(nr / resolution);
-	int colUnit = (int)std::ceil(nc / resolution);
+	T rowUnit = (T)std::ceil(nr / resolution);
+	T colUnit = (T)std::ceil(nc / resolution);
 
 	//#pragma omp parallel for
-	for (int i = 0; i < nr; i++)
+	for (uint64 i = 0; i < nr; i++)
 	{
-		int start = csrRowPointer[i];
-		int end = csrRowPointer[i + 1];
-		int j;
+		T start = csrRowPointer[i];
+		T end = csrRowPointer[i + 1];
+		T j;
 
-		int rowIndex = (int)std::floor(i / rowUnit);
+		T rowIndex = (T)std::floor(i / rowUnit);
 
 		for (j = start; j < end; j++)
 		{
-			int colIndex = (int)std::floor(csrColumns[j] / rowUnit);
+			T colIndex = (T)std::floor(csrColumns[j] / rowUnit);
 			st[rowIndex][colIndex]++;
 		}
 	}
 
-	for (int i = 0; i < resolution; i++)
+	for (uint64 i = 0; i < resolution; i++)
 	{
-		for (int j = 0; j < resolution; j++)
+		for (uint64 j = 0; j < resolution; j++)
 		{
 			float perc = st[i][j] / nnz;
 

@@ -4,7 +4,9 @@
 #include "../include/defs.cuh"
 
 #define INT_INVALID  (INT32_MAX)
-#define LEVEL_SKIP_SIZE (1024)
+
+#define LEVEL_SKIP_SIZE (16)
+#define KCL_LEVEL_SKIP_SIZE (2048)
 
 #define INBUCKET_BOOL
 #ifndef INBUCKET_BOOL
@@ -315,9 +317,9 @@ void sub_level_process2(
     //}
 }
 
-
+template<typename T>
 __global__
-void update_processed(int* curr, uint32_t curr_cnt, bool* inCurr, bool* processed) {
+void update_processed(T* curr, T curr_cnt, bool* inCurr, bool* processed) {
     auto gtid = threadIdx.x + blockIdx.x * blockDim.x;
     if (gtid < curr_cnt) {
         auto edge_off = curr[gtid];
@@ -339,11 +341,12 @@ void output_edge_support(
     }
 }
 
+template<typename T>
 __global__
 void warp_detect_deleted_edges(
-    uint* old_offsets, uint32_t old_offset_cnt,
-    uint* eid, bool* old_processed,
-    uint* histogram, bool* focus) 
+    T* old_offsets, T old_offset_cnt,
+    T* eid, bool* old_processed,
+    T* histogram, bool* focus) 
 {
 
     __shared__ uint32_t cnts[WARPS_PER_BLOCK];
@@ -388,9 +391,9 @@ void warp_detect_deleted_edges(
 //}
 //
 
-template<typename T>
+template<typename T, typename PeelT>
 __global__
-void filter_window(T* edge_sup, int count, InBucketWinType* in_bucket, int low, int high) {
+void filter_window(PeelT* edge_sup, T count, InBucketWinType* in_bucket, T low, T high) {
     auto gtid = threadIdx.x + blockIdx.x * blockDim.x;
     if (gtid < count) {
         auto v = edge_sup[gtid];
@@ -398,9 +401,9 @@ void filter_window(T* edge_sup, int count, InBucketWinType* in_bucket, int low, 
     }
 }
 
-
+template<typename T, typename PeelT>
 __global__
-void filter_pointer_window(uint* edge_sup, int count, InBucketWinType* in_bucket, int low, int high) {
+void filter_pointer_window(PeelT* edge_sup, T count, InBucketWinType* in_bucket, T low, T high) {
     auto gtid = threadIdx.x + blockIdx.x * blockDim.x;
     if (gtid < count) {
         auto v = edge_sup[gtid+1] - edge_sup[gtid];
@@ -408,10 +411,10 @@ void filter_pointer_window(uint* edge_sup, int count, InBucketWinType* in_bucket
     }
 }
 
-
+template<typename T, typename PeelT>
 __global__
-void filter_with_random_append(int* bucket_buf, int count, int* EdgeSupport, bool* in_curr, int* curr, int* curr_cnt,
-    int ref) 
+void filter_with_random_append(T* bucket_buf, T count, PeelT* EdgeSupport, bool* in_curr, T* curr, T* curr_cnt,
+    T ref) 
 {
     auto gtid = threadIdx.x + blockIdx.x * blockDim.x;
     if (gtid < count) {
@@ -424,10 +427,10 @@ void filter_with_random_append(int* bucket_buf, int count, int* EdgeSupport, boo
     }
 }
 
-
+template<typename T, typename PeelT>
 __global__
-void filter_with_random_append(int* bucket_buf, int count, uint* EdgeSupport, bool* in_curr, int* curr, int* curr_cnt,
-    int ref, int span)
+void filter_with_random_append(T* bucket_buf, T count, PeelT* EdgeSupport, bool* in_curr, T* curr, T* curr_cnt,
+    T ref, T span)
 {
     auto gtid = threadIdx.x + blockIdx.x * blockDim.x;
     if (gtid < count) {
@@ -440,9 +443,9 @@ void filter_with_random_append(int* bucket_buf, int count, uint* EdgeSupport, bo
     }
 }
 
-template<typename T>
+template<typename T, typename PeelT>
 __global__
-void filter_with_random_append_pointer(int* bucket_buf, int count, T* EdgeSupport, bool* in_curr, int* curr, int* curr_cnt,
+void filter_with_random_append_pointer(T* bucket_buf, T count, PeelT* EdgeSupport, bool* in_curr, T* curr, T* curr_cnt,
     int ref, int span)
 {
     auto gtid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -457,6 +460,93 @@ void filter_with_random_append_pointer(int* bucket_buf, int count, T* EdgeSuppor
         }
     }
 }
+
+
+
+template<typename T>
+__device__ void add_to_queue_1(graph::GraphQueue_d<T, bool>& q, T element)
+{
+    auto insert_idx = atomicAdd(q.count, 1);
+    q.queue[insert_idx] = element;
+    q.mark[element] = true;
+}
+
+template<typename T>
+__device__ void add_to_queue_1_no_dup(graph::GraphQueue_d<T, bool>& q, T element)
+{
+    auto old_token = atomicCASBool(q.mark + element, InBucketFalse, InBucketTrue);
+    if (!old_token) {
+        auto insert_idx = atomicAdd(q.count, 1);
+        q.queue[insert_idx] = element;
+    }
+}
+
+template<typename T, typename PeelT>
+__inline__ __device__
+void process_support2(
+    T edge_idx, T level, PeelT* EdgeSupport,
+    graph::GraphQueue_d<T, bool>& next,
+    graph::GraphQueue_d<T, bool>& bucket,
+    T bucket_level_end_)
+{
+    auto cur = atomicSub(&EdgeSupport[edge_idx], 1);
+    if (cur == (level + 1)) {
+        add_to_queue_1(next, edge_idx);
+    }
+    if (cur <= level) {
+        atomicAdd(&EdgeSupport[edge_idx], 1);
+    }
+
+    // Update the Bucket.
+    auto latest = cur - 1;
+    if (latest > level && latest < bucket_level_end_) {
+        add_to_queue_1_no_dup<T>(bucket, edge_idx);
+    }
+
+}
+
+
+template <typename T, typename PeelT>
+__device__ inline void addNexBucket(T e1, T e2, T e3, bool* processed,
+    PeelT* edgeSupport, int level,
+    bool* inCurr,
+    graph::GraphQueue_d<T, bool>& next,
+    graph::GraphQueue_d<T, bool>& bucket, 
+    T bucket_upper_level)
+{
+    bool is_peel_e2 = !inCurr[e2];
+    bool is_peel_e3 = !inCurr[e3];
+    if (is_peel_e2 || is_peel_e3)
+    {
+        if ((!processed[e2]) && (!processed[e3]))
+        {
+            if (is_peel_e2 && is_peel_e3)
+            {
+
+                process_support2<T, PeelT>(e2, level, edgeSupport, next, bucket, bucket_upper_level);
+                process_support2<T>(e3, level, edgeSupport, next, bucket, bucket_upper_level);
+
+
+
+            }
+            else if (is_peel_e2)
+            {
+                if (e1 < e3) {
+                    process_support2<T, PeelT>(e2, level, edgeSupport, next, bucket, bucket_upper_level);
+                }
+            }
+            else
+            {
+                if (e1 < e2)
+                {
+                    process_support2<T, PeelT>(e3, level, edgeSupport, next, bucket, bucket_upper_level);
+                }
+            }
+        }
+    }
+}
+
+
 
 __global__ void bmp_bsr_update_next(uint32_t* d_offsets, uint32_t* d_dsts,
     uint32_t* d_bitmaps, uint32_t* d_bitmap_states,

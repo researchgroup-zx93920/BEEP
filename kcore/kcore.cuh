@@ -15,13 +15,13 @@
 #include "../include/GraphQueue.cuh"
 
 
-
+template<typename T, typename PeelT>
 __inline__ __device__
 void process_degree(
-	uint32_t nodeId, int level, int* nodeDegree,
-	graph::GraphQueue_d<int, bool>& next,
-	graph::GraphQueue_d<int, bool>& bucket,
-	int bucket_level_end_)
+	T nodeId, T level, PeelT* nodeDegree,
+	graph::GraphQueue_d<T, bool>& next,
+	graph::GraphQueue_d<T, bool>& bucket,
+	T bucket_level_end_)
 {
 	auto cur = atomicSub(&nodeDegree[nodeId], 1);
 	if (cur == (level + 1)) 
@@ -42,12 +42,12 @@ void process_degree(
 }
 
 
-template<typename T>
-__global__ void getNodeDegree_kernel(int* nodeDegree, graph::COOCSRGraph_d<T> g)
+template<typename T, typename PeelT>
+__global__ void getNodeDegree_kernel(PeelT* nodeDegree, graph::COOCSRGraph_d<T> g)
 {
-	int gtid = threadIdx.x + blockIdx.x * blockDim.x;
+	uint64 gtid = threadIdx.x + blockIdx.x * blockDim.x;
 
-	for (int i = gtid; i < g.numNodes; i+= blockDim.x*gridDim.x)
+	for (uint64 i = gtid; i < g.numNodes; i+= blockDim.x*gridDim.x)
 	{
 		nodeDegree[i] = g.rowPtr[i + 1] - g.rowPtr[i];
 	}
@@ -55,15 +55,15 @@ __global__ void getNodeDegree_kernel(int* nodeDegree, graph::COOCSRGraph_d<T> g)
 
 
 
-template <typename T>
+template <typename T, typename PeelT>
 __global__ void
 kernel_thread_level_next(
 	graph::COOCSRGraph_d<T> g,
-	int level, bool* processed, int* nodeDegree,
-	graph::GraphQueue_d<int, bool> current,
-	graph::GraphQueue_d<int, bool>& next,
-	graph::GraphQueue_d<int, bool>& bucket,
-	int bucket_level_end_
+	T level, bool* processed, PeelT* nodeDegree,
+	graph::GraphQueue_d<T, bool> current,
+	graph::GraphQueue_d<T, bool>& next,
+	graph::GraphQueue_d<T, bool>& bucket,
+	T bucket_level_end_
 )
 {
 	size_t gx = blockDim.x * blockIdx.x + threadIdx.x;
@@ -74,11 +74,11 @@ kernel_thread_level_next(
 		T srcStart = g.rowPtr[nodeId];
 		T srcStop = g.rowPtr[nodeId + 1];
 
-		for (int j = srcStart; j < srcStop; j++)
+		for (T j = srcStart; j < srcStop; j++)
 		{
 			T affectedNode = g.colInd[j];
 			if(/*!processed[affectedNode] &&*/ !current.mark[affectedNode] )
-				process_degree(affectedNode, level, nodeDegree, next, bucket, bucket_level_end_);
+				process_degree<T, PeelT>(affectedNode, level, nodeDegree, next, bucket, bucket_level_end_);
 		}
 	}
 }
@@ -152,14 +152,14 @@ kernel_warp_level_next(
 
 
 
-template <typename T, int BD, int P>
+template <typename T, typename PeelT, int BD, int P>
 __global__ void
 kernel_partition_level_next(
 	graph::COOCSRGraph_d<T> g,
-	int level, bool* processed, int* nodeDegree,
-	graph::GraphQueue_d<int, bool> current,
-	graph::GraphQueue_d<int, bool>& next,
-	graph::GraphQueue_d<int, bool>& bucket,
+	int level, bool* processed, PeelT* nodeDegree,
+	graph::GraphQueue_d<T, bool> current,
+	graph::GraphQueue_d<T, bool>& next,
+	graph::GraphQueue_d<T, bool>& bucket,
 	int bucket_level_end_
 )
 {
@@ -169,30 +169,30 @@ kernel_partition_level_next(
 	const size_t gwx = (blockDim.x * blockIdx.x + threadIdx.x) / P;
 
 	__shared__ T q[partitionsPerBlock][P * 2];
-	__shared__ int sizes[partitionsPerBlock];
+	__shared__ T sizes[partitionsPerBlock];
 	T* e1_arr = &q[warpIdx][0];
-	int* size = &sizes[warpIdx];
+	T* size = &sizes[warpIdx];
 
 	if (lx == 0)
 		*size = 0;
 
-	for (size_t i = gwx; i < current.count[0]; i += blockDim.x * gridDim.x / P)
+	for (auto i = gwx; i < current.count[0]; i += blockDim.x * gridDim.x / P)
 	{
 		T nodeId = current.queue[i];
 
 		T srcStart = g.rowPtr[nodeId];
 		T srcStop = g.rowPtr[nodeId + 1];
 
-		for (int j = srcStart + lx; j < (srcStop + P-1) / P * P; j += P)
+		for (auto j = srcStart + lx; j < (srcStop + P-1) / P * P; j += P)
 		{
 			__syncwarp();
 			if (*size >= P)
 			{
-				for (int e = lx; e < *size; e += P)
+				for (auto e = lx; e < *size; e += P)
 				{
 					T e1 = e1_arr[e];
 					if (!current.mark[e1])
-						process_degree(e1, level, nodeDegree, next, bucket, bucket_level_end_);
+						process_degree<T>(e1, level, nodeDegree, next, bucket, bucket_level_end_);
 				}
 				__syncwarp();
 				if (lx == 0)
@@ -209,26 +209,26 @@ kernel_partition_level_next(
 		}
 
 		__syncwarp();
-		for (int e = lx; e < *size; e += P)
+		for (auto e = lx; e < *size; e += P)
 		{
 			T e1 = e1_arr[e];
 			if (!current.mark[e1])
-				process_degree(e1, level, nodeDegree, next, bucket, bucket_level_end_);
+				process_degree<T>(e1, level, nodeDegree, next, bucket, bucket_level_end_);
 		}
 	}
 }
 
 
 
-template <typename T, int BLOCK_DIM_X>
+template <typename T, typename PeelT, int BLOCK_DIM_X>
 __global__ void
 kernel_block_level_next(
 	graph::COOCSRGraph_d<T> g,
-	int level, bool* processed, int* nodeDegree,
-	graph::GraphQueue_d<int, bool> current,
-	graph::GraphQueue_d<int, bool>& next,
-	graph::GraphQueue_d<int, bool>& bucket,
-	int bucket_level_end_
+	T level, bool* processed, PeelT* nodeDegree,
+	graph::GraphQueue_d<T, bool> current,
+	graph::GraphQueue_d<T, bool>& next,
+	graph::GraphQueue_d<T, bool>& bucket,
+	T bucket_level_end_
 )
 {
 	auto tid = threadIdx.x;
@@ -237,7 +237,7 @@ kernel_block_level_next(
 
 	__shared__ T q[BLOCK_DIM_X*2];
 	T* e1_arr = &q[0];
-	__shared__ int size;
+	__shared__ T size;
 
 	if (tid == 0)
 	{
@@ -253,16 +253,16 @@ kernel_block_level_next(
 		T srcStop = g.rowPtr[nodeId + 1];
 		T srcLen = srcStop - srcStart;
 
-		for (int j = tid; j < (srcLen + BLOCK_DIM_X -1) / BLOCK_DIM_X * BLOCK_DIM_X; j += BLOCK_DIM_X)
+		for (auto j = tid; j < (srcLen + BLOCK_DIM_X -1) / BLOCK_DIM_X * BLOCK_DIM_X; j += BLOCK_DIM_X)
 		{
 			__syncthreads();
 		    if (size >= BLOCK_DIM_X)
 			{
-				for (int e = tid; e < size; e += BLOCK_DIM_X)
+				for (auto e = tid; e < size; e += BLOCK_DIM_X)
 				{
 					T e1 = e1_arr[e];
 					if (!current.mark[e1])
-						process_degree(e1, level, nodeDegree, next, bucket, bucket_level_end_);
+						process_degree<T>(e1, level, nodeDegree, next, bucket, bucket_level_end_);
 				}
 				__syncthreads();
 				if (tid == 0)
@@ -279,11 +279,11 @@ kernel_block_level_next(
 		}
 
 		__syncthreads();
-		for (int e = tid; e < size; e += BLOCK_DIM_X)
+		for (auto e = tid; e < size; e += BLOCK_DIM_X)
 		{
 			T e1 = e1_arr[e];
 			if (!current.mark[e1])
-				process_degree(e1, level, nodeDegree, next, bucket, bucket_level_end_);
+				process_degree<T>(e1, level, nodeDegree, next, bucket, bucket_level_end_);
 		}
 	}
 }
@@ -291,7 +291,7 @@ kernel_block_level_next(
 
 namespace graph
 {
-	template<typename T>
+	template<typename T, typename PeelT>
 	class SingleGPU_Kcore
 	{
 	private:
@@ -308,10 +308,10 @@ namespace graph
 
 		//Same Function for any comutation
 		void bucket_scan(
-			GPUArray<int> nodeDegree, uint32_t node_num, int level,
-			GraphQueue<int, bool>& current,
-			GPUArray<uint> asc,
-			GraphQueue<int, bool>& bucket,
+			GPUArray<PeelT> nodeDegree, T node_num, int level,
+			GraphQueue<T, bool>& current,
+			GPUArray<T> asc,
+			GraphQueue<T, bool>& bucket,
 			int& bucket_level_end_)
 		{
 			static bool is_first = true;
@@ -328,7 +328,7 @@ namespace graph
 
 
 				long grid_size = (node_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
-				execKernel(filter_window, grid_size, BLOCK_SIZE, false,
+				execKernel((filter_window<T, PeelT>), grid_size, BLOCK_SIZE, false,
 					nodeDegree.gdata(), node_num, bucket.mark.gdata(), level, bucket_level_end_ + LEVEL_SKIP_SIZE);
 
 				bucket.count.gdata()[0] = CUBSelect(asc.gdata(), bucket.queue.gdata(), bucket.mark.gdata(), node_num);
@@ -339,8 +339,8 @@ namespace graph
 			{
 				current.count.gdata()[0] = 0;
 				long grid_size = (bucket.count.gdata()[0] + BLOCK_SIZE - 1) / BLOCK_SIZE;
-				execKernel(filter_with_random_append, grid_size, BLOCK_SIZE, false,
-					bucket.queue.gdata(), bucket.count.gdata()[0], nodeDegree.gdata(), current.mark.gdata(), current.queue.gdata(), &(current.count.gdata()[0]), level);
+				execKernel((filter_with_random_append<T, PeelT>), grid_size, BLOCK_SIZE, false,
+					bucket.queue.gdata(), bucket.count.gdata()[0], nodeDegree.gdata(), current.mark.gdata(), current.queue.gdata(), &(current.count.gdata()[0]), level, 1);
 			}
 			else
 			{
@@ -350,7 +350,7 @@ namespace graph
 		}
 
 
-		void AscendingGpu(int n, GPUArray<uint>& identity_arr_asc)
+		void AscendingGpu(int n, GPUArray<T>& identity_arr_asc)
 		{
 			long grid_size = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
 			identity_arr_asc.initialize("Identity Array Asc", AllocationTypeEnum::unified, n, 0);
@@ -405,9 +405,7 @@ namespace graph
 		}
 
 	public:
-
-
-		GPUArray<int> nodeDegree;
+		GPUArray<PeelT> nodeDegree;
 
 		SingleGPU_Kcore(int dev) : dev_(dev) {
 			CUDA_RUNTIME(cudaSetDevice(dev_));
@@ -443,22 +441,22 @@ namespace graph
 			GPUArray<bool> node_kept;
 
 			//Lets apply queues and buckets
-			graph::GraphQueue<int, bool> bucket_q;
+			graph::GraphQueue<T, bool> bucket_q;
 			bucket_q.Create(unified, g.numNodes, 0);
 
-			graph::GraphQueue<int, bool> current_q;
+			graph::GraphQueue<T, bool> current_q;
 			current_q.Create(unified, g.numNodes, 0);
 
-			graph::GraphQueue<int, bool> next_q;
+			graph::GraphQueue<T, bool> next_q;
 			next_q.Create(unified, g.numNodes, 0);
 
 			GPUArray<T> identity_arr_asc;
 			AscendingGpu(g.numNodes,identity_arr_asc);
 
-			GPUArray <uint> newRowPtr;
-			GPUArray <uint> newColIndex_csr;
-			GPUArray <uint> new_eid;
-			GPUArray <uint> new_edge_offset_origin;
+			GPUArray <T> newRowPtr;
+			GPUArray <T> newColIndex_csr;
+			GPUArray <T> new_eid;
+			GPUArray <T> new_edge_offset_origin;
 			GPUArray<bool> edge_deleted;           // Auxiliaries for shrinking graphs.
 
 
@@ -534,7 +532,7 @@ namespace graph
 							const int P = 16;
 							auto gridSize = (P * current_q.count.gdata()[0] + block_size - 1) / block_size;
 
-							execKernel((kernel_partition_level_next<T, 256, P>), gridSize, block_size, false,
+							execKernel((kernel_partition_level_next<T, PeelT, 256, P>), gridSize, block_size, false,
 								g,
 								level, processed.gdata(), nodeDegree.gdata(),
 								current_q.device_queue->gdata()[0],
@@ -544,7 +542,7 @@ namespace graph
 						}
 						else if(level <= 32)
 						{
-							execKernel((kernel_partition_level_next<T, 256, 32>), grid_warp_size, block_size, false,
+							execKernel((kernel_partition_level_next<T, PeelT, 256, 32>), grid_warp_size, block_size, false,
 								g,
 								level, processed.gdata(), nodeDegree.gdata(),
 								current_q.device_queue->gdata()[0],
@@ -579,7 +577,7 @@ namespace graph
 						}*/
 						else
 						{
-							execKernel((kernel_block_level_next<T, 256>), grid_block_size, block_size, false,
+							execKernel((kernel_block_level_next<T, PeelT, 256>), grid_block_size, block_size, false,
 								g,
 								level, processed.gdata(), nodeDegree.gdata(),
 								current_q.device_queue->gdata()[0],

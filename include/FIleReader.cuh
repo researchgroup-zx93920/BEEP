@@ -33,7 +33,7 @@ namespace graph
     class EdgeListFile {
 
     private:
-        enum class FileType { TSV, BEL, MTX};
+        enum class FileType { TSV, BEL, MTX };
         FILE* fp_;
         std::string path_;
         FileType type_;
@@ -94,10 +94,10 @@ namespace graph
             return numRead;
         }
 
-      
-        
 
-       
+
+
+
         template <typename T> size_t read_tsv(EdgeTy<T>* ptr, const size_t n) {
 
             assert(ptr != nullptr);
@@ -127,8 +127,8 @@ namespace graph
         }
 
 
-        template <typename T, typename ValueT> 
-        size_t read_market(EdgeTy<T>* ptr, const size_t n, bool has_edge_val=true)
+        template <typename T, typename ValueT>
+        size_t read_market(EdgeTy<T>* ptr, const size_t n, bool has_edge_val = true)
         {
 
             assert(ptr != nullptr);
@@ -136,7 +136,7 @@ namespace graph
             std::istream& input_stream = market_file;
             size_t i = 0;
             bool succeed = true;
-            for (; i < n; ++i) 
+            for (; i < n; ++i)
             {
                 succeed = true;
                 std::string line;
@@ -175,18 +175,18 @@ namespace graph
                             ll_value = (ValueT)lf_value;
                         else
                             ll_value = (ValueT)(lf_value + 1e-10);
-        
+
                     }
 
                 }
-                else 
+                else
                 { // if (GraphT::FLAG & graph::HAS_EDGE_VALUES)
                     num_input = sscanf(line.c_str(), "%lld %lld", &ll_row, &ll_col);
 
-                    if (mfp.array && (num_input == 1)) 
+                    if (mfp.array && (num_input == 1))
                     {
                         ll_value = ll_row;
-                        ll_col =0;
+                        ll_col = 0;
                         ll_row = 0;
                     }
                     else if (mfp.array || (num_input != 2)) {
@@ -268,7 +268,7 @@ namespace graph
                 Log(LogPriorityEnum::critical, "no reader for file {}", path);
                 exit(-1);
             }
-           
+
             if (nullptr == fp_) {
                 Log(LogPriorityEnum::error, "unable to open \"{}\"", path_);
             }
@@ -373,7 +373,7 @@ namespace graph
                 break;
             }
             case FileType::MTX:
-                numRead = read_market<T,T>(edges.data(), n, false);
+                numRead = read_market<T, T>(edges.data(), n, false);
                 break;
             default: {
                 Log(LogPriorityEnum::critical, "unexpected file type");
@@ -418,17 +418,17 @@ namespace graph
             FILE* writer = fopen(path.c_str(), "wb");
 
             if (writer == nullptr) {
-                
+
                 return 0;
             }
             if (ptr == nullptr) {
-                
+
                 return 0;
             }
 
-            unsigned long long *l;
+            unsigned long long* l;
             l = (unsigned long long*)malloc(3 * n * sizeof(unsigned long long));
-            int elementCounter=0;
+            int elementCounter = 0;
             for (int i = 0; i < n; i++)
             {
                 EdgeTy<T> p = ptr[i];
@@ -446,7 +446,7 @@ namespace graph
             free(l);
         }
 
-       
+
     };
 
 
@@ -590,7 +590,7 @@ namespace graph
 
             printf("File Edges = %d, Edges found = %d\n", edges, ptr.size());
             edges = ptr.size();
-            
+
 
             std::sort(ptr.begin(), ptr.end(), [](const EdgeTy<T>& a, const EdgeTy<T>& b) -> bool
                 {
@@ -638,7 +638,7 @@ namespace graph
             std::vector<EdgeTy<T>> fileEdges;
 
             int numread = 0;
-            do{
+            do {
                 long long unsigned dst, src, weight;
                 numread = fscanf(fp_, "%llu %llu %llu", &dst, &src, &weight);
                 if (numread == 3)
@@ -647,7 +647,10 @@ namespace graph
                 }
             } while (numread == 3);
 
-            int n = fileEdges.size();
+            uint64 n = fileEdges.size();
+
+            printf("Read the file: N=%llu\n", n);
+
             FILE* writer = fopen(outputPath.c_str(), "wb");
 
             if (writer == nullptr) {
@@ -692,7 +695,7 @@ namespace graph
             do {
                 long long unsigned dst, src;
                 ValueT weight;
-                if(typeid(ValueT) != typeid(double))
+                if (typeid(ValueT) != typeid(double))
                     numread = fscanf(fp_, "%llu %llu %llu", &dst, &src, &weight);
                 else
                     numread = fscanf(fp_, "%llu %llu %llg", &dst, &src, &weight);
@@ -719,9 +722,9 @@ namespace graph
 
             for (unsigned long long i = 0; i < m; i++)
             {
-                file << fileEdges[i].first << " " << fileEdges[i].second <<" " << weights[i] << std::endl;
+                file << fileEdges[i].first << " " << fileEdges[i].second << " " << weights[i] << std::endl;
             }
-           
+
             //closing the file
             file.close();
         }
@@ -757,7 +760,7 @@ namespace graph
                         memcpy(&dst, &belBuf_[i * 24 + 0], 8);
                         fileEdges.push_back(std::make_pair(src, dst));
                         ValueT weight;
-                        
+
                         memcpy(&weight, &belBuf_[i * 24 + 16], 8);
                         weights.push_back(weight);
                     }
@@ -798,7 +801,7 @@ namespace graph
             std::vector<EdgeTy<T>> fileEdges;
             int numread = 0;
             long long unsigned a, b, weight;
-            do 
+            do
             {
                 if (numCol == 3)
                     numread = fscanf(fp_, "%llu %llu %llu", &a, &b, &weight);
@@ -823,8 +826,7 @@ namespace graph
                     if (makeFull)
                         fileEdges.push_back(std::make_pair(dst, src));
                 }
-            }
-            while (numread == numCol);
+            } while (numread == numCol);
 
             std::sort(fileEdges.begin(), fileEdges.end(), [](const EdgeTy<T>& a, const EdgeTy<T>& b) -> bool
                 {
@@ -832,7 +834,7 @@ namespace graph
                 });
 
 
-            
+
             int n = fileEdges.size();
             FILE* writer = fopen(outputPath.c_str(), "wb");
 

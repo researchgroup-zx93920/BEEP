@@ -3,77 +3,10 @@
 #include "utils.cuh"
 #include "defs.cuh"
 
-
-
-int     opterr = 1,             /* if error message should be printed */
-optind = 1,             /* index into parent argv vector */
-optopt,                 /* character checked for validity */
-optreset;               /* reset getopt */
-char* optarg;                /* argument associated with option */
-
-#define BADCH   (int)'?'
-#define BADARG  (int)':'
-#define EMSG    ""
-
-/*
-* getopt --
-*      Parse argc/argv argument vector.
-*/
-int
-getopt(int nargc, char* const nargv[], const char* ostr)
-{
-    static char* place = EMSG;              /* option letter processing */
-    const char* oli;                        /* option letter list index */
-
-    if (optreset || !*place) {              /* update scanning pointer */
-        optreset = 0;
-        if (optind >= nargc || *(place = nargv[optind]) != '-') {
-            place = EMSG;
-            return (-1);
-        }
-        if (place[1] && *++place == '-') {      /* found "--" */
-            ++optind;
-            place = EMSG;
-            return (-1);
-        }
-    }                                       /* option letter okay? */
-    if ((optopt = (int)*place++) == (int)':' ||
-        !(oli = strchr(ostr, optopt))) {
-        /*
-        * if the user didn't specify '-' as an option,
-        * assume it means -1.
-        */
-        if (optopt == (int)'-')
-            return (-1);
-        if (!*place)
-            ++optind;
-        if (opterr && *ostr != ':')
-            (void)printf("illegal option -- %c\n", optopt);
-        return (BADCH);
-    }
-    if (*++oli != ':') {                    /* don't need argument */
-        optarg = NULL;
-        if (!*place)
-            ++optind;
-    }
-    else {                                  /* need an argument */
-        if (*place)                     /* no white space */
-            optarg = place;
-        else if (nargc <= ++optind) {   /* no arg */
-            place = EMSG;
-            if (*ostr == ':')
-                return (BADARG);
-            if (opterr)
-                (void)printf("option requires an argument -- %c\n", optopt);
-            return (BADCH);
-        }
-        else                            /* white space */
-            optarg = nargv[optind];
-        place = EMSG;
-        ++optind;
-    }
-    return (optopt);                        /* dump back option letter */
-}
+#ifndef __VS__
+    #include <unistd.h>
+#endif
+#include <stdio.h>
 
 struct Config {
 
@@ -91,35 +24,35 @@ struct Config {
 
 static MAINTASK parseMainTask(const char* s)
 {
-    if (strcmp(s, "tsv-mtx"))
+    if (strcmp(s, "tsv-mtx") == 0)
         return CONV_TSV_MTX;
 
-    if (strcmp(s, "tsv-bel"))
+    if (strcmp(s, "tsv-bel") == 0)
         return CONV_TSV_BEL;
 
-    if (strcmp(s, "txt-bel"))
+    if (strcmp(s, "txt-bel") == 0)
         return CONV_TXT_BEL;
 
-    if (strcmp(s, "mtx-bel"))
+    if (strcmp(s, "mtx-bel") == 0)
         return CONV_MTX_BEL;
 
-    if (strcmp(s, "bel-mtx"))
+    if (strcmp(s, "bel-mtx") == 0)
         return CONV_BEL_MTX;
 
-    if (strcmp(s, "tc"))
+    if (strcmp(s, "tc") == 0)
         return TC;
 
-    if (strcmp(s, "kcore"))
+    if (strcmp(s, "kcore") == 0)
         return KCORE;
 
 
-    if (strcmp(s, "ktruss"))
+    if (strcmp(s, "ktruss") == 0)
         return KTRUSS;
 
-    if (strcmp(s, "kclique"))
+    if (strcmp(s, "kclique") == 0)
         return KCLIQUE;
 
-    if (strcmp(s, "cd"))
+    if (strcmp(s, "cd") == 0)
         return CROSSDECOMP;
 
     fprintf(stderr, "Unrecognized -mt option (Main TASK): %s\n", s);
@@ -147,20 +80,37 @@ static const char* asString(MAINTASK mt) {
 
 static OrientGraphByEnum parseOrient(const char* s)
 {
-    if (strcmp(s, "full"))
+    if (strcmp(s, "full") == 0)
         return None;
-    if (strcmp(s, "upper"))
+    if (strcmp(s, "upper") == 0)
         return Upper;
-    if (strcmp(s, "lower"))
+    if (strcmp(s, "lower") == 0)
         return Lower;
-    if (strcmp(s, "degree"))
+    if (strcmp(s, "degree") == 0)
         return Degree;
-    if (strcmp(s, "degen"))
+    if (strcmp(s, "degen") == 0)
         return Degeneracy;
 
     fprintf(stderr, "Unrecognized -o option (Graph Orient): %s\n", s);
     exit(0);
 }
+
+
+
+
+static const char* asString(OrientGraphByEnum mt) {
+    switch (mt) {
+    case None:            return "full";
+    case Upper:            return "upper";
+    case Lower:            return "lower";
+    case Degree:            return "degree";
+    case Degeneracy:            return "degen";
+    default:
+        fprintf(stderr, "Unrecognized orient\n");
+        exit(0);
+    }
+}
+
 
 static AllocationTypeEnum parseAllocation(const char* s)
 {
@@ -183,10 +133,10 @@ static void usage() {
         "\nUsage:  ./build/exe/src/main.cu.exe [options]"
         "\n"
         "\nOptions:"
-        "\n    -sf <Src graph FileName>       Name of file with input graph (default = )"
-        "\n    -df <Dst graph FileName>       Name of file with dst graph only for conversion (default = )"
+        "\n    -g <Src graph FileName>       Name of file with input graph (default = )"
+        "\n    -r <Dst graph FileName>       Name of file with dst graph only for conversion (default = )"
         "\n    -d <Device Id>                      GPU Device Id (default = 0)"
-        "\n    -mt <MainTask>     Name of the task to perform (default = TC)"
+        "\n    -m <MainTask>     Name of the task to perform (default = TC)"
         "\n    -x                   Print Graph Stats         "
         "\n    -o <orientGraph>       How to orient undirected to directed graph (default = full)"
         "\n    -a <allocation>        Data allocation on GPU (default = unified)"
@@ -202,27 +152,30 @@ static Config parseArgs(int argc, char** argv) {
     config.srcGraph = "D:\\graphs\\as-Skitter2.bel";
     config.dstGraph = "D:\\graphs\\as-Skitter2.bel";
     config.deviceId = 0;
-    config.mt = TC;
+    config.mt = KCLIQUE;
     config.printStats = false;
-    config.orient = None;
+    config.orient = Degree;
     config.allocation = unified;
-    config.k = 3;
+    config.k = 5;
     config.sortEdges = false;
 #ifndef __VS__
     int opt;
-    while ((opt = getopt(argc, argv, "sf:df:d:mt:x:o:a:k:h:v:s")) >= 0) {
+
+    printf("parsing configuration .... \n");
+
+    while ((opt = getopt(argc, argv, "g:r:d:m:x:o:a:k:h:v:s")) >= 0) {
         switch (opt) {
-        case 'sf': config.srcGraph = optarg;                           break;
-        case 'df': config.dstGraph = optarg;                     break;
+        case 'g': config.srcGraph = optarg;                                break;
+        case 'r': config.dstGraph = optarg;                                break;
         case 'd': config.deviceId = atoi(optarg);                           break;
-        case 'mt': config.mt = parseMainTask(optarg);                       break;
+        case 'm': config.mt = parseMainTask(optarg);                       break;
         case 'x': config.printStats = true;                                 break;
         case 'o': config.orient = parseOrient(optarg);                      break;
         case 'a': config.allocation = parseAllocation(optarg);              break;
-        case 'v': config.verbosity = atoi(optarg);                     break;
-        case 'k': config.k = atoi(optarg);
-        case 's': config.sortEdges = true;
-        case 'h': usage(); exit(0);
+        case 'v': config.verbosity = atoi(optarg);                          break;
+        case 'k': config.k = atoi(optarg);                                  break;
+        case 's': config.sortEdges = true;                                  break;
+        case 'h': usage(); exit(0);                                         break;
         default: fprintf(stderr, "\nUnrecognized option!\n");
             usage(); exit(0);
         }
@@ -231,11 +184,13 @@ static Config parseArgs(int argc, char** argv) {
     return config;
 }
 
-static void printConfig(Config config) 
+static void printConfig(Config config)
 {
     printf("    Graph: %s\n", config.srcGraph);
     printf("    DST Graph: %s\n", config.dstGraph);
-    printf("        Device Id = %u\n", config.deviceId);
-    printf("        Main Task = %s\n", asString(config.mt));
+    printf("    Device Id = %u\n", config.deviceId);
+    printf("    Main Task = %s\n", asString(config.mt));
+    printf("    Graph Orientation = %s\n", asString(config.orient));
+
     printf("    k: %u\n", config.k);
 }

@@ -329,102 +329,22 @@ kernel_binary_thread_pe_eid_arrays(int* count, //!< [inout] the count, caller sh
 
 }
 
-__device__ void add_to_queue_1(graph::GraphQueue_d<int, bool>& q, int element)
-{
-    auto insert_idx = atomicAdd(q.count, 1);
-    q.queue[insert_idx] = element;
-    q.mark[element] = true;
-}
 
-__device__ void add_to_queue_1_no_dup(graph::GraphQueue_d<int, bool>& q, int element)
-{
-    auto old_token = atomicCASBool(q.mark + element, InBucketFalse, InBucketTrue);
-    if (!old_token) {
-        auto insert_idx = atomicAdd(q.count, 1);
-        q.queue[insert_idx] = element;
-    }
-}
-
-
-__inline__ __device__
-void process_support2(
-    uint32_t edge_idx, int level, int* EdgeSupport,
-    graph::GraphQueue_d<int, bool>& next,
-    graph::GraphQueue_d<int, bool>& bucket,
-    int bucket_level_end_)
-{
-    auto cur = atomicSub(&EdgeSupport[edge_idx], 1);
-    if (cur == (level + 1)) {
-        add_to_queue_1(next, edge_idx);
-    }
-    if (cur <= level) {
-        atomicAdd(&EdgeSupport[edge_idx], 1);
-    }
-
-    // Update the Bucket.
-    auto latest = cur - 1;
-    if (latest > level && latest < bucket_level_end_) {
-        add_to_queue_1_no_dup(bucket, edge_idx);
-    }
-
-}
-
-
-template <typename T>
-__device__ inline void addNexBucket(T e1, T e2, T e3, bool* processed,
-    int* edgeSupport, int level,
-    bool* inCurr,
-    graph::GraphQueue_d<int, bool>& next,
-    graph::GraphQueue_d<int, bool>& bucket, 
-    int bucket_upper_level)
-{
-    bool is_peel_e2 = !inCurr[e2];
-    bool is_peel_e3 = !inCurr[e3];
-    if (is_peel_e2 || is_peel_e3)
-    {
-        if ((!processed[e2]) && (!processed[e3]))
-        {
-            if (is_peel_e2 && is_peel_e3)
-            {
-
-                process_support2(e2, level, edgeSupport, next, bucket, bucket_upper_level);
-                process_support2(e3, level, edgeSupport, next, bucket, bucket_upper_level);
-
-
-
-            }
-            else if (is_peel_e2)
-            {
-                if (e1 < e3) {
-                    process_support2(e2, level, edgeSupport, next, bucket, bucket_upper_level);
-                }
-            }
-            else
-            {
-                if (e1 < e2)
-                {
-                    process_support2(e3, level, edgeSupport, next, bucket, bucket_upper_level);
-                }
-            }
-        }
-    }
-}
-
-template <typename T, size_t BLOCK_DIM_X>
+template <typename T, typename PeelT, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_binary_thread_pe_level_next(
     T* rowPtr_csr, T* colIndex_csr,
     T* rowInd, T* colInd, T* eid,
     const size_t numEdges,
-    int level, bool* processed, int* edgeSupport,
-    graph::GraphQueue_d<int, bool> current,
-    graph::GraphQueue_d<int, bool>& next,
-    graph::GraphQueue_d<int, bool>& bucket, 
-    int bucket_level_end_
+    T level, bool* processed, PeelT* edgeSupport,
+    graph::GraphQueue_d<T, bool> current,
+    graph::GraphQueue_d<T, bool>& next,
+    graph::GraphQueue_d<T, bool>& bucket, 
+    T bucket_level_end_
 )
 {
-    size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
-    for (size_t i = gx; i < current.count[0]; i += BLOCK_DIM_X * gridDim.x)
+    auto gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
+    for (auto i = gx; i < current.count[0]; i += BLOCK_DIM_X * gridDim.x)
     {
         T edgeId = current.queue[i];
 
@@ -626,16 +546,16 @@ kernel_binary_warp_pe_eid_arrays(int* count,                //!< [inout] the cou
         T srcLen = srcStop - srcStart;
 
 
-        // if (srcLen > dstLen)
-        // {
-        //     swap_ele(srcStart, dstStart);
-        //     swap_ele(srcStop, dstStop);
-        //     swap_ele(srcLen, dstLen);
-        // }
+         if (srcLen > dstLen)
+         {
+             swap_ele(srcStart, dstStart);
+             swap_ele(srcStop, dstStop);
+             swap_ele(srcLen, dstLen);
+         }
 
         // FIXME: remove warp reduction from this function call
-        warpCount += graph::warp_sorted_count_binary<warpsPerBlock>(&colIndex_csr[dstStart], dstLen,
-            &colIndex_csr[srcStart], srcLen);
+        warpCount += graph::warp_sorted_count_binary<warpsPerBlock>(&colIndex_csr[srcStart], srcLen,
+            &colIndex_csr[dstStart], dstLen);
 
         if (lx == 0)
             count[i + edgeStart] = warpCount;
@@ -646,17 +566,17 @@ kernel_binary_warp_pe_eid_arrays(int* count,                //!< [inout] the cou
 
 
 
-template <typename T, size_t BLOCK_DIM_X>
+template <typename T, typename PeelT, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_binary_warp_pe_level_next(
     T* rowPtr_csr, T* colIndex_csr,
     T* rowInd, T* colInd, T* eid,
     const size_t numEdges,
-    int level, bool* processed, int* edgeSupport,
-    graph::GraphQueue_d<int, bool> current,
-    graph::GraphQueue_d<int, bool> next,
-    graph::GraphQueue_d<int, bool> bucket, 
-    int bucket_level_end_
+    T level, bool* processed, PeelT* edgeSupport,
+    graph::GraphQueue_d<T, bool> current,
+    graph::GraphQueue_d<T, bool> next,
+    graph::GraphQueue_d<T, bool> bucket, 
+    T bucket_level_end_
 )
 {
 
@@ -668,11 +588,11 @@ kernel_binary_warp_pe_level_next(
 
 
     __shared__ T q[warpsPerBlock][3 * 2 * 32];
-    __shared__ int sizes[warpsPerBlock];
+    __shared__ T sizes[warpsPerBlock];
     T* e1_arr = &q[warpIdx][0];
     T* e2_arr = &q[warpIdx][1 * 32 * 2];
     T* e3_arr = &q[warpIdx][2 * 32 * 2];
-    int* size = &sizes[warpIdx];
+    T* size = &sizes[warpIdx];
 
     if (lx == 0)
         *size = 0;
@@ -706,7 +626,7 @@ kernel_binary_warp_pe_level_next(
         T lastIndex = 0;
 
         // cover entirety of A with warp
-        for (size_t j = lx; j < (srcLen + 31) / 32 * 32; j += 32)
+        for (auto j = lx; j < (srcLen + 31) / 32 * 32; j += 32)
         {
             __syncwarp();
             if (*size >= 32)
@@ -761,7 +681,7 @@ kernel_binary_warp_pe_level_next(
         }
 
         __syncwarp();
-        for (int e = lx; e < *size; e += 32)
+        for (auto e = lx; e < *size; e += 32)
         {
             T e1 = e1_arr[e];
             T e2 = e2_arr[e];
@@ -773,16 +693,16 @@ kernel_binary_warp_pe_level_next(
 
 }
 
-template <typename T, size_t BLOCK_DIM_X>
+template <typename T, typename PeelT, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_binary_block_pe_level_next(
     T* rowPtr_csr, T* colIndex_csr,
     T* rowInd, T* colInd, T* eid,
     const size_t numEdges,
-    int level, bool* processed, int* edgeSupport,
-    graph::GraphQueue_d<int, bool> current,
-    graph::GraphQueue_d<int, bool> next,
-    graph::GraphQueue_d<int, bool> bucket, int bucket_level_end_
+    int level, bool* processed, PeelT* edgeSupport,
+    graph::GraphQueue_d<T, bool> current,
+    graph::GraphQueue_d<T, bool> next,
+    graph::GraphQueue_d<T, bool> bucket, int bucket_level_end_
 )
 {
 
@@ -792,7 +712,7 @@ kernel_binary_block_pe_level_next(
 
     __shared__ T first[BLOCK_DIM_X];
     __shared__ T q[3 * 2 * BLOCK_DIM_X];
-    __shared__ int size;
+    __shared__ T size;
     T* e1_arr = &q[0];
     T* e2_arr = &q[1 * BLOCK_DIM_X * 2];
     T* e3_arr = &q[2 * BLOCK_DIM_X * 2];
@@ -841,7 +761,7 @@ kernel_binary_block_pe_level_next(
         T lastIndex = 0;
         T fl = 0;
         // cover entirety of A with warp
-        for (size_t j = tid; j < (dstLen + BLOCK_DIM_X - 1) / BLOCK_DIM_X * BLOCK_DIM_X; j += BLOCK_DIM_X)
+        for (auto j = tid; j < (dstLen + BLOCK_DIM_X - 1) / BLOCK_DIM_X * BLOCK_DIM_X; j += BLOCK_DIM_X)
         {
             __syncthreads();
             if (size >= BLOCK_DIM_X)
@@ -851,7 +771,7 @@ kernel_binary_block_pe_level_next(
                     T e1 = e1_arr[e];
                     T e2 = e2_arr[e];
                     T e3 = e3_arr[e];
-                    addNexBucket(e1, e2, e3, processed, edgeSupport, level, current.mark, next, bucket, bucket_level_end_);
+                    addNexBucket<T>(e1, e2, e3, processed, edgeSupport, level, current.mark, next, bucket, bucket_level_end_);
                 }
 
                 __syncthreads();
@@ -905,12 +825,12 @@ kernel_binary_block_pe_level_next(
         }
 
         __syncthreads();
-        for (int e = tid; e < size; e += BLOCK_DIM_X)
+        for (auto e = tid; e < size; e += BLOCK_DIM_X)
         {
             T e1 = e1_arr[e];
             T e2 = e2_arr[e];
             T e3 = e3_arr[e];
-            addNexBucket(e1, e2, e3, processed, edgeSupport, level, current.mark, next, bucket, bucket_level_end_);
+            addNexBucket<T>(e1, e2, e3, processed, edgeSupport, level, current.mark, next, bucket, bucket_level_end_);
         }
     }
 
@@ -1226,8 +1146,8 @@ kernel_binary_warp_shared_colab_arrays(uint64* count,                //!< [inout
 namespace graph {
 
 
-    template<typename T>
-    class TcBinary : public TcBase<T>
+    template<typename T, typename PeelT=int>
+    class TcBinary : public TcBase<T, PeelT>
     {
     public:
 
@@ -1369,9 +1289,9 @@ namespace graph {
 
         void count_moveNext_per_edge_async(
             EidGraph_d<T>& g, const size_t numEdges,
-            int level, GPUArray<bool> processed, GPUArray<int>& edgeSupport,
-            GraphQueue<int, bool>& current, GraphQueue<int, bool>& next, GraphQueue<int, bool>& bucket, int bucket_level_end_,
-            const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+            T level, GPUArray<bool> processed, GPUArray<PeelT>& edgeSupport,
+            GraphQueue<T, bool>& current, GraphQueue<T, bool>& next, GraphQueue<T, bool>& bucket, T bucket_level_end_,
+            const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, T increasing = 0)
         {
 
             const size_t dimBlock = 256;
@@ -1382,9 +1302,9 @@ namespace graph {
             T* ri = g.rowInd;
             T* ci = g.colInd;
 
-            const int dimGrid = (current.count.gdata()[0] - edgeOffset + (dimBlock)-1) / (dimBlock);
-            const int dimGridWarp = (32 * current.count.gdata()[0] + (dimBlock)-1) / (dimBlock);
-            const int dimGridBlock = current.count.gdata()[0]; //(dimBlock * curr_cnt + (dimBlock)-1) / (dimBlock);
+            const T dimGrid = (current.count.gdata()[0] - edgeOffset + (dimBlock)-1) / (dimBlock);
+            const T dimGridWarp = (32 * current.count.gdata()[0] + (dimBlock)-1) / (dimBlock);
+            const T dimGridBlock = current.count.gdata()[0]; //(dimBlock * curr_cnt + (dimBlock)-1) / (dimBlock);
             CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
 
 
@@ -1393,7 +1313,7 @@ namespace graph {
 
             //CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
             if (kernelType == ProcessingElementEnum::Thread)
-                kernel_binary_thread_pe_level_next<T, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (
+                kernel_binary_thread_pe_level_next<T, PeelT, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (
                     rp_csr, ci_csr, ri, ci, g.eid, ne,
                     level, processed.gdata(), edgeSupport.gdata(),
                     current.device_queue->gdata()[0],
@@ -1401,7 +1321,7 @@ namespace graph {
                     bucket.device_queue->gdata()[0],
                     bucket_level_end_);
             else if (kernelType == ProcessingElementEnum::Warp)
-                kernel_binary_warp_pe_level_next<T, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (
+                kernel_binary_warp_pe_level_next<T, PeelT, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (
                     rp_csr, ci_csr, ri, ci, g.eid, ne,
                     level, processed.gdata(), edgeSupport.gdata(),
                     current.device_queue->gdata()[0],
@@ -1409,7 +1329,7 @@ namespace graph {
                     bucket.device_queue->gdata()[0],
                     bucket_level_end_);
             else if (kernelType == ProcessingElementEnum::Block)
-                kernel_binary_block_pe_level_next<T, dimBlock> << <dimGridBlock, dimBlock, 0, TcBase<T>::stream_ >> > (
+                kernel_binary_block_pe_level_next<T, PeelT, dimBlock> << <dimGridBlock, dimBlock, 0, TcBase<T>::stream_ >> > (
                     rp_csr, ci_csr, ri, ci, g.eid, ne,
                     level, processed.gdata(), edgeSupport.gdata(),
                     current.device_queue->gdata()[0],

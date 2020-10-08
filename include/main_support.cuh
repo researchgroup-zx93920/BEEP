@@ -114,15 +114,15 @@ __global__ void init(graph::COOCSRGraph_d<T> g, T* asc, bool* keep)
 }
 
 
-template<typename T>
-__global__ void init(graph::COOCSRGraph_d<T> g, T* asc, bool* keep, int* degeneracy)
+template<typename T, typename PeelT>
+__global__ void init(graph::COOCSRGraph_d<T> g, T* asc, bool* keep, PeelT* degeneracy)
 {
-	uint tx = threadIdx.x;
-	uint bx = blockIdx.x;
+	auto tx = threadIdx.x;
+	auto bx = blockIdx.x;
 
-	uint ptx = tx + bx * blockDim.x;
+	auto ptx = tx + bx * blockDim.x;
 
-	for (uint i = ptx; i < g.numEdges; i += blockDim.x * gridDim.x)
+	for (auto i = ptx; i < g.numEdges; i += blockDim.x * gridDim.x)
 	{
 		const T src = g.rowInd[i];
 		const T dst = g.colInd[i];
@@ -144,7 +144,6 @@ __global__ void init(graph::COOCSRGraph_d<T> g, T* asc, bool* keep, int* degener
 		else if (degeneracy[src] == degeneracy[dst] && dstLen == srcLen && src < dst)
 			keep[i] = true;
 
-
 		asc[i] = i;
 	}
 }
@@ -152,7 +151,7 @@ __global__ void init(graph::COOCSRGraph_d<T> g, T* asc, bool* keep, int* degener
 
 
 template<typename T>
-__global__ void createHashPointer2(graph::COOCSRGraph_d<T> g, T* hashPointer, int minLen, int maxLen, int divideConstant)
+__global__ void createHashPointer2(graph::COOCSRGraph_d<T> g, T* hashPointer, T minLen, T maxLen, int divideConstant)
 {
 	uint tx = threadIdx.x;
 	uint bx = blockIdx.x;
@@ -217,11 +216,12 @@ __global__ void createHashStartBin(graph::COOCSRGraph_d<T> g, T* hashPointer, T 
 
 
 //Overloaded form Ktruss
+template<typename T>
 __global__
 void warp_detect_deleted_edges(
-	uint* rowPtr, uint32_t numRows,
+	T* rowPtr, T numRows,
 	bool* keep,
-	uint* histogram)
+	T* histogram)
 {
 
 	__shared__ uint32_t cnts[WARPS_PER_BLOCK];
@@ -283,6 +283,14 @@ template<typename T>
 uint64 CountTriangles(std::string message, graph::TcBase<T>* tc, graph::COOCSRGraph_d<T> *g,
 	const size_t numEdges_upto, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
 {
+
+	#ifndef __VS__
+	CUDA_RUNTIME(cudaMemPrefetchAsync(g->rowPtr, (g->numNodes + 1) * sizeof(T), 0, tc->stream_));
+	CUDA_RUNTIME(cudaMemPrefetchAsync(g->rowInd, numEdges_upto * sizeof(T), 0, tc->stream_));
+	CUDA_RUNTIME(cudaMemPrefetchAsync(g->colInd, numEdges_upto * sizeof(T), 0, tc->stream_));
+	tc->sync();
+	#endif // !__VS__
+
 	tc->count_async(g, numEdges_upto, edgeOffset, kernelType, increasing);
 	tc->sync();
 	CUDA_RUNTIME(cudaGetLastError());
@@ -304,8 +312,8 @@ void CountTrianglesHash(const int divideConstant, graph::TcBase<T>* tc, graph::C
 	const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
 {
 
-	const int minRowLen = 16*1024;
-	const int maxRowLen = 32 * 1024;
+	const T minRowLen = 256;
+	const T maxRowLen = 3200 * 1024;
 	const int cNumBins = 512; //not used
 
 	//Construct
@@ -331,7 +339,11 @@ void CountTrianglesHash(const int divideConstant, graph::TcBase<T>* tc, graph::C
 	//for (int i = 0; i < 100; i++)
 	//	printf("%u, ", htp.gdata()[i]);
 	//printf("\n");
-
+	if (totalBins == 0)
+	{
+		printf("Hashing is not suitable or min row is higher than max row len, exit \n");
+		return;
+	}
 
 	graph::GPUArray<uint> hts("bins start per row", AllocationTypeEnum::unified, totalBins, 0);
 	hts.setAll(0, true);

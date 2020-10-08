@@ -196,9 +196,9 @@ namespace graph
         if (end - start == 0)//empty bin
             return false;
 
-        if (end - start < 128)
+       /* if (end - start < 32)
         {
-            for (int i = start; i < end; i++)
+            for (T i = start; i < end; i++)
             {
                 if (searchVal == arr[i])
                 {
@@ -206,7 +206,7 @@ namespace graph
                 }
             }
         }
-       else
+       else*/
         {
             T left = graph::binary_search<T>(&arr[start], 0, end-start, searchVal);
             if (arr[start + left] == searchVal)

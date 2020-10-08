@@ -130,7 +130,7 @@ kernel_hash_warp_arrays(uint64* count, //!< [inout] the count, caller should zer
                     &(colInd[srcStart]), srcLen);
             }
         }
-        else if (!srcHashed || (bothHashed && srcLen >= dstLen)) //only dest is hashed
+        else if (!srcHashed || (bothHashed && srcLen <= dstLen)) //only dest is hashed
         {
             //printf("DST HASH\n");
 
@@ -143,7 +143,7 @@ kernel_hash_warp_arrays(uint64* count, //!< [inout] the count, caller should zer
                 &hbs[binStart],
                 &colInd[dstStart], numBins);
         }
-        else if (!dstHashed || (bothHashed && srcLen < dstLen))
+        else if (!dstHashed || (bothHashed && srcLen > dstLen))
         {
 
             //printf("SRC HASH\n");

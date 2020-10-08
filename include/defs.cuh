@@ -3,7 +3,9 @@
 typedef uint64_t EncodeDataType;
 
 typedef std::chrono::system_clock::time_point timepoint;
+typedef unsigned long long int uint64;
 typedef unsigned int uint;
+typedef int PeelType;
 typedef uint wtype;
 typedef std::pair<uint, uint> Edge;
 typedef std::tuple<uint, uint, wtype> WEdge;
@@ -25,7 +27,6 @@ template <typename NodeTy, typename WeightTy> using WEdgeTy = std::tuple<NodeTy,
 #define __VS__ //visual studio debug
 
 
-typedef unsigned long long int uint64;
 
 //Enums
 enum ProcessingElementEnum { Thread, Warp, Block, Grid, WarpShared, Test, Queue };

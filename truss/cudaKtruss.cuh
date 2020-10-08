@@ -56,7 +56,7 @@ namespace graph
 
             #ifndef DEBUG_USE_CPU
             long grid_size = (edge_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
-            execKernel(filter_window, grid_size, BLOCK_SIZE, false,
+            execKernel((filter_window<int>), grid_size, BLOCK_SIZE, false,
                 EdgeSupport.gdata(), edge_num, in_bucket_window_.gdata(), level, bucket_level_end_);
 
             *window_bucket_buf_size_ = CUBSelect(asc.gdata(), bucket_buf_.gdata(), in_bucket_window_.gdata(), edge_num);
@@ -126,7 +126,7 @@ namespace graph
         /*2. construct new CSR (offsets, adj) and rebuild the eid*/
         int block_size = 128;
         // Attention: new_offset gets the histogram.
-        execKernel(warp_detect_deleted_edges, GRID_SIZE, block_size, true,
+        execKernel((warp_detect_deleted_edges<uint>), GRID_SIZE, block_size, true,
             rowPtr.gdata(), n, bmp.eid.gdata(), processed.gdata(), new_offset.gdata(), edge_deleted.gdata());
 
         uint total = CUBScanExclusive<uint, uint>(new_offset.gdata(), new_offset.gdata(), n);
