@@ -152,9 +152,9 @@ static Config parseArgs(int argc, char** argv) {
     config.srcGraph = "D:\\graphs\\cit-Patents_adj.bel";
     config.dstGraph = "D:\\graphs\\as-Skitter2.bel";
     config.deviceId = 0;
-    config.mt = TC;
+    config.mt = KTRUSS;
     config.printStats = false;
-    config.orient = Upper;
+    config.orient = None;
     config.allocation = unified;
     config.k = 5;
     config.sortEdges = false;

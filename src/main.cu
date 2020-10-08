@@ -36,6 +36,7 @@
 
 
 #include "../include/Config.h"
+#include "../include/ScanLarge.cuh"
 
 
 using namespace std;
@@ -77,6 +78,30 @@ int main(int argc, char** argv) {
 		mwriter.write_txt_bel<uint, uint>(fileSrc, fileDst, true, 2, 0);
 		return;
 	}
+
+
+
+
+	//test Scan
+	/*const int size = 256;
+
+	graph::CubLarge<uint> s;
+	graph::GPUArray<uint> 
+		asc("ASC temp", AllocationTypeEnum::unified, size, 0);
+	graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, size, 0);
+	keep.setAll(true, true);
+
+	keep.gdata()[1] = false;
+	keep.gdata()[2] = false;
+	keep.gdata()[3] = false;
+
+	keep.gdata()[128] = false;
+	keep.gdata()[255] = false;
+
+
+	execKernel((initAsc<uint, PeelType>), (size + 512 - 1) / 512, 512, false, asc.gdata(), size);
+
+	uint t = s.Select(asc.gdata(), keep.gdata(), asc.gdata(), size);*/
 
 
 	//HERE is the normal program !!
@@ -153,9 +178,23 @@ int main(int argc, char** argv) {
 			asc("ASC temp", AllocationTypeEnum::unified, m, 0);
 		graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, 0);
 		execKernel((init<uint, PeelType>), (m + 512 - 1) / 512, 512, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata());
-		CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m);
-		CUBSelect(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m);
-		uint newNumEdges = CUBSelect(gd->colInd, colInd_half.gdata(), keep.gdata(), m);
+
+		graph::CubLarge<uint> s;
+		uint newNumEdges;
+		if (m < INT_MAX)
+		{
+			CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m);
+			CUBSelect(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m);
+			newNumEdges = CUBSelect(gd->colInd, colInd_half.gdata(), keep.gdata(), m);
+		}
+		else
+		{
+			s.Select(asc.gdata(), asc.gdata(), keep.gdata(), m);
+			s.Select(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m);
+			newNumEdges = s.Select(gd->colInd, colInd_half.gdata(), keep.gdata(), m);
+		}
+
+
 		execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, false, gd->rowPtr, n, keep.gdata(), new_rowPtr.gdata());
 		uint total = CUBScanExclusive<uint, uint>(new_rowPtr.gdata(), new_rowPtr.gdata(), n);
 		new_rowPtr.gdata()[n] = total;
@@ -300,14 +339,14 @@ int main(int argc, char** argv) {
 				printf("}\n");
 			}
 
-			//bmp.Count(*gd);
+			bmp.Count(*gd);
 
-			//uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, gd, ee, st, ProcessingElementEnum::Thread, 0);
+			uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, gd, ee, st, ProcessingElementEnum::Thread, 0);
 
-			//////CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
-			//uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, gd, ee, st, ProcessingElementEnum::Block, 0);
-			//uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee, st, ProcessingElementEnum::WarpShared, 0);
-			//uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee, st, ProcessingElementEnum::Test, 0);
+			////CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
+			uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, gd, ee, st, ProcessingElementEnum::Block, 0);
+			uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee, st, ProcessingElementEnum::WarpShared, 0);
+			uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee, st, ProcessingElementEnum::Test, 0);
 
 
 
@@ -455,7 +494,7 @@ int main(int argc, char** argv) {
 		graph::SingleGPU_KtrussMod<uint, PeelType> mohatrussM(0);
 
 		Timer t;
-		graph::TcBase<uint, PeelType>* tcb = new graph::TcBinary<uint, PeelType>(0, m, n, mohatrussM.stream());
+		graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(0, m, n, mohatrussM.stream());
 
 		mohatrussM.findKtrussIncremental_sync(3, 1000, tcb, geid, nullptr, nullptr, 0, 0);
 		mohatrussM.sync();

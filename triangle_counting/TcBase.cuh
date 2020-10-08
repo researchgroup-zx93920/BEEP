@@ -13,7 +13,7 @@ struct Edge1
 };
 
 namespace graph {
-    template<typename T, typename PeelT=int>
+    template<typename T>
     class TcBase {
     public:
         int dev_;
@@ -82,17 +82,18 @@ namespace graph {
         virtual void count_hash_async(const int divideConstant, COOCSRGraph_d<T>* g, GPUArray<T> colInd, GPUArray<T> hp, GPUArray<T> hps, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {}
 
-        virtual void count_per_edge_async(GPUArray<int>& tcpt, COOCSRGraph_d<T>* g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+
+        
+        virtual void count_per_edge_async(GPUArray<PeelType>& tcpt, COOCSRGraph_d<T>* g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {}
 
 
-        virtual void count_per_edge_eid_async(GPUArray<int>& tcpt, EidGraph_d<T> g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+        virtual void count_per_edge_eid_async(GPUArray<PeelType>& tcpt, EidGraph_d<T> g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {}
-
 
         virtual void count_moveNext_per_edge_async(
             EidGraph_d<T>& g, const size_t numEdges,
-            T level, GPUArray<bool> processed, GPUArray<PeelT>&  edgeSupport,
+            T level, GPUArray<bool> processed, GPUArray<PeelType>&  edgeSupport,
             GraphQueue<T,bool>& current, GraphQueue<T, bool>& next, GraphQueue<T, bool>& bucket, T bucket_level_end_,
             const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, T increasing = 0)
         {}

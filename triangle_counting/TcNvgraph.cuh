@@ -18,7 +18,8 @@ namespace graph {
             int* ri = (int*)g->rowInd;
             int* ci = (int*)g->colInd;
 
-          /* CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
+    #ifndef __VS__
+            CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
 
 
 
@@ -28,7 +29,7 @@ namespace graph {
             CSR_input = (nvgraphCSRTopology32I_t)malloc(sizeof(struct nvgraphCSRTopology32I_st));
 
 
-           
+
             nvgraphCreate(&handle);
             nvgraphCreateGraphDescr(handle, &graph);
             CSR_input->nvertices = TcBase<T>::numNodes;
@@ -42,7 +43,8 @@ namespace graph {
             nvgraphTriangleCount(handle, graph, &trcount);
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
 
-            *TcBase<T>::count_ = trcount;*/
+            *TcBase<T>::count_ = trcount;
+    #endif
 
         }
 

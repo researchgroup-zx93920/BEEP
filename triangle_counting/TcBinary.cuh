@@ -330,13 +330,13 @@ kernel_binary_thread_pe_eid_arrays(int* count, //!< [inout] the count, caller sh
 }
 
 
-template <typename T, typename PeelT, size_t BLOCK_DIM_X>
+template <typename T, typename PeelType, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_binary_thread_pe_level_next(
     T* rowPtr_csr, T* colIndex_csr,
     T* rowInd, T* colInd, T* eid,
     const size_t numEdges,
-    T level, bool* processed, PeelT* edgeSupport,
+    T level, bool* processed, PeelType* edgeSupport,
     graph::GraphQueue_d<T, bool> current,
     graph::GraphQueue_d<T, bool>& next,
     graph::GraphQueue_d<T, bool>& bucket, 
@@ -566,13 +566,13 @@ kernel_binary_warp_pe_eid_arrays(int* count,                //!< [inout] the cou
 
 
 
-template <typename T, typename PeelT, size_t BLOCK_DIM_X>
+template <typename T, typename PeelType, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_binary_warp_pe_level_next(
     T* rowPtr_csr, T* colIndex_csr,
     T* rowInd, T* colInd, T* eid,
     const size_t numEdges,
-    T level, bool* processed, PeelT* edgeSupport,
+    T level, bool* processed, PeelType* edgeSupport,
     graph::GraphQueue_d<T, bool> current,
     graph::GraphQueue_d<T, bool> next,
     graph::GraphQueue_d<T, bool> bucket, 
@@ -693,13 +693,13 @@ kernel_binary_warp_pe_level_next(
 
 }
 
-template <typename T, typename PeelT, size_t BLOCK_DIM_X>
+template <typename T, typename PeelType, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_binary_block_pe_level_next(
     T* rowPtr_csr, T* colIndex_csr,
     T* rowInd, T* colInd, T* eid,
     const size_t numEdges,
-    int level, bool* processed, PeelT* edgeSupport,
+    int level, bool* processed, PeelType* edgeSupport,
     graph::GraphQueue_d<T, bool> current,
     graph::GraphQueue_d<T, bool> next,
     graph::GraphQueue_d<T, bool> bucket, int bucket_level_end_
@@ -1146,8 +1146,8 @@ kernel_binary_warp_shared_colab_arrays(uint64* count,                //!< [inout
 namespace graph {
 
 
-    template<typename T, typename PeelT=int>
-    class TcBinary : public TcBase<T, PeelT>
+    template<typename T>
+    class TcBinary : public TcBase<T>
     {
     public:
 
@@ -1162,9 +1162,9 @@ namespace graph {
             CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
 
             // create one warp per edge
-            const int dimGrid = (numEdges - edgeOffset + (dimBlock)-1) / (dimBlock);
-            const int dimGridWarp = (32 * (numEdges - edgeOffset) + (dimBlock)-1) / (dimBlock);
-            const int dimGridBlock = (dimBlock * numEdges + (dimBlock)-1) / (dimBlock);
+            const auto dimGrid = (numEdges - edgeOffset + (dimBlock)-1) / (dimBlock);
+            const auto dimGridWarp = (32 * (numEdges - edgeOffset) + (dimBlock)-1) / (dimBlock);
+            const auto dimGridBlock = (dimBlock * numEdges + (dimBlock)-1) / (dimBlock);
 
             assert(TcBase<T>::count_);
             Log(LogPriorityEnum::debug, "device = %d, blocks = %d, threads = %d\n", TcBase<T>::dev_, dimGrid, dimBlock);
@@ -1222,7 +1222,8 @@ namespace graph {
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
         }
 
-        void count_per_edge_async(GPUArray<int>& tcpt, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int limit = 0)
+
+        void count_per_edge_async(GPUArray<PeelType>& tcpt, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int limit = 0)
         {
 
             const size_t dimBlock = 512;
@@ -1250,7 +1251,8 @@ namespace graph {
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStop_, TcBase<T>::stream_));
         }
 
-        void count_per_edge_eid_async(GPUArray<int>& tcpt, EidGraph_d<T> g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+
+        void count_per_edge_eid_async(GPUArray<PeelType>& tcpt, EidGraph_d<T> g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
             const size_t dimBlock = 32;
             const size_t ne = numEdges;
@@ -1289,7 +1291,7 @@ namespace graph {
 
         void count_moveNext_per_edge_async(
             EidGraph_d<T>& g, const size_t numEdges,
-            T level, GPUArray<bool> processed, GPUArray<PeelT>& edgeSupport,
+            T level, GPUArray<bool> processed, GPUArray<PeelType>& edgeSupport,
             GraphQueue<T, bool>& current, GraphQueue<T, bool>& next, GraphQueue<T, bool>& bucket, T bucket_level_end_,
             const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, T increasing = 0)
         {
@@ -1313,7 +1315,7 @@ namespace graph {
 
             //CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
             if (kernelType == ProcessingElementEnum::Thread)
-                kernel_binary_thread_pe_level_next<T, PeelT, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (
+                kernel_binary_thread_pe_level_next<T, PeelType, dimBlock> << <dimGrid, dimBlock, 0, TcBase<T>::stream_ >> > (
                     rp_csr, ci_csr, ri, ci, g.eid, ne,
                     level, processed.gdata(), edgeSupport.gdata(),
                     current.device_queue->gdata()[0],
@@ -1321,7 +1323,7 @@ namespace graph {
                     bucket.device_queue->gdata()[0],
                     bucket_level_end_);
             else if (kernelType == ProcessingElementEnum::Warp)
-                kernel_binary_warp_pe_level_next<T, PeelT, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (
+                kernel_binary_warp_pe_level_next<T, PeelType, dimBlock> << <dimGridWarp, dimBlock, 0, TcBase<T>::stream_ >> > (
                     rp_csr, ci_csr, ri, ci, g.eid, ne,
                     level, processed.gdata(), edgeSupport.gdata(),
                     current.device_queue->gdata()[0],
@@ -1329,7 +1331,7 @@ namespace graph {
                     bucket.device_queue->gdata()[0],
                     bucket_level_end_);
             else if (kernelType == ProcessingElementEnum::Block)
-                kernel_binary_block_pe_level_next<T, PeelT, dimBlock> << <dimGridBlock, dimBlock, 0, TcBase<T>::stream_ >> > (
+                kernel_binary_block_pe_level_next<T, PeelType, dimBlock> << <dimGridBlock, dimBlock, 0, TcBase<T>::stream_ >> > (
                     rp_csr, ci_csr, ri, ci, g.eid, ne,
                     level, processed.gdata(), edgeSupport.gdata(),
                     current.device_queue->gdata()[0],

@@ -8,7 +8,8 @@ template<typename InputType, typename OutputType>
 OutputType CUBScanExclusive(
     InputType* input,
     OutputType* output,
-    const int count)
+    const int count,
+    cudaStream_t 	stream = 0)
 {
     float singleKernelTime, elaspedTime = 0;
     cudaEvent_t start, end;

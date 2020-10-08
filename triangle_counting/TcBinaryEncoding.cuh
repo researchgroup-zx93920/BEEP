@@ -6,7 +6,7 @@
 using namespace std;
 
 template<typename T>
-EncodeDataType* encodeLargeRows(T nr, T* csrRowPointers, T* csrColumns, unsigned short* reverseIndex, int* numberOfLongRows)
+EncodeDataType* encodeLargeRows(T nr, T* csrRowPointers, T* csrColumns, unsigned short* reverseIndex, T* numberOfLongRows)
 {
     const T bitArraySize = sizeof(EncodeDataType) * 8;
     const T numEntries = nr / bitArraySize + 1;
@@ -204,8 +204,8 @@ kernel_binaryEncoding_warp_arrays(uint64* count,                //!< [inout] the
 namespace graph {
 
 
-    template<typename T, typename PeelT = int>
-    class TcBinaryEncoding : public TcBase<T, PeelT>
+    template<typename T>
+    class TcBinaryEncoding : public TcBase<T>
     {
     public:
 
@@ -223,8 +223,8 @@ namespace graph {
             unsigned short* reversed;
             CUDA_RUNTIME(cudaMallocManaged((void**)&reversed, sizeof(unsigned short) * TcBase<T>::numNodes));
 
-            int longRowCount = 0;
-            EncodeDataType *bitMap = encodeLargeRows(TcBase<T>::numNodes, rp, ci, reversed, &longRowCount);
+            T longRowCount = 0;
+            EncodeDataType *bitMap = encodeLargeRows<T>(TcBase<T>::numNodes, rp, ci, reversed, &longRowCount);
 
 
             CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));

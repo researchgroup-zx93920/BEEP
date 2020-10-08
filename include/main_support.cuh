@@ -115,6 +115,21 @@ __global__ void init(graph::COOCSRGraph_d<T> g, T* asc, bool* keep)
 
 
 template<typename T, typename PeelT>
+__global__ void initAsc(T* asc, T count)
+{
+	auto tx = threadIdx.x;
+	auto bx = blockIdx.x;
+
+	auto ptx = tx + bx * blockDim.x;
+
+	for (auto i = ptx; i < count; i += blockDim.x * gridDim.x)
+	{
+	
+		asc[i] = i;
+	}
+}
+
+template<typename T, typename PeelT>
 __global__ void init(graph::COOCSRGraph_d<T> g, T* asc, bool* keep, PeelT* degeneracy)
 {
 	auto tx = threadIdx.x;

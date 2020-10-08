@@ -15,6 +15,10 @@
 #include "ourtruss19.cuh"
 #include "../include/GraphQueue.cuh"
 
+
+#include "../include/ScanLarge.cuh"
+
+
 typedef uint64_t EncodeDataType;
 
 
@@ -258,7 +262,7 @@ namespace graph
 				new_offset.initialize("New Row Pointer", unified, (n + 1), 0);
 				edge_deleted.initialize("Edge deleted", gpu, old_edge_num * 2, 0);
 			}
-
+			graph::CubLarge<uint> s;
 
 			/*2. construct new CSR (offsets, adj) and rebuild the eid*/
 			int block_size = 128;
@@ -266,7 +270,12 @@ namespace graph
 			execKernel((warp_detect_deleted_edges<T>), GRID_SIZE, block_size, true,
 				rowPtr, n, eid, processed.gdata(), new_offset.gdata(), edge_deleted.gdata());
 
-			uint total = CUBScanExclusive<uint, uint>(new_offset.gdata(), new_offset.gdata(), n);
+			uint total = 0;
+			if(n < INT_MAX)
+				total = CUBScanExclusive<uint, uint>(new_offset.gdata(), new_offset.gdata(), n);
+			else
+				total = s.ExclusiveSum(new_offset.gdata(), new_offset.gdata(), n);
+
 			new_offset.gdata()[n] = total;
 			//assert(total == new_edge_num * 2);
 			cudaDeviceSynchronize();
@@ -274,15 +283,20 @@ namespace graph
 			swap_ele(rowPtr, new_offset.gdata());
 
 			/*new adj and eid construction*/
-			CUBSelect(colInd, new_adj.gdata(), edge_deleted.gdata(), old_edge_num * 2);
-			CUBSelect(eid, new_eid.gdata(), edge_deleted.gdata(), old_edge_num * 2);
+			if (old_edge_num * 2 < INT_MAX)
+			{
+				CUBSelect(colInd, new_adj.gdata(), edge_deleted.gdata(), old_edge_num * 2);
+				CUBSelect(eid, new_eid.gdata(), edge_deleted.gdata(), old_edge_num * 2);
+			}
+			else
+			{
+				s.Select(colInd, new_adj.gdata(), edge_deleted.gdata(), old_edge_num * 2);
+				s.Select(eid, new_eid.gdata(), edge_deleted.gdata(), old_edge_num * 2);
+			}
 
 			swap_ele(colInd, new_adj.gdata());
-		
-
 			swap_ele(eid, new_eid.gdata());
 			
-
 			m = new_edge_num * 2;
 		}
 

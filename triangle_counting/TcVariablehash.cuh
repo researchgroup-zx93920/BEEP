@@ -174,8 +174,8 @@ kernel_hash_warp_arrays(uint64* count, //!< [inout] the count, caller should zer
 
 namespace graph {
 
-    template<typename T, typename PeelT = int>
-    class TcVariableHash : public TcBase<T, PeelT>
+    template<typename T>
+    class TcVariableHash : public TcBase<T>
     {
     public:
 
