@@ -149,12 +149,12 @@ static void usage() {
 
 static Config parseArgs(int argc, char** argv) {
     Config config;
-    config.srcGraph = "D:\\graphs\\as-Skitter2.bel";
+    config.srcGraph = "D:\\graphs\\cit-Patents_adj.bel";
     config.dstGraph = "D:\\graphs\\as-Skitter2.bel";
     config.deviceId = 0;
-    config.mt = KCLIQUE;
+    config.mt = TC;
     config.printStats = false;
-    config.orient = Degree;
+    config.orient = Upper;
     config.allocation = unified;
     config.k = 5;
     config.sortEdges = false;

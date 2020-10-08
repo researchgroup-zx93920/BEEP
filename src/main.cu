@@ -300,14 +300,14 @@ int main(int argc, char** argv) {
 				printf("}\n");
 			}
 
-			bmp.Count(*gd);
+			//bmp.Count(*gd);
 
-			uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, gd, ee, st, ProcessingElementEnum::Thread, 0);
+			//uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, gd, ee, st, ProcessingElementEnum::Thread, 0);
 
-			////CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
-			uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, gd, ee, st, ProcessingElementEnum::Block, 0);
-			uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee, st, ProcessingElementEnum::WarpShared, 0);
-			uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee, st, ProcessingElementEnum::Test, 0);
+			//////CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
+			//uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, gd, ee, st, ProcessingElementEnum::Block, 0);
+			//uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee, st, ProcessingElementEnum::WarpShared, 0);
+			//uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee, st, ProcessingElementEnum::Test, 0);
 
 
 

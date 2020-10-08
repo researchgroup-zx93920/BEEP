@@ -174,8 +174,8 @@ kernel_hash_warp_arrays(uint64* count, //!< [inout] the count, caller should zer
 
 namespace graph {
 
-    template<typename T>
-    class TcVariableHash : public TcBase<T>
+    template<typename T, typename PeelT = int>
+    class TcVariableHash : public TcBase<T, PeelT>
     {
     public:
 
@@ -199,9 +199,9 @@ namespace graph {
             CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
 
             // create one warp per edge
-            const int dimGrid = (numEdges - edgeOffset + (dimBlock)-1) / (dimBlock);
-            const int dimGridWarp = (32 * numEdges + (dimBlock)-1) / (dimBlock);
-            const int dimGridBlock = (dimBlock * numEdges + (dimBlock)-1) / (dimBlock);
+            const auto dimGrid = (numEdges - edgeOffset + (dimBlock)-1) / (dimBlock);
+            const auto dimGridWarp = (32 * numEdges + (dimBlock)-1) / (dimBlock);
+            const auto dimGridBlock = (dimBlock * numEdges + (dimBlock)-1) / (dimBlock);
 
             assert(TcBase<T>::count_);
             Log(LogPriorityEnum::debug, "device = %d, blocks = %d, threads = %d\n", TcBase<T>::dev_, dimGrid, dimBlock);

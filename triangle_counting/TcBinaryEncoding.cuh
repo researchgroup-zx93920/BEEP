@@ -6,19 +6,19 @@
 using namespace std;
 
 template<typename T>
-EncodeDataType* encodeLargeRows(int nr, T* csrRowPointers, T* csrColumns, unsigned short* reverseIndex, int* numberOfLongRows)
+EncodeDataType* encodeLargeRows(T nr, T* csrRowPointers, T* csrColumns, unsigned short* reverseIndex, int* numberOfLongRows)
 {
-    const int bitArraySize = sizeof(EncodeDataType) * 8;
-    const int numEntries = nr / bitArraySize + 1;
+    const T bitArraySize = sizeof(EncodeDataType) * 8;
+    const T numEntries = nr / bitArraySize + 1;
 
-    Log(LogPriorityEnum::debug, "bitArraySize = %d\n", bitArraySize);
+    Log(LogPriorityEnum::debug, "bitArraySize = %u\n", bitArraySize);
 
     //Get largest rows
-    vector<int> longRowIndex;
-    for (int i = 0; i < nr; i++)
+    vector<T> longRowIndex;
+    for (auto i = 0; i < nr; i++)
     {
-        int start = csrRowPointers[i];
-        int end = csrRowPointers[i + 1];
+        T start = csrRowPointers[i];
+        T end = csrRowPointers[i + 1];
         if ((end - start) > nr / bitArraySize)
         {
             longRowIndex.push_back(i);
@@ -26,29 +26,29 @@ EncodeDataType* encodeLargeRows(int nr, T* csrRowPointers, T* csrColumns, unsign
 
         reverseIndex[i] = 0;
     }
-    const int numLongRows = longRowIndex.size();
+    const T numLongRows = longRowIndex.size();
     EncodeDataType* bitmap = 0;
     CUDA_RUNTIME(cudaMallocManaged((void**)&bitmap, sizeof(EncodeDataType) * (numLongRows == 0 ? 1 : numLongRows) * numEntries));
 
 
-    for (int k = 0; k < numLongRows; k++)
+    for (auto k = 0; k < numLongRows; k++)
     {
-        int i = longRowIndex[k];
-        int stratIndex = k * numEntries;
+        T i = longRowIndex[k];
+        T stratIndex = k * numEntries;
 
         reverseIndex[i] = k;
-        for (int z = 0; z < numEntries; z++)
+        for (auto z = 0; z < numEntries; z++)
         {
             bitmap[stratIndex + z] = 0;
         }
 
-        int start = csrRowPointers[i];
-        int end = csrRowPointers[i + 1];
-        for (int j = start; j < end; j++)
+        T start = csrRowPointers[i];
+        T end = csrRowPointers[i + 1];
+        for (auto j = start; j < end; j++)
         {
-            int colIndex = csrColumns[j];
+            T colIndex = csrColumns[j];
 
-            int baseIndex = colIndex / bitArraySize;
+            T baseIndex = colIndex / bitArraySize;
 
             EncodeDataType mask = 1ULL << (colIndex % bitArraySize);
             bitmap[stratIndex + baseIndex] |= mask;
@@ -63,14 +63,14 @@ template <typename T, size_t BLOCK_DIM_X>
 __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_binaryEncoding_thread_arrays(uint64* count, //!< [inout] the count, caller should zero
     T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, const size_t edgeStart, 
-    unsigned short* reverseIndex, EncodeDataType* bitMap, int numNodes) {
+    unsigned short* reverseIndex, EncodeDataType* bitMap, T numNodes) {
 
     size_t gx = BLOCK_DIM_X * blockIdx.x + threadIdx.x;
     uint64 threadCount = 0;
     const EncodeDataType bitLength = sizeof(EncodeDataType) * 8;
-    const int numEntries = numNodes / bitLength + 1;
+    const T numEntries = numNodes / bitLength + 1;
 
-    for (size_t i = gx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x) {
+    for (auto i = gx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x) {
         T src = rowInd[i];
         T dst = colInd[i];
 
@@ -98,12 +98,12 @@ kernel_binaryEncoding_thread_arrays(uint64* count, //!< [inout] the count, calle
         {
 
             
-            int index = reverseIndex[dst];
-            for (int v = srcStart; v < srcStop; v++)
+            T index = reverseIndex[dst];
+            for (auto v = srcStart; v < srcStop; v++)
             {
                 T val = colInd[v];
-                int base = val / bitLength;
-                int rem = val % bitLength; // val & 0x3F;
+                T base = val / bitLength;
+                T rem = val % bitLength; // val & 0x3F;
                 EncodeDataType bm = bitMap[index * numEntries + base];
                 if (bm & (1ULL << rem))
                     threadCount++;
@@ -133,18 +133,18 @@ __global__ void __launch_bounds__(BLOCK_DIM_X)
 kernel_binaryEncoding_warp_arrays(uint64* count,                //!< [inout] the count, caller should zero
     T* rowPtr, T* rowInd, T* colInd, const size_t numEdges, //!< the number of edges this kernel will count
     const size_t edgeStart,                       //!< the edge this kernel will start counting at
-    unsigned short* reverseIndex, EncodeDataType* bitMap, int numNodes
+    unsigned short* reverseIndex, EncodeDataType* bitMap, T numNodes
 ) {
     constexpr size_t warpsPerBlock = BLOCK_DIM_X / 32;
     const EncodeDataType bitLength = sizeof(EncodeDataType) * 8;
-    const int numEntries = numNodes / bitLength + 1;
+    const T numEntries = numNodes / bitLength + 1;
 
     const size_t lx = threadIdx.x % 32;
     const int warpIdx = threadIdx.x / 32; // which warp in thread block
     const size_t gwx = (BLOCK_DIM_X * blockIdx.x + threadIdx.x) / 32;
     uint64 warpCount = 0;
 
-    for (size_t i = gwx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x / 32) {
+    for (auto i = gwx + edgeStart; i < numEdges; i += BLOCK_DIM_X * gridDim.x / 32) {
         T src = rowInd[i];
         T dst = colInd[i];
 
@@ -169,14 +169,14 @@ kernel_binaryEncoding_warp_arrays(uint64* count,                //!< [inout] the
 
          if (dn_lr)
         {
-            int index = reverseIndex[dst];
+            T index = reverseIndex[dst];
             uint64_t threadCount = 0;
             for (size_t a = lx; a < srcLen; a += 32)
             {
                 // one element of A per thread, just search for A into B
                 const T val = colInd[srcStart + a];
-                int base = val / bitLength;
-                int rem = val % bitLength; // val & 0x3F;
+                T base = val / bitLength;
+                T rem = val % bitLength; // val & 0x3F;
                 EncodeDataType bm = bitMap[index * numEntries + base];
                 if (bm & (1ULL << rem))
                     threadCount++;
@@ -204,16 +204,15 @@ kernel_binaryEncoding_warp_arrays(uint64* count,                //!< [inout] the
 namespace graph {
 
 
-    template<typename T>
-    class TcBinaryEncoding : public TcBase<T>
+    template<typename T, typename PeelT = int>
+    class TcBinaryEncoding : public TcBase<T, PeelT>
     {
     public:
 
         TcBinaryEncoding(int dev, uint64 ne, uint64 nn, cudaStream_t stream = 0) :TcBase<T>(dev, ne, nn, stream)
         {}
 
-
-        void count_async(COOCSRGraph_d<T>* g, const T numEdges, const T edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int limit = 0)
+        void count_async(COOCSRGraph_d<T>* g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int limit = 0)
         {
             const size_t dimBlock = 128;
             const size_t ne = numEdges;
@@ -231,9 +230,9 @@ namespace graph {
             CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
 
             // create one warp per edge
-            const int dimGrid = (numEdges - edgeOffset + (dimBlock)-1) / (dimBlock);
-            const int dimGridWarp = (32 * (numEdges - edgeOffset) + (dimBlock)-1) / (dimBlock);
-            const int dimGridBlock = (dimBlock * numEdges + (dimBlock)-1) / (dimBlock);
+            const auto dimGrid = (numEdges - edgeOffset + (dimBlock)-1) / (dimBlock);
+            const auto dimGridWarp = (32 * (numEdges - edgeOffset) + (dimBlock)-1) / (dimBlock);
+            const auto dimGridBlock = (dimBlock * numEdges + (dimBlock)-1) / (dimBlock);
 
 
           
