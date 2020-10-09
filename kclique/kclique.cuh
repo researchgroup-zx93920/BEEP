@@ -971,7 +971,7 @@ namespace graph
 
 
 				long grid_size = (node_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
-				execKernel((filter_window<T,T>), grid_size, BLOCK_SIZE, false,
+				execKernel((filter_window<T,T>), grid_size, BLOCK_SIZE, dev_, false,
 					nodeDegree.gdata(), node_num, bucket.mark.gdata(), level, bucket_level_end_ + KCL_LEVEL_SKIP_SIZE);
 
 				multi++;
@@ -1018,7 +1018,7 @@ namespace graph
 
 
 				long grid_size = (node_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
-				execKernel(filter_pointer_window, grid_size, BLOCK_SIZE, false,
+				execKernel(filter_pointer_window, grid_size, BLOCK_SIZE, dev_, false,
 					nodeDegree.gdata(), node_num, bucket.mark.gdata(), level, bucket_level_end_ + KCL_LEVEL_SKIP_SIZE);
 
 				multi++;
@@ -1031,7 +1031,7 @@ namespace graph
 			{
 				current.count.gdata()[0] = 0;
 				long grid_size = (bucket.count.gdata()[0] + BLOCK_SIZE - 1) / BLOCK_SIZE;
-				execKernel((filter_with_random_append_pointer<T>), grid_size, BLOCK_SIZE, false,
+				execKernel((filter_with_random_append_pointer<T>), grid_size, BLOCK_SIZE, dev_, false,
 					bucket.queue.gdata(), bucket.count.gdata()[0], nodeDegree.gdata(), current.mark.gdata(), current.queue.gdata(), &(current.count.gdata()[0]), level, span);
 			}
 			else
@@ -1045,7 +1045,7 @@ namespace graph
 		{
 			long grid_size = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
 			identity_arr_asc.initialize("Identity Array Asc", AllocationTypeEnum::unified, n, 0);
-			execKernel(init_asc, grid_size, BLOCK_SIZE, false, identity_arr_asc.gdata(), n);
+			execKernel(init_asc, grid_size, BLOCK_SIZE, dev_, false, identity_arr_asc.gdata(), n);
 		}
 
 	public:
@@ -1068,7 +1068,7 @@ namespace graph
 			const int dimBlock = 256;
 			nodeDegree.initialize("Edge Support", unified, g.numNodes, 0);
 			uint dimGridNodes = (g.numNodes + dimBlock - 1) / dimBlock;
-			execKernel((getNodeDegree_kernel<T, T>), dimGridNodes, dimBlock, false, nodeDegree.gdata(), g);
+			execKernel((getNodeDegree_kernel<T, T>), dimGridNodes, dimBlock, dev_, false, nodeDegree.gdata(), g);
 		}
 
 		void findKclqueIncremental_node_async(int kcount, COOCSRGraph_d<T>& g,
@@ -1083,22 +1083,22 @@ namespace graph
 
 			//Lets apply queues and buckets
 			graph::GraphQueue<T, bool> bucket_q;
-			bucket_q.Create(unified, g.numNodes, 0);
+			bucket_q.Create(unified, g.numNodes, dev_);
 
 			graph::GraphQueue<T, bool> current_q;
-			current_q.Create(unified, g.numNodes, 0);
+			current_q.Create(unified, g.numNodes, dev_);
 
 			GPUArray<T> identity_arr_asc;
 			AscendingGpu(g.numNodes, identity_arr_asc);
 
 		
-			GPUArray <uint64> counter("Temp level Counter", unified, 1, 0) ;
+			GPUArray <uint64> counter("Temp level Counter", unified, 1, dev_) ;
 
 			GPUArray<T> 
-				filter_level("Temp filter Counter", unified, g.numEdges, 0),
-				filter_scan("Temp scan Counter", unified, g.numEdges, 0);
+				filter_level("Temp filter Counter", unified, g.numEdges, dev_),
+				filter_scan("Temp scan Counter", unified, g.numEdges, dev_);
 
-			GPUArray<char> current_level("Temp level Counter", unified, g.numEdges, 0);
+			GPUArray<char> current_level("Temp level Counter", unified, g.numEdges, dev_);
 			counter.setSingle(0, 0, true);
 			CUDA_RUNTIME(cudaStreamSynchronize(stream_));
 
@@ -1145,7 +1145,7 @@ namespace graph
 					const auto block_size = 64;
 					auto grid_block_size = current_q.count.gdata()[0];
 
-					execKernel((kernel_block_level_kclique_count<T, block_size>), grid_block_size, block_size, false,
+					execKernel((kernel_block_level_kclique_count<T, block_size>), grid_block_size, block_size, dev_, false,
 						counter.gdata(),
 						g,
 						kcount,
@@ -1190,26 +1190,26 @@ namespace graph
 
 			//Lets apply queues and buckets
 			graph::GraphQueue<T, bool> bucket_q;
-			bucket_q.Create(unified, g.numEdges, 0);
+			bucket_q.Create(unified, g.numEdges, dev_);
 
 			graph::GraphQueue<T, bool> current_q;
-			current_q.Create(unified, g.numEdges, 0);
+			current_q.Create(unified, g.numEdges, dev_);
 
 			GPUArray<T> identity_arr_asc;
 			AscendingGpu(g.numEdges, identity_arr_asc);
 
 
-			GPUArray <uint64> counter("Temp level Counter", unified, 1, 0);
+			GPUArray <uint64> counter("Temp level Counter", unified, 1, dev_);
 			
 			counter.setSingle(0, 0, true);
 			CUDA_RUNTIME(cudaStreamSynchronize(stream_));
 			int todo = g.numEdges;
 
-			GPUArray<T> edgePtr("Temp Edge Ptr", unified, g.numEdges + 1, 0);
-			execKernel((init_edge_ptr<T, 128>), (g.numEdges + 128 - 1) / 128, 128, false, g, edgePtr.gdata());
+			GPUArray<T> edgePtr("Temp Edge Ptr", unified, g.numEdges + 1, dev_);
+			execKernel((init_edge_ptr<T, 128>), (g.numEdges + 128 - 1) / 128, 128, dev_, false, g, edgePtr.gdata());
 			T total = CUBScanExclusive(edgePtr.gdata(), edgePtr.gdata(), g.numEdges);
 			edgePtr.gdata()[g.numEdges] = total;
-			GPUArray<char> freeSpace("Temp Edge Space", unified, total, 0);
+			GPUArray<char> freeSpace("Temp Edge Space", unified, total, dev_);
 			freeSpace.setAll(2, true);
 
 
@@ -1244,7 +1244,7 @@ namespace graph
 					const auto block_size = 64;
 					auto grid_block_size = current_q.count.gdata()[0];
 
-					execKernel((kernel_block_level_kclique_edge_count<T, block_size>), grid_block_size, block_size, false,
+					execKernel((kernel_block_level_kclique_edge_count<T, block_size>), grid_block_size, block_size, dev_, false,
 						counter.gdata(),
 						g,
 						kcount,

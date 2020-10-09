@@ -26,7 +26,7 @@
 namespace graph
 {
 
-    void PKT_Scan(
+    void PKT_Scan(int deviceId,
         GPUArray<int> EdgeSupport, uint32_t edge_num, int level,
         GPUArray<int>& curr, GPUArray<bool>& inCurr, int& curr_cnt, GPUArray<uint> asc,
         GPUArray<InBucketWinType>& in_bucket_window_,
@@ -56,7 +56,7 @@ namespace graph
 
             #ifndef DEBUG_USE_CPU
             long grid_size = (edge_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
-            execKernel((filter_window<int>), grid_size, BLOCK_SIZE, false,
+            execKernel((filter_window<int>), grid_size, BLOCK_SIZE, deviceId, false,
                 EdgeSupport.gdata(), edge_num, in_bucket_window_.gdata(), level, bucket_level_end_);
 
             *window_bucket_buf_size_ = CUBSelect(asc.gdata(), bucket_buf_.gdata(), in_bucket_window_.gdata(), edge_num);
@@ -78,7 +78,7 @@ namespace graph
             #ifndef DEBUG_USE_CPU
             curr_cnt = 0;
             long grid_size = (*window_bucket_buf_size_ + BLOCK_SIZE - 1) / BLOCK_SIZE;
-            execKernel(filter_with_random_append, grid_size, BLOCK_SIZE, false,
+            execKernel(filter_with_random_append, grid_size, BLOCK_SIZE, deviceId, false,
                 bucket_buf_.gdata(), *window_bucket_buf_size_, EdgeSupport.gdata(), inCurr.gdata(), curr.gdata(), &curr_cnt, level);
             #else
             curr_cnt = 0;
@@ -99,7 +99,7 @@ namespace graph
         #endif
     }
 
-    void ShrinkCSREid(
+    void ShrinkCSREid(int deviceId,
         int n, int& m,
         GPUArray<uint>& rowPtr, GPUArray<uint>& colInd, BmpGpu<uint>& bmp,
         GPUArray<bool> processed,
@@ -114,11 +114,11 @@ namespace graph
         if (shrink_first_time) { //shrink first time, allocate the buffers
             shrink_first_time = false;
             Timer alloc_timer;
-            new_adj.initialize("New Adj", gpu, new_edge_num * 2, 0);
-            new_eid.initialize("New EID", gpu, new_edge_num * 2, 0);
-            new_offset.initialize("New Row Pointer", unified, (n + 1), 0);
+            new_adj.initialize("New Adj", gpu, new_edge_num * 2, deviceId);
+            new_eid.initialize("New EID", gpu, new_edge_num * 2, deviceId);
+            new_offset.initialize("New Row Pointer", unified, (n + 1), deviceId);
 
-            edge_deleted.initialize("Edge deleted", gpu, old_edge_num * 2, 0);
+            edge_deleted.initialize("Edge deleted", gpu, old_edge_num * 2, deviceId);
             Log(info, "Shrink Allocation Time: %.9lfs", alloc_timer.elapsed());
         }
 
@@ -126,7 +126,7 @@ namespace graph
         /*2. construct new CSR (offsets, adj) and rebuild the eid*/
         int block_size = 128;
         // Attention: new_offset gets the histogram.
-        execKernel((warp_detect_deleted_edges<uint>), GRID_SIZE, block_size, true,
+        execKernel((warp_detect_deleted_edges<uint>), GRID_SIZE, block_size, deviceId, true,
             rowPtr.gdata(), n, bmp.eid.gdata(), processed.gdata(), new_offset.gdata(), edge_deleted.gdata());
 
         uint total = CUBScanExclusive<uint, uint>(new_offset.gdata(), new_offset.gdata(), n);
@@ -251,17 +251,17 @@ namespace graph
     double set_inter_time = 0;
     double process_update_time = 0;
 
-    void PKT_LevelZeroProcess(
+    void PKT_LevelZeroProcess(int deviceId,
         GPUArray<int> curr, int curr_cnt, GPUArray<bool>& inCurr,
         GPUArray<bool>& processed) {
         int block_size = 256;
         int grid_size = (curr_cnt + block_size - 1) / block_size;
         execKernel(
-            update_processed, grid_size, block_size, false,
+            update_processed, grid_size, block_size, deviceId, false,
             curr.gdata(), curr_cnt, inCurr.gdata(), processed.gdata());
     }
 
-    void PKT_SubLevelProcess(
+    void PKT_SubLevelProcess(int deviceId,
         BmpGpu<uint> bmp, GPUArray<uint> edge_off_origin, uint32_t eids_cnt, int level,
         GPUArray <uint>& rowPtr, GPUArray <uint>& colIdn,
         GPUArray<int>& curr, int curr_cnt, GPUArray<bool>& inCurr,
@@ -278,7 +278,7 @@ namespace graph
         
         execKernelDynamicAllocation(
             sub_level_process, grid_size, block_size,
-            shared_memory_size_per_block, false,
+            shared_memory_size_per_block, deviceId, false,
             level, curr.gdata(), curr_cnt, inCurr.gdata(),
             next.gdata(), next_cnt.gdata(), inNext.gdata(),
             rowPtr.gdata(), colIdn.gdata(), bmp.eid.gdata(),
@@ -290,12 +290,12 @@ namespace graph
         /* 2nd: Update the processed flags */
         grid_size = (curr_cnt + block_size - 1) / block_size;
         execKernel(
-            update_processed, grid_size, block_size, false,
+            update_processed, grid_size, block_size, deviceId, false,
             curr.gdata(), curr_cnt, inCurr.gdata(), processed.gdata());
         process_update_time += timer.elapsed_and_reset();
     }
 
-    void PKT_SubLevelTCBased(
+    void PKT_SubLevelTCBased(int deviceId,
         int n, int& m, GPUArray<uint> rowPtr, GPUArray<uint> colInd, BmpGpu<uint> bmp,
         GPUArray<bool> processed,
         GPUArray<uint> edge_off_origin,
@@ -315,13 +315,13 @@ namespace graph
         auto grid_size = (curr_cnt + block_size - 1) / block_size;
 
         /* Mark Processed */
-        execKernel(update_processed, grid_size, block_size, false, curr.gdata(), curr_cnt, inCurr.gdata(), processed.gdata());
+        execKernel(update_processed, grid_size, block_size, deviceId, false, curr.gdata(), curr_cnt, inCurr.gdata(), processed.gdata());
 
         /* Shrink Edge Lists, CSR and update eid/edge_off_origin mappings */
         #ifdef SHRINK_ALL
         PKT_Shrink_all(g_cuda, processed, EdgeSupport, edge_off_origin, edge_list,
         #else
-        ShrinkCSREid(n, m, rowPtr,colInd,bmp, processed, edge_off_origin,
+        ShrinkCSREid(deviceId, n, m, rowPtr,colInd,bmp, processed, edge_off_origin,
         #endif
             new_edge_list,
             reversed_processed, edge_deleted, scanned_processed,
@@ -352,7 +352,7 @@ namespace graph
         execKernelDynamicAllocation(
             bmp_bsr_update_next,
             n, t_dimension,
-            num_words_bmp_idx * sizeof(uint32_t), false,
+            num_words_bmp_idx * sizeof(uint32_t), deviceId, false,
             rowPtr.gdata(), colInd.gdata(), bmp.d_bitmaps.gdata(), bmp.d_bitmap_states.gdata(),
             bmp.d_vertex_count.gdata(), bmp.conc_blocks_per_SM, bmp.eid.gdata(), bmp.edge_sup_gpu.gdata(),
             num_words_bmp, num_words_bmp_idx,
@@ -381,7 +381,7 @@ namespace graph
     //    InitBMP(&g_cuda, d_bitmaps, d_bitmap_states, d_vertex_count, mem_stat);
     //}
 
-    void PrepareCSRELEidQueues(int n, int m,
+    void PrepareCSRELEidQueues(int deviceId, int n, int m,
         GPUArray<uint> rowPtr, GPUArray<uint> colInd, BmpGpu<uint> bmp,
         GPUArray<int>& next_cnt, GPUArray<int>& curr, GPUArray<bool>& inCurr, GPUArray<int>& next, GPUArray<bool>& inNext, GPUArray<bool>& processed,
         uint* edge_off_origin_cpu, GPUArray<uint>& edge_off_origin, GPUArray<uint>& identity_arr_asc) 
@@ -411,13 +411,13 @@ namespace graph
             //cudaMemcpy(edge_off_origin, edge_off_origin_cpu, sizeof(uint) * edge_num, cudaMemcpyHostToDevice);
         }
         else {
-            execKernel(init_asc, grid_size, BLOCK_SIZE, false, edge_off_origin.gdata(), edge_num);
+            execKernel(init_asc, grid_size, BLOCK_SIZE, deviceId, false, edge_off_origin.gdata(), edge_num);
         }
         // 5th: Introduce identity_arr_asc for the CUB Select invocations.
        
         identity_arr_asc.initialize("Identity Array Asc", AllocationTypeEnum::gpu, edge_num, 0);
 
-        execKernel(init_asc, grid_size, BLOCK_SIZE, false, identity_arr_asc.gdata(), edge_num);
+        execKernel(init_asc, grid_size, BLOCK_SIZE, deviceId, false, identity_arr_asc.gdata(), edge_num);
     }
 
     void PrepareBucket(GPUArray<InBucketWinType>& in_bucket_window_,
@@ -428,7 +428,7 @@ namespace graph
         window_bucket_buf_size_.initialize("Window Bucket Buffer Size", unified, 1, 0);
     }
 
-    void PKT_cuda(
+    void PKT_cuda(int deviceId,
         int n, int m,
         GPUArray<uint> rowPtr, GPUArray<uint> colInd, BmpGpu<uint> bmp,
         uint* edge_off_origin_cpu, int shrink_factor,
@@ -450,7 +450,7 @@ namespace graph
         curr_cnt_ptr.initialize("Curr Count Pointer", AllocationTypeEnum::unified, 1, 0);
         int*& curr_cnt = curr_cnt_ptr.gdata();
 
-        PrepareCSRELEidQueues(n, m,
+        PrepareCSRELEidQueues(deviceId, n, m,
             rowPtr, colInd, bmp,
             next_cnt, curr, inCurr, next, inNext, processed,
             edge_off_origin_cpu, edge_off_origin, identity_arr_asc);
@@ -508,7 +508,7 @@ namespace graph
                 #ifdef SHRINK_ALL
                 PKT_Shrink_all(g_cuda, processed,
                 #else
-                ShrinkCSREid(n, m,rowPtr, colInd, bmp, processed,
+                ShrinkCSREid(deviceId, n, m,rowPtr, colInd, bmp, processed,
                 #endif
                     edge_off_origin,
                     new_edge_list, reversed_processed, edge_deleted, scanned_processed,
@@ -538,7 +538,7 @@ namespace graph
 
             // 2nd: Frontier Generation.
             scan_timer.reset();
-            PKT_Scan(bmp.edge_sup_gpu,
+            PKT_Scan(deviceId, bmp.edge_sup_gpu,
                 #ifdef SHRINK_ALL
                 edge_num,
                 #else
@@ -558,7 +558,7 @@ namespace graph
                 todo -= *curr_cnt;
                 deleted_acc += *curr_cnt;
                 auto grid_size = (*curr_cnt + BLOCK_SIZE - 1) / BLOCK_SIZE;
-                execKernel(output_edge_support, grid_size, BLOCK_SIZE, false, output.gdata(), curr.gdata(), *curr_cnt,
+                execKernel(output_edge_support, grid_size, BLOCK_SIZE, deviceId, false, output.gdata(), curr.gdata(), *curr_cnt,
                     edge_off_origin.gdata(), level_start_pos[level] + level_acc_cnt);
                 level_acc_cnt += *curr_cnt;
                 copy_time += copy_timer.elapsed();
@@ -572,7 +572,7 @@ namespace graph
                 sub_process_timer.reset();
                 cudaDeviceSynchronize();
                 if (level == 0) {
-                    PKT_LevelZeroProcess(curr, *curr_cnt, inCurr, processed);
+                    PKT_LevelZeroProcess(deviceId, curr, *curr_cnt, inCurr, processed);
                 }
                 else {
                     size_t task_size = *curr_cnt * (size_t)(level + 1);
@@ -583,7 +583,7 @@ namespace graph
                     if (estimated_tc_time > estimated_peel_time) 
                     {
                         //                if (true) {
-                        PKT_SubLevelProcess(bmp, edge_off_origin,
+                        PKT_SubLevelProcess(deviceId, bmp, edge_off_origin,
                             edge_num, level,
                             rowPtr, colInd,
                             curr, *curr_cnt, inCurr,
@@ -597,7 +597,7 @@ namespace graph
                         const uint32_t elem_bits = sizeof(uint32_t) * 8; /*#bits in a bitmap element*/
                         const uint32_t num_words_bmp = (n + elem_bits - 1) / elem_bits;
                         const uint32_t num_words_bmp_idx = (num_words_bmp + BITMAP_SCALE - 1) / BITMAP_SCALE;
-                        PKT_SubLevelTCBased(n, m, rowPtr, colInd, bmp, 
+                        PKT_SubLevelTCBased(deviceId, n, m, rowPtr, colInd, bmp,
                             processed,
                             edge_off_origin,
                             new_EdgeSupport, new_edge_offset_origin, new_edge_list,

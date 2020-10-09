@@ -1156,6 +1156,8 @@ namespace graph {
 
         void count_async(COOCSRGraph_d<T>* g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int limit = 0)
         {
+
+            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
             const size_t dimBlock = 256;
             const size_t ne = numEdges;
 
@@ -1168,7 +1170,7 @@ namespace graph {
 
             assert(TcBase<T>::count_);
             Log(LogPriorityEnum::debug, "device = %d, blocks = %d, threads = %d\n", TcBase<T>::dev_, dimGrid, dimBlock);
-            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
+           
 
 
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
@@ -1225,6 +1227,7 @@ namespace graph {
 
         void count_per_edge_async(GPUArray<PeelType>& tcpt, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int limit = 0)
         {
+            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
 
             const size_t dimBlock = 512;
             const size_t ne = numEdges;
@@ -1239,7 +1242,7 @@ namespace graph {
 
             assert(TcBase<T>::count_);
             Log(LogPriorityEnum::info, "device = %d, blocks = %d, threads = %d\n", TcBase<T>::dev_, dimGrid, dimBlock);
-            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
+           
 
 
 
@@ -1254,6 +1257,8 @@ namespace graph {
 
         void count_per_edge_eid_async(GPUArray<PeelType>& tcpt, EidGraph_d<T> g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
+            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
+
             const size_t dimBlock = 32;
             const size_t ne = numEdges;
             T* rp_csr = g.rowPtr_csr;
@@ -1271,7 +1276,7 @@ namespace graph {
 
             assert(TcBase<T>::count_);
             Log(LogPriorityEnum::info, "device = %d, blocks = %d, threads = %d\n", TcBase<T>::dev_, dimGrid, dimBlock);
-            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
+            
 
 
             //CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
@@ -1346,7 +1351,7 @@ namespace graph {
 
         void set_per_edge_async(GPUArray<int>& tcpt, GPUArray<T> triPointer, GPUArray<T> rowPtr, GPUArray<T> rowInd, GPUArray<T> colInd, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
-
+            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
             const size_t dimBlock = 512;
             const size_t ne = numEdges;
             T* rp = rowPtr.gdata();
@@ -1360,7 +1365,7 @@ namespace graph {
 
             assert(TcBase<T>::count_);
             Log(LogPriorityEnum::info, "device = %d, blocks = %d, threads = %d\n", TcBase<T>::dev_, dimGrid, dimBlock);
-            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
+         
 
 
             CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));

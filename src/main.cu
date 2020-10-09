@@ -160,7 +160,7 @@ int main(int argc, char** argv) {
 	///Now we need to orient the graph
 	graph::COOCSRGraph_d<uint>* gd;
 	to_csrcoo_device(g, gd); //got to device !!
-	graph::SingleGPU_Kcore<uint, PeelType> mohacore(0);
+	graph::SingleGPU_Kcore<uint, PeelType> mohacore(config.deviceId);
 	if (config.orient == Degree || config.orient == Degeneracy)
 	{
 		Timer t_init;
@@ -172,12 +172,12 @@ int main(int argc, char** argv) {
 			mohacore.getNodeDegree(*gd);
 		mohacore.sync();
 
-		graph::GPUArray<uint> rowInd_half("Half Row Index", AllocationTypeEnum::unified, m / 2, 0),
-			colInd_half("Half Col Index", AllocationTypeEnum::unified, m / 2, 0),
-			new_rowPtr("New", AllocationTypeEnum::unified, n + 1, 0),
-			asc("ASC temp", AllocationTypeEnum::unified, m, 0);
-		graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, 0);
-		execKernel((init<uint, PeelType>), (m + 512 - 1) / 512, 512, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata());
+		graph::GPUArray<uint> rowInd_half("Half Row Index", AllocationTypeEnum::unified, m / 2, config.deviceId),
+			colInd_half("Half Col Index", AllocationTypeEnum::unified, m / 2, config.deviceId),
+			new_rowPtr("New", AllocationTypeEnum::unified, n + 1, config.deviceId),
+			asc("ASC temp", AllocationTypeEnum::unified, m, config.deviceId);
+		graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, config.deviceId);
+		execKernel((init<uint, PeelType>), (m + 512 - 1) / 512, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata());
 
 		graph::CubLarge<uint> s;
 		uint newNumEdges;
@@ -195,7 +195,7 @@ int main(int argc, char** argv) {
 		}
 
 
-		execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, false, gd->rowPtr, n, keep.gdata(), new_rowPtr.gdata());
+		execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), new_rowPtr.gdata());
 		uint total = CUBScanExclusive<uint, uint>(new_rowPtr.gdata(), new_rowPtr.gdata(), n);
 		new_rowPtr.gdata()[n] = total;
 		//assert(total == new_edge_num * 2);
@@ -260,7 +260,7 @@ int main(int argc, char** argv) {
 
 	if (config.mt == TC)
 	{
-
+		CUDA_RUNTIME(cudaSetDevice(config.deviceId));
 		graph::TiledCOOCSRGraph<uint>* gtiled;
 		coo2tiledcoocsrOnDevice(g, 16, gtiled, unified);
 		unsigned int numThreadsPerBlock = 128;
@@ -296,16 +296,16 @@ int main(int argc, char** argv) {
 		uint step = m;
 		uint st = 0;
 		uint ee = st + step; // st + 2;
-		graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(0, ee, n);
-		graph::TcBase<uint>* tcNV = new graph::TcNvgraph<uint>(0, ee, n);
-		graph::TcBase<uint>* tcBE = new graph::TcBinaryEncoding<uint>(0, ee, n);
-		graph::TcBase<uint>* tc = new graph::TcSerial<uint>(0, ee, n);
+		graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(config.deviceId, ee, n);
+		graph::TcBase<uint>* tcNV = new graph::TcNvgraph<uint>(config.deviceId, ee, n);
+		graph::TcBase<uint>* tcBE = new graph::TcBinaryEncoding<uint>(config.deviceId, ee, n);
+		graph::TcBase<uint>* tc = new graph::TcSerial<uint>(config.deviceId, ee, n);
 
 		const int divideConstant = 10;
-		graph::TcBase<uint>* tchash = new graph::TcVariableHash<uint>(0, ee, n);
+		graph::TcBase<uint>* tchash = new graph::TcVariableHash<uint>(config.deviceId, ee, n);
 
 
-		graph::BmpGpu<uint> bmp;
+		graph::BmpGpu<uint> bmp(config.deviceId);
 		bmp.InitBMP(*gd);
 		bmp.bmpConstruct(*gd);
 
@@ -341,21 +341,21 @@ int main(int argc, char** argv) {
 
 			bmp.Count(*gd);
 
-			uint64  serialTc = CountTriangles<uint>("Serial Thread", tc, gd, ee, st, ProcessingElementEnum::Thread, 0);
+			uint64  serialTc = CountTriangles<uint>("Serial Thread", config.deviceId, tc, gd, ee, st, ProcessingElementEnum::Thread, 0);
 
 			////CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
-			uint64  binaryTc = CountTriangles<uint>("Binary Warp", tcb, gd, ee, st, ProcessingElementEnum::Block, 0);
-			uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee, st, ProcessingElementEnum::WarpShared, 0);
-			uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", tcb, gd, ee, st, ProcessingElementEnum::Test, 0);
+			uint64  binaryTc = CountTriangles<uint>("Binary Warp", config.deviceId, tcb, gd, ee, st, ProcessingElementEnum::Block, 0);
+			uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", config.deviceId, tcb, gd, ee, st, ProcessingElementEnum::WarpShared, 0);
+			uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", config.deviceId, tcb, gd, ee, st, ProcessingElementEnum::Test, 0);
 
 
 
-			uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", tcBE, gd, ee, st, ProcessingElementEnum::Warp, 0);
-			CountTrianglesHash<uint>(divideConstant, tchash, gd, ee, 0, ProcessingElementEnum::Warp, 0);
+			uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", config.deviceId, tcBE, gd, ee, st, ProcessingElementEnum::Warp, 0);
+			CountTrianglesHash<uint>(config.deviceId,divideConstant, tchash, gd, ee, 0, ProcessingElementEnum::Warp, 0);
 
-			uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
+			uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", config.deviceId, tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
 
-			CountTriangles<uint>("NVGRAPH", tcNV, gd, ee);
+			CountTriangles<uint>("NVGRAPH", config.deviceId, tcNV, gd, ee);
 
 			/*if (serialTc != binaryTc)
 				break;*/
@@ -395,7 +395,7 @@ int main(int argc, char** argv) {
 		to_csrcoo_device(g, gd); //got to device !!
 		cudaDeviceSynchronize();
 
-		graph::SingleGPU_Kcore<uint, PeelType> mohacore(0);
+		graph::SingleGPU_Kcore<uint, PeelType> mohacore(config.deviceId);
 		Timer t;
 		mohacore.findKcoreIncremental_async(3, 1000, *gd, 0, 0);
 		mohacore.sync();
@@ -409,7 +409,7 @@ int main(int argc, char** argv) {
 		if (config.orient == None)
 			Log(warn,"Redundunt K-cliques, Please orient the graph\n");
 
-		graph::SingleGPU_Kclique<uint> mohaclique(0);
+		graph::SingleGPU_Kclique<uint> mohaclique(config.deviceId);
 		Timer t;
 		mohaclique.findKclqueIncremental_edge_async(config.k, *gd, 0, 0);
 		mohaclique.sync();
@@ -430,7 +430,7 @@ int main(int argc, char** argv) {
 #ifdef VLDB2020
 	//We need unified to do stream compaction
 		graph::GPUArray<int> output("KT Output", AllocationTypeEnum::unified, m / 2, 0);
-		graph::BmpGpu<uint> bmp;
+		graph::BmpGpu<uint> bmp(config.deviceId);
 		bmp.getEidAndEdgeList(g);// CPU
 		bmp.InitBMP(*gd);
 		bmp.bmpConstruct(*gd);
@@ -440,6 +440,7 @@ int main(int argc, char** argv) {
 		auto level_start_pos = (uint*)calloc(MAX_LEVEL, sizeof(uint));
 
 		graph::PKT_cuda(
+			config.deviceId,
 			n, m,
 			*g.rowPtr, *g.colInd, bmp,
 			nullptr,
@@ -470,12 +471,12 @@ int main(int argc, char** argv) {
 		graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, 0);
 
 
-		execKernel(init, (m + 512 - 1) / 512, 512, false, *gd, asc.gdata(), keep.gdata());
+		execKernel(init, (m + 512 - 1) / 512, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata());
 
 		CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m);
 		CUBSelect(gd->rowInd, rowIndex.gdata(), keep.gdata(), m);
 		uint newNumEdges = CUBSelect(gd->colInd, colIndex.gdata(), keep.gdata(), m);
-		execKernel(InitEid, (newNumEdges + 512 - 1) / 512, 512, false, newNumEdges, asc.gdata(), rowIndex.gdata(), colIndex.gdata(), gd->rowPtr, gd->colInd, EID.gdata());
+		execKernel(InitEid, (newNumEdges + 512 - 1) / 512, 512, config.deviceId, false, newNumEdges, asc.gdata(), rowIndex.gdata(), colIndex.gdata(), gd->rowPtr, gd->colInd, EID.gdata());
 		asc.freeGPU();
 		keep.freeGPU();
 		double time_init = t_init.elapsed();
@@ -491,10 +492,10 @@ int main(int argc, char** argv) {
 		geid.colInd = colIndex.gdata();
 		geid.eid = EID.gdata();
 
-		graph::SingleGPU_KtrussMod<uint, PeelType> mohatrussM(0);
+		graph::SingleGPU_KtrussMod<uint, PeelType> mohatrussM(config.deviceId);
 
 		Timer t;
-		graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(0, m, n, mohatrussM.stream());
+		graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(config.deviceId, m, n, mohatrussM.stream());
 
 		mohatrussM.findKtrussIncremental_sync(3, 1000, tcb, geid, nullptr, nullptr, 0, 0);
 		mohatrussM.sync();

@@ -72,7 +72,18 @@ __device__ inline uint getEdgeId(uint* rowPtr, uint* colInd, uint sn, const uint
 
 /*---- 2. CUDA kernel execution wrapper ----*/
 /*normal execution without dynamic shared memory allocation*/
-#define execKernel(kernel, gridSize, blockSize, verbose, ...) \
+#define execKernel(kernel, gridSize, blockSize, deviceId, verbose, ...) \
+{ \
+    dim3 grid(gridSize); \
+    dim3 block(blockSize); \
+    \
+    CUDA_RUNTIME(cudaSetDevice(deviceId)); \
+    kernel<<<grid,block>>>(__VA_ARGS__); \
+    CUDA_RUNTIME(cudaDeviceSynchronize()); \
+}
+
+
+#define execKernel2(kernel, gridSize, blockSize, deviceId, verbose, ...) \
 { \
     float singleKernelTime;\
     cudaEvent_t start, end; \
@@ -81,6 +92,7 @@ __device__ inline uint getEdgeId(uint* rowPtr, uint* colInd, uint sn, const uint
     dim3 grid(gridSize); \
     dim3 block(blockSize); \
     \
+    CUDA_RUNTIME(cudaSetDevice(deviceId)); \
     CUDA_RUNTIME(cudaEventRecord(start)); \
     kernel<<<grid,block>>>(__VA_ARGS__); \
     CHECK_KERNEL(#kernel)\
@@ -98,7 +110,7 @@ __device__ inline uint getEdgeId(uint* rowPtr, uint* colInd, uint sn, const uint
 
 //if (false) Log(LogPriorityEnum::info, "Kernel: %s, time: %.2f ms.", #kernel, singleKernelTime); \
 /*execution with dynamic shared memory allocation*/
-#define execKernelDynamicAllocation(kernel, gridSize, blockSize, sharedSize, verbose, ...) \
+#define execKernelDynamicAllocation(kernel, gridSize, blockSize, sharedSize, deviceId, verbose, ...) \
 { \
     float singleKernelTime;\
     cudaEvent_t start, end; \
@@ -107,6 +119,7 @@ __device__ inline uint getEdgeId(uint* rowPtr, uint* colInd, uint sn, const uint
     dim3 grid(gridSize); \
     dim3 block(blockSize); \
     \
+    CUDA_RUNTIME(cudaSetDevice(deviceId)); \
     CUDA_RUNTIME(cudaEventRecord(start)); \
     kernel<<<grid,block,sharedSize>>>(__VA_ARGS__); \
     CHECK_KERNEL(#kernel)\

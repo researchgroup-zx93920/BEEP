@@ -295,7 +295,7 @@ __global__ void InitEid(T numEdges, T* asc, T*newSrc, T* newDst, T* rowPtr, T* c
 
 
 template<typename T>
-uint64 CountTriangles(std::string message, graph::TcBase<T>* tc, graph::COOCSRGraph_d<T> *g,
+uint64 CountTriangles(std::string message, int deviceId, graph::TcBase<T>* tc, graph::COOCSRGraph_d<T> *g,
 	const size_t numEdges_upto, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
 {
 
@@ -323,7 +323,7 @@ uint64 CountTriangles(std::string message, graph::TcBase<T>* tc, graph::COOCSRGr
 }
 
 template<typename T>
-void CountTrianglesHash(const int divideConstant, graph::TcBase<T>* tc, graph::COOCSRGraph_d<T>* g,
+void CountTrianglesHash(int deviceId, const int divideConstant, graph::TcBase<T>* tc, graph::COOCSRGraph_d<T>* g,
 	const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
 {
 
@@ -333,36 +333,23 @@ void CountTrianglesHash(const int divideConstant, graph::TcBase<T>* tc, graph::C
 
 	//Construct
 	
-	graph::GPUArray<uint> htp("hash table pointer", AllocationTypeEnum::unified, g->numNodes + 1, 0);
-	graph::GPUArray<uint> htd("hash table", AllocationTypeEnum::gpu, numEdges - edgeOffset, 0);
+	graph::GPUArray<uint> htp("hash table pointer", AllocationTypeEnum::unified, g->numNodes + 1, deviceId);
+	graph::GPUArray<uint> htd("hash table", AllocationTypeEnum::gpu, numEdges - edgeOffset, deviceId);
 
-	execKernel(createHashPointer2, (g->numNodes + 128 - 1) / 128, 128, false, *g, htp.gdata(), minRowLen, maxRowLen, divideConstant);
-
-
-	//for (int i = 0; i < 100; i++)
-	//	printf("%u, ", htp.gdata()[i]);
-	//printf("\n");
-
-
+	execKernel(createHashPointer2, (g->numNodes + 128 - 1) / 128, 128, deviceId, false, *g, htp.gdata(), minRowLen, maxRowLen, divideConstant);
 	T total = CUBScanExclusive(htp.gdata(), htp.gdata(), g->numNodes);
 	htp.gdata()[g->numNodes] = total;
 
 	uint totalBins = htp.gdata()[g->numNodes];
-
-
-
-	//for (int i = 0; i < 100; i++)
-	//	printf("%u, ", htp.gdata()[i]);
-	//printf("\n");
 	if (totalBins == 0)
 	{
 		printf("Hashing is not suitable or min row is higher than max row len, exit \n");
 		return;
 	}
 
-	graph::GPUArray<uint> hts("bins start per row", AllocationTypeEnum::unified, totalBins, 0);
+	graph::GPUArray<uint> hts("bins start per row", AllocationTypeEnum::unified, totalBins, deviceId);
 	hts.setAll(0, true);
-	execKernel(createHashStartBin, (g->numNodes + 128 - 1) / 128, 128, false, *g, htp.gdata(), hts.gdata(), minRowLen, maxRowLen, divideConstant);
+	execKernel(createHashStartBin, (g->numNodes + 128 - 1) / 128, 128, deviceId, false, *g, htp.gdata(), hts.gdata(), minRowLen, maxRowLen, divideConstant);
 
 
 
@@ -410,7 +397,8 @@ void CountTrianglesHash(const int divideConstant, graph::TcBase<T>* tc, graph::C
 	tc->count_hash_async(divideConstant, g, htd, htp, hts, numEdges, edgeOffset, kernelType, increasing);
 	tc->sync();
 	CUDA_RUNTIME(cudaGetLastError());
-	printf("TC Hash = %d\n", tc->count());
+	std::cout.imbue(std::locale(""));
+	cout << "TC = " << tc->count() << "\n";
 	double secs = tc->kernel_time();
 	int dev = tc->device();
 	Log(LogPriorityEnum::info, "gpu %d kernel time %f (%f teps) \n", dev, secs, numEdges / secs);

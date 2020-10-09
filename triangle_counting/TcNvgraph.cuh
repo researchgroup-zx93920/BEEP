@@ -13,6 +13,8 @@ namespace graph {
 
         void count_async(COOCSRGraph_d<T>* g, const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
         {
+
+            CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
          
            int* rp = (int*)g->rowPtr;
             int* ri = (int*)g->rowInd;

@@ -546,7 +546,7 @@ namespace graph {
 
 
     public:
-
+        int deviceId;
         GPUArray<T> d_bitmaps;
         GPUArray<T> d_bitmap_states;
         GPUArray<T> d_vertex_count;
@@ -569,8 +569,8 @@ namespace graph {
             T n = g.numNodes;
 
             //Allocate space for eid -- size g->m
-            idToEdge.initialize("id2edge", AllocationTypeEnum::unified, m / 2, 0);
-            eid.initialize("EID", AllocationTypeEnum::unified, m, 0);
+            idToEdge.initialize("id2edge", AllocationTypeEnum::unified, m / 2, deviceId);
+            eid.initialize("EID", AllocationTypeEnum::unified, m, deviceId);
 
             //Edge upper_tri_start of each edge
             auto* num_edges_copy = (T*)malloc((n + 1) * sizeof(T));
@@ -630,8 +630,9 @@ namespace graph {
             #pragma omp single
             Log(LogPriorityEnum::info, "EID and Edge list: %.9lfs", t.elapsed());
         }
-        BmpGpu()
+        BmpGpu(int d)
         {
+            deviceId = d;
 
         }
 
@@ -650,15 +651,15 @@ namespace graph {
             auto conc_blocks_per_SM = context.GetConCBlocks(512);
 
             /*initialize the bitmaps*/
-            d_bitmaps.initialize("bmp bitmap", AllocationTypeEnum::gpu, conc_blocks_per_SM * num_SMs * num_words_bmp, 0);
+            d_bitmaps.initialize("bmp bitmap", AllocationTypeEnum::gpu, conc_blocks_per_SM * num_SMs * num_words_bmp, deviceId);
             d_bitmaps.setAll(0,true);
 
             ///*initialize the bitmap states*/
-            d_bitmap_states.initialize("bmp bitmap stats", AllocationTypeEnum::gpu, num_SMs * conc_blocks_per_SM, 0);
+            d_bitmap_states.initialize("bmp bitmap stats", AllocationTypeEnum::gpu, num_SMs * conc_blocks_per_SM, deviceId);
             d_bitmap_states.setAll(0, true);
 
                 ///vertex count for sequential block execution
-            d_vertex_count.initialize("d_vertex count", AllocationTypeEnum::gpu, 1, 0);
+            d_vertex_count.initialize("d_vertex count", AllocationTypeEnum::gpu, 1, deviceId);
             d_vertex_count.setAll(0, true);
 
             Log(LogPriorityEnum::info, "BMP Inialization: %.9lfs", t.elapsed());
@@ -673,13 +674,14 @@ namespace graph {
             Timer t;
             T m = g.numEdges;
             T n = g.numNodes;
-            bmp_offs.initialize("bmp offset", AllocationTypeEnum::unified, n + 1, 0);
-            edge_sup_gpu.initialize("Edge Support", AllocationTypeEnum::unified, m/2, 0);
+            bmp_offs.initialize("bmp offset", AllocationTypeEnum::unified, n + 1, deviceId);
+            edge_sup_gpu.initialize("Edge Support", AllocationTypeEnum::unified, m/2, deviceId);
 
 
            execKernel(construct_bsr_row_ptr_per_thread, 
                 (n + 127) / 128, 
                 128,
+               deviceId,
                 true, 
                 g.rowPtr, g.colInd, n, bmp_offs.gdata());
 
@@ -692,7 +694,7 @@ namespace graph {
 
                 cudaMalloc(&bmp_word_indices, sizeof(T) * word_num);
                 cudaMalloc(&bmp_words, sizeof(T) * word_num);
-                execKernel(construct_bsr_content_per_thread, (n + 127) / 128, 128,
+                execKernel(construct_bsr_content_per_thread, (n + 127) / 128, 128, deviceId,
                     true, g.rowPtr, g.colInd, n, bmp_offs.gdata(), bmp_word_indices, bmp_words);
 
 
@@ -711,6 +713,7 @@ namespace graph {
 
         double Count_Set(graph::COOCSRGraph_d<T> g)
         {
+            CUDA_RUNTIME(cudaSetDevice(deviceId));
             
             Timer t;
             T m = g.numEdges;
@@ -733,7 +736,7 @@ namespace graph {
 
             
             execKernelDynamicAllocation(bmp_bsr_kernel, n, t_dimension,
-                num_word_bmp_idx * sizeof(uint32_t), false,
+                num_word_bmp_idx * sizeof(uint32_t), deviceId, false,
                 g.rowPtr, g.colInd, d_bitmaps.gdata(), d_bitmap_states.gdata(),
                 d_vertex_count.gdata(), conc_blocks_per_SM, eid.gdata(), edge_sup_gpu.gdata(),
                 bmp_offs.gdata(), bmp_word_indices, bmp_words);
@@ -754,7 +757,7 @@ namespace graph {
 
         double Count(graph::COOCSRGraph_d<T> g)
         {
-
+            CUDA_RUNTIME(cudaSetDevice(deviceId));
 
             T m = g.numEdges;
             T n = g.numNodes;
@@ -772,7 +775,7 @@ namespace graph {
 
             Log<false>(LogPriorityEnum::info, "Kernel Time= ");
             execKernelDynamicAllocation(bmp_bsr_count_kernel, n, t_dimension,
-                num_word_bmp_idx * sizeof(uint32_t), true,
+                num_word_bmp_idx * sizeof(uint32_t), deviceId,true,
                 g.rowPtr, g.colInd, d_bitmaps.gdata(), d_bitmap_states.gdata(),
                 d_vertex_count.gdata(), conc_blocks_per_SM, eid.gdata(),
                 bmp_offs.gdata(), bmp_word_indices, bmp_words, count);

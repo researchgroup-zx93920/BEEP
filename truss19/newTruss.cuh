@@ -194,6 +194,8 @@ namespace graph
 			GraphQueue<T, bool>& bucket,
 			T& bucket_level_end_)
 		{
+
+			CUDA_RUNTIME(cudaSetDevice(dev_));
 			static bool is_first = true;
 			if (is_first)
 			{
@@ -208,7 +210,7 @@ namespace graph
 				
 
 				auto grid_size = (edge_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
-				execKernel((filter_window<T, PeelT>), grid_size, BLOCK_SIZE, false,
+				execKernel((filter_window<T, PeelT>), grid_size, BLOCK_SIZE, dev_, false,
 					edgeSupport.gdata(), edge_num, bucket.mark.gdata(), level, bucket_level_end_ + LEVEL_SKIP_SIZE);
 
 				bucket.count.gdata()[0] = CUBSelect(asc.gdata(), bucket.queue.gdata(), bucket.mark.gdata(), edge_num);
@@ -219,7 +221,7 @@ namespace graph
 			{
 				current.count.gdata()[0] = 0;
 				long grid_size = (bucket.count.gdata()[0] + BLOCK_SIZE - 1) / BLOCK_SIZE;
-				execKernel(filter_with_random_append, grid_size, BLOCK_SIZE, false,
+				execKernel(filter_with_random_append, grid_size, BLOCK_SIZE, dev_, false,
 					bucket.queue.gdata(), bucket.count.gdata()[0], edgeSupport.gdata(), current.mark.gdata(), current.queue.gdata(), &(current.count.gdata()[0]), level);
 			}
 			else
@@ -232,7 +234,7 @@ namespace graph
 
 		void AscendingGpu(int n, int m, GPUArray<uint>& identity_arr_asc)
 		{
-
+			CUDA_RUNTIME(cudaSetDevice(dev_));
 
 			// 4th: Keep the edge offset mapping.
 			long grid_size = (m + BLOCK_SIZE - 1) / BLOCK_SIZE;
@@ -240,7 +242,7 @@ namespace graph
 
 			identity_arr_asc.initialize("Identity Array Asc", AllocationTypeEnum::unified, m, 0);
 
-			execKernel(init_asc, grid_size, BLOCK_SIZE, false, identity_arr_asc.gdata(), m);
+			execKernel(init_asc, grid_size, BLOCK_SIZE, dev_, false, identity_arr_asc.gdata(), m);
 		}
 
 
@@ -253,21 +255,23 @@ namespace graph
 			GPUArray <T>& new_offset, GPUArray<T>& new_eid, GPUArray <T>& new_adj,
 			T old_edge_num, T new_edge_num)
 		{
+
+			CUDA_RUNTIME(cudaSetDevice(dev_));
 			static bool shrink_first_time = true;
 			if (shrink_first_time) { //shrink first time, allocate the buffers
 				shrink_first_time = false;
 				Timer alloc_timer;
-				new_adj.initialize("New Adj", gpu, new_edge_num * 2, 0);
-				new_eid.initialize("New EID", gpu, new_edge_num * 2, 0);
-				new_offset.initialize("New Row Pointer", unified, (n + 1), 0);
-				edge_deleted.initialize("Edge deleted", gpu, old_edge_num * 2, 0);
+				new_adj.initialize("New Adj", gpu, new_edge_num * 2, dev_);
+				new_eid.initialize("New EID", gpu, new_edge_num * 2, dev_);
+				new_offset.initialize("New Row Pointer", unified, (n + 1), dev_);
+				edge_deleted.initialize("Edge deleted", gpu, old_edge_num * 2, dev_);
 			}
 			graph::CubLarge<uint> s;
 
 			/*2. construct new CSR (offsets, adj) and rebuild the eid*/
 			int block_size = 128;
 			// Attention: new_offset gets the histogram.
-			execKernel((warp_detect_deleted_edges<T>), GRID_SIZE, block_size, true,
+			execKernel((warp_detect_deleted_edges<T>), GRID_SIZE, block_size, dev_, true,
 				rowPtr, n, eid, processed.gdata(), new_offset.gdata(), edge_deleted.gdata());
 
 			uint total = 0;
@@ -347,13 +351,13 @@ namespace graph
 
 
 			graph::GraphQueue<T, bool> bucket_q;
-			bucket_q.Create(unified, numEdges, 0);
+			bucket_q.Create(unified, numEdges, dev_);
 
 			graph::GraphQueue<T, bool> current_q;
-			current_q.Create(unified, numEdges, 0);
+			current_q.Create(unified, numEdges, dev_);
 
 			graph::GraphQueue<T, bool> next_q;
-			next_q.Create(unified, numEdges, 0);
+			next_q.Create(unified, numEdges, dev_);
 
 		
 			//Queues
@@ -368,8 +372,8 @@ namespace graph
 			GPUArray<bool> edge_deleted;           // Auxiliaries for shrinking graphs.
 		
 
-			processed.initialize("is Deleted (Processed)", unified, numEdges, 0);
-			edgeSupport.initialize("Edge Support", unified, numEdges, 0);
+			processed.initialize("is Deleted (Processed)", unified, numEdges, dev_);
+			edgeSupport.initialize("Edge Support", unified, numEdges, dev_);
 
 			uint dimGridEdges = (numEdges + dimBlock - 1) / dimBlock;
 
@@ -410,7 +414,7 @@ namespace graph
 					{
 						auto block_size = 256;
 						auto grid_size = (current_q.count.gdata()[0] + block_size - 1) / block_size;
-						execKernel((update_processed<T>), grid_size, block_size, false, current_q.queue.gdata(), current_q.count.gdata()[0], current_q.mark.gdata(), processed.gdata());
+						execKernel((update_processed<T>), grid_size, block_size, dev_, false, current_q.queue.gdata(), current_q.count.gdata()[0], current_q.mark.gdata(), processed.gdata());
 					}
 					else
 					{
@@ -425,7 +429,7 @@ namespace graph
 
 						auto block_size = 256;
 						auto grid_size = (current_q.count.gdata()[0] + block_size - 1) / block_size;
-						execKernel(update_processed, grid_size, block_size, false, current_q.queue.gdata(), current_q.count.gdata()[0], current_q.mark.gdata(), processed.gdata());
+						execKernel(update_processed, grid_size, block_size, dev_, false, current_q.queue.gdata(), current_q.count.gdata()[0], current_q.mark.gdata(), processed.gdata());
 					}
 
 					numDeleted_l = numEdges - todo;
