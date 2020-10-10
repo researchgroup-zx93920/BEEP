@@ -6,7 +6,7 @@
 #define INT_INVALID  (INT32_MAX)
 
 #define LEVEL_SKIP_SIZE (16)
-#define KCL_LEVEL_SKIP_SIZE (2048)
+#define KCL_LEVEL_SKIP_SIZE (1024)
 
 #define INBUCKET_BOOL
 #ifndef INBUCKET_BOOL

@@ -71,12 +71,13 @@ namespace graph
 
 		void freeGPU()
 		{
-			if (!freed)
+			if (N != 0)
 			{
 				freed = true;
 				CUDA_RUNTIME(cudaSetDevice(_deviceId));
 				CUDA_RUNTIME(cudaFree(gpu_data));
 				CUDA_RUNTIME(cudaStreamDestroy(_stream));
+				N = 0;
 			}
 		}
 		void freeCPU()
@@ -262,7 +263,7 @@ namespace graph
 			return cpu_data;
 		}
 
-		std::size_t N;
+		uint64 N;
 		std::string name;
 	private:
 		T* cpu_data;

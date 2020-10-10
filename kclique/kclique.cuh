@@ -15,7 +15,7 @@
 #include "../include/GraphQueue.cuh"
 
 template <typename T, int BLOCK_DIM_X>
-__global__ void try_block_scan(T count,  T* output)
+__global__ void try_block_scan(T count, T* output)
 {
 	typedef cub::BlockScan<T, BLOCK_DIM_X> BlockScan;
 	__shared__ typename BlockScan::TempStorage temp_storage;
@@ -42,7 +42,7 @@ __global__ void try_block_scan(T count,  T* output)
 
 		__syncthreads();
 
-		
+
 
 		if (index < count)
 			output[threadData + total] = threadData;
@@ -57,10 +57,11 @@ __global__ void try_block_scan(T count,  T* output)
 }
 
 
-template <typename T,  int BLOCK_DIM_X>
+template <typename T, int BLOCK_DIM_X>
 __global__ void init_edge_ptr(graph::COOCSRGraph_d<T> g, T* edgePtr)
 {
 	const T gtid = (BLOCK_DIM_X * blockIdx.x + threadIdx.x);
+
 
 	if (gtid < g.numEdges)
 	{
@@ -72,6 +73,38 @@ __global__ void init_edge_ptr(graph::COOCSRGraph_d<T> g, T* edgePtr)
 
 		edgePtr[gtid] = srcDeg < dstDeg ? srcDeg : dstDeg;
 	}
+
+}
+
+
+
+template <typename T, int BLOCK_DIM_X>
+__global__ void get_max_degree(graph::COOCSRGraph_d<T> g, T* edgePtr, T* maxDegree)
+{
+	const T gtid = (BLOCK_DIM_X * blockIdx.x + threadIdx.x);
+	typedef cub::BlockReduce<T, BLOCK_DIM_X> BlockReduce;
+	__shared__ typename BlockReduce::TempStorage temp_storage;
+	T degree = 0;
+
+	if (gtid < g.numEdges)
+	{
+		T src = g.rowInd[gtid];
+		T dst = g.colInd[gtid];
+
+		T srcDeg = g.rowPtr[src + 1] - g.rowPtr[src];
+		T dstDeg = g.rowPtr[dst + 1] - g.rowPtr[dst];
+		
+		degree = srcDeg < dstDeg ? srcDeg : dstDeg;
+		edgePtr[gtid] = degree;
+	}
+
+	__syncthreads();
+	T aggregate = BlockReduce(temp_storage).Reduce(degree, cub::Max());
+
+
+	if (threadIdx.x == 0)
+		atomicMax(maxDegree, aggregate);
+
 
 }
 
@@ -91,11 +124,11 @@ __global__ void getNodeDegree_kernel(T* nodeDegree, graph::COOCSRGraph_d<T> g)
 template <typename T, int BLOCK_DIM_X>
 __global__ void
 kernel_block_level_kclique_count0(
-	uint64 *counter,
+	uint64* counter,
 	graph::COOCSRGraph_d<T> g,
 	int kclique,
 	int level,
-	bool* processed, 
+	bool* processed,
 	graph::GraphQueue_d<int, bool> current,
 	T* current_level,
 	T* filter_level,
@@ -290,7 +323,7 @@ kernel_block_level_kclique_count0(
 			__syncthreads();
 
 
-			if(tid == 0)
+			if (tid == 0)
 				l = new_level;
 			__syncthreads();
 			/*if (tid == 0)
@@ -331,7 +364,7 @@ kernel_block_level_kclique_count1(
 	typedef cub::BlockScan<T, BLOCK_DIM_X> BlockScan;
 	__shared__ typename BlockScan::TempStorage temp_storage;
 
-	
+
 	__shared__ uint64 clique_count;
 	__shared__ uint64 block_count_shared;
 
@@ -339,7 +372,7 @@ kernel_block_level_kclique_count1(
 	__shared__ T filter_level_s[BLOCK_DIM_X * 2];
 	__shared__ T filter_scan_s[BLOCK_DIM_X * 2];
 
-	
+
 
 	auto tid = threadIdx.x;
 	const size_t gbx = (BLOCK_DIM_X * blockIdx.x + threadIdx.x) / BLOCK_DIM_X;
@@ -361,7 +394,7 @@ kernel_block_level_kclique_count1(
 		const T srcStop = g.rowPtr[nodeId + 1];
 		const T srcLen = srcStop - srcStart;
 		const T srcLenBlocks = (srcLen + BLOCK_DIM_X - 1) / BLOCK_DIM_X;
-		
+
 		l = 2;
 		level_index[l - 2] = 0;
 		level_count[l - 2] = srcLen;
@@ -430,7 +463,7 @@ kernel_block_level_kclique_count1(
 			current_node_index = filter_level_s[/*srcStart +*/ level_index[l - 2]];
 			level_index[l - 2]++;
 			new_level = l;
-			
+
 			uint64 blockCount = 0;
 
 			//(3) intesect Adj[current_node] with
@@ -472,7 +505,7 @@ kernel_block_level_kclique_count1(
 						clique_count += block_count_shared;
 				}
 				__syncthreads();
-				
+
 				if (block_count_shared > 0 && l + 1 < kclique)
 				{
 					l++;
@@ -483,12 +516,12 @@ kernel_block_level_kclique_count1(
 			}
 
 
-		
+
 			while (new_level > 2 && level_index[new_level - 2] >= level_count[new_level - 2])
 			{
 				new_level--;
 			}
-			
+
 			if (new_level < l)
 			{
 				for (int k = 0; k < srcLenBlocks; k++)
@@ -643,7 +676,7 @@ kernel_block_level_kclique_count(
 
 				if (blockCount > 0)
 				{
-					if(l+1 == kclique && tid == 0)
+					if (l + 1 == kclique && tid == 0)
 						clique_count += blockCount;
 					else if (l + 1 < kclique)
 					{
@@ -710,7 +743,7 @@ kernel_block_level_kclique_edge_count(
 	T level,
 	graph::GraphQueue_d<T, bool> current,
 	char* current_level,
-	T* edgePointer
+	const T spaceLen
 )
 {
 	T threadData = 0;
@@ -743,27 +776,21 @@ kernel_block_level_kclique_edge_count(
 		T src = g.rowInd[edgeId];
 		T src2 = g.colInd[edgeId];
 
-		T epStart = edgePointer[edgeId];
-		
 		const T srcStart = g.rowPtr[src];
 		const T srcStop = g.rowPtr[src + 1];
 		const T srcLen = srcStop - srcStart;
-		
+
 		const T src2Start = g.rowPtr[src2];
 		const T src2Stop = g.rowPtr[src2 + 1];
 		const T src2Len = src2Stop - src2Start;
 
-		const T refStart =	src2Len > srcLen ? srcStart : src2Start;
-		const T refLen =	src2Len > srcLen ? srcLen : src2Len;
+		T refIndex = srcLen < src2Len ? srcStart : src2Start;
+		const T refLen = srcLen < src2Len ? srcLen : src2Len;;
 		const T srcLenBlocks = (refLen + BLOCK_DIM_X - 1) / BLOCK_DIM_X;
 
-
-		//assert(epSpace == refLen);
-
-
-		char* cl = &current_level[epStart];
-		if (refLen < 4 * BLOCK_DIM_X)
-			cl = current_level_s;
+		char* cl = &(current_level[i * spaceLen]);
+		/* if (refLen < 4 * BLOCK_DIM_X)
+		 	cl = current_level_s;*/
 
 		if (tid == 0)
 		{
@@ -780,148 +807,158 @@ kernel_block_level_kclique_edge_count(
 			level_prev_index[tid] = 0;
 		}
 
-		current_level_s[tid] = 2; // tid < srcLen&& nodeDegree[g.colInd[srcStart + tid]] < kclique - 1 ? 0 : 2;
-		current_level_s[tid + BLOCK_DIM_X] = 2; // (tid + BLOCK_DIM_X) < srcLen&& nodeDegree[g.colInd[srcStart + tid + BLOCK_DIM_X]] < kclique - 1 ? 0 : 2;
-		current_level_s[tid + BLOCK_DIM_X * 2] = 2; // (tid + BLOCK_DIM_X * 2) < srcLen&& nodeDegree[g.colInd[srcStart + tid + BLOCK_DIM_X * 2]] < kclique - 1 ? 0 : 2;
-		current_level_s[tid + BLOCK_DIM_X * 3] = 2; // (tid + BLOCK_DIM_X * 3) < srcLen&& nodeDegree[g.colInd[srcStart + tid + BLOCK_DIM_X * 3]] < kclique - 1 ? 0 : 2;
+		for (T k = 0; k < srcLenBlocks; k++)
+		{
+			T index = k * BLOCK_DIM_X + tid;
+			if (index < refLen)
+				cl[index] = 2;
+		}
+
+
+
+
+		 current_level_s[tid] = 2; // tid < srcLen&& nodeDegree[g.colInd[srcStart + tid]] < kclique - 1 ? 0 : 2;
+		 current_level_s[tid + BLOCK_DIM_X] = 2; // (tid + BLOCK_DIM_X) < srcLen&& nodeDegree[g.colInd[srcStart + tid + BLOCK_DIM_X]] < kclique - 1 ? 0 : 2;
+		 current_level_s[tid + BLOCK_DIM_X * 2] = 2; // (tid + BLOCK_DIM_X * 2) < srcLen&& nodeDegree[g.colInd[srcStart + tid + BLOCK_DIM_X * 2]] < kclique - 1 ? 0 : 2;
+		 current_level_s[tid + BLOCK_DIM_X * 3] = 2; // (tid + BLOCK_DIM_X * 3) < srcLen&& nodeDegree[g.colInd[srcStart + tid + BLOCK_DIM_X * 3]] < kclique - 1 ? 0 : 2;
 
 		__syncthreads();
 
 		uint64 blockCount = 0;
-		if (src2Len >= kclique - l)
-		{
-			if (src2Len > srcLen)
-			{
-				blockCount += graph::block_sorted_count_and_set_binary2<BLOCK_DIM_X, T, true>(&g.colInd[srcStart], srcLen,
-					&g.colInd[src2Start], src2Len, true, srcStart, cl, l + 1, kclique);
-			}
-			else {
-				blockCount += graph::block_sorted_count_and_set_binary2<BLOCK_DIM_X, T, true>(&g.colInd[src2Start], src2Len,
-					&g.colInd[srcStart], srcLen, true, srcStart, cl, l + 1, kclique);
-			}
+		 if (src2Len >= kclique - l)
+		 {
+		 	if (src2Len > srcLen)
+		 	{
+		 		blockCount += graph::block_sorted_count_and_set_binary2<BLOCK_DIM_X, T, true>(&g.colInd[srcStart], srcLen,
+		 			&g.colInd[src2Start], src2Len, true, srcStart, cl, l + 1, kclique);
+		 	}
+		 	else {
+		 		blockCount += graph::block_sorted_count_and_set_binary2<BLOCK_DIM_X, T, true>(&g.colInd[src2Start], src2Len,
+		 			&g.colInd[srcStart], srcLen, true, srcStart, cl, l + 1, kclique);
+		 	}
 
-			__syncthreads();
-			if (blockCount > 0)
-			{
-				if (l + 1 == kclique && tid == 0)
-					clique_count += blockCount;
-				else if (l + 1 < kclique)
-				{
-					if (tid == 0)
-					{
-						l++;
-						new_level++;
-						level_count[l - 2] = blockCount;
-						level_index[l - 2] = 0;
-						level_prev_index[l - 2] = 0;
-					}
-				}
+		 	__syncthreads();
+		 	if (blockCount > 0)
+		 	{
+		 		if (l + 1 == kclique && tid == 0)
+		 			clique_count += blockCount;
+		 		else if (l + 1 < kclique)
+		 		{
+		 			if (tid == 0)
+		 			{
+		 				l++;
+		 				new_level++;
+		 				level_count[l - 2] = blockCount;
+		 				level_index[l - 2] = 0;
+		 				level_prev_index[l - 2] = 0;
+		 			}
+		 		}
 
-			}
+		 	}
 
-			__syncthreads();
-		}
+		 	__syncthreads();
+		 }
 
 
-		__syncthreads();
+		 __syncthreads();
 
 
 		assert(refLen >= level_count[l - 2]);
 
-		while (level_count[l - 2] > level_index[l - 2])
-		{
-			for (int k = 0; k < srcLenBlocks; k++)
-			{
-				T index = level_prev_index[l - 2] + k * BLOCK_DIM_X + tid;
-				if (index < refLen && cl[index] == l)
-				{
-					atomicMin(&current_node_index, index);
-				}
-				__syncthreads();
-				if (current_node_index != UINT_MAX)
-					break;
-			}
+		 while (level_count[l - 2] > level_index[l - 2])
+		 {
+		 	for (int k = 0; k < srcLenBlocks; k++)
+		 	{
+		 		T index = level_prev_index[l - 2] + k * BLOCK_DIM_X + tid;
+		 		if (index < refLen && cl[index] == l)
+		 		{
+		 			atomicMin(&current_node_index, index);
+		 		}
+		 		__syncthreads();
+		 		if (current_node_index != UINT_MAX)
+		 			break;
+		 	}
 
-			__syncthreads();
-			if (tid == 0)
-			{
-				level_prev_index[l - 2] = current_node_index + 1;
-				level_index[l - 2]++;
-				new_level = l;
-			}
+		 	__syncthreads();
+		 	if (tid == 0)
+		 	{
+		 		level_prev_index[l - 2] = current_node_index + 1;
+		 		level_index[l - 2]++;
+		 		new_level = l;
+		 	}
 
-			__syncthreads();
+		 	__syncthreads();
 
-			uint64 blockCountIn = 0;
-			const T dst = g.colInd[current_node_index + refStart];
+		 	uint64 blockCountIn = 0;
+		 	const T dst = g.colInd[current_node_index + refIndex];
 
-			const T dstStart = g.rowPtr[dst];
-			const T dstStop = g.rowPtr[dst + 1];
-			const T dstLen = dstStop - dstStart;
-			if (dstLen >= kclique - l)
-			{
-				if (dstLen > refLen)
-				{
-					blockCountIn += graph::block_sorted_count_and_set_binary2<BLOCK_DIM_X, T, true>(&g.colInd[refStart], refLen,
-						&g.colInd[dstStart], dstLen, true, srcStart, cl, l + 1, kclique);
-				}
-				else {
-					blockCountIn += graph::block_sorted_count_and_set_binary2<BLOCK_DIM_X, T, true>(&g.colInd[dstStart], dstLen,
-						&g.colInd[refStart], refLen, false, srcStart, cl, l + 1, kclique);
-				}
+		 	const T dstStart = g.rowPtr[dst];
+		 	const T dstStop = g.rowPtr[dst + 1];
+		 	const T dstLen = dstStop - dstStart;
+		 	if (dstLen >= kclique - l)
+		 	{
+		 		if (dstLen > refLen)
+		 		{
+		 			blockCountIn += graph::block_sorted_count_and_set_binary2<BLOCK_DIM_X, T, true>(&g.colInd[refIndex], refLen,
+		 				&g.colInd[dstStart], dstLen, true, srcStart, cl, l + 1, kclique);
+		 		}
+		 		else {
+		 			blockCountIn += graph::block_sorted_count_and_set_binary2<BLOCK_DIM_X, T, true>(&g.colInd[dstStart], dstLen,
+		 				&g.colInd[refIndex], refLen, false, srcStart, cl, l + 1, kclique);
+		 		}
 
-				__syncthreads();
-				if (blockCountIn > 0)
-				{
-					if (l + 1 == kclique && tid == 0)
-						clique_count += blockCountIn;
-					else if (l + 1 < kclique)
-					{
-						if (tid == 0)
-						{
-							l++;
-							new_level++;
-							level_count[l - 2] = blockCountIn;
-							level_index[l - 2] = 0;
-							level_prev_index[l - 2] = 0;
-						}
-					}
+		 		__syncthreads();
+		 		if (blockCountIn > 0)
+		 		{
+		 			if (l + 1 == kclique && tid == 0)
+		 				clique_count += blockCountIn;
+		 			else if (l + 1 < kclique)
+		 			{
+		 				if (tid == 0)
+		 				{
+		 					l++;
+		 					new_level++;
+		 					level_count[l - 2] = blockCountIn;
+		 					level_index[l - 2] = 0;
+		 					level_prev_index[l - 2] = 0;
+		 				}
+		 			}
 
-				}
+		 		}
 
-				__syncthreads();
-			}
+		 		__syncthreads();
+		 	}
 
-			__syncthreads();
-			if (tid == 0)
-			{
+		 	__syncthreads();
+		 	if (tid == 0)
+		 	{
 
-				while (new_level > 3 && level_index[new_level - 2] >= level_count[new_level - 2])
-				{
-					new_level--;
-				}
-			}
+		 		while (new_level > 3 && level_index[new_level - 2] >= level_count[new_level - 2])
+		 		{
+		 			new_level--;
+		 		}
+		 	}
 
-			__syncthreads();
-			if (new_level < l)
-			{
-				for (int k = 0; k < srcLenBlocks; k++)
-				{
-					T index = k * BLOCK_DIM_X + tid;
-					if (index < refLen && cl[index] > new_level)
-						cl[index] = new_level;
-				}
-			}
+		 	__syncthreads();
+		 	if (new_level < l)
+		 	{
+		 		for (T k = 0; k < srcLenBlocks; k++)
+		 		{
+		 			T index = k * BLOCK_DIM_X + tid;
+		 			if (index < refLen && cl[index] > new_level)
+		 				cl[index] = new_level;
+		 		}
+		 	}
 
-			__syncthreads();
+		 	__syncthreads();
 
-			if (tid == 0)
-			{
-				l = new_level;
-				current_node_index = UINT_MAX;
-			}
-			__syncthreads();
-		}
+		 	if (tid == 0)
+		 	{
+		 		l = new_level;
+		 		current_node_index = UINT_MAX;
+		 	}
+		 	__syncthreads();
+		 }
 
 		if (threadIdx.x == 0)
 			atomicAdd(counter, clique_count);
@@ -971,7 +1008,7 @@ namespace graph
 
 
 				long grid_size = (node_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
-				execKernel((filter_window<T,T>), grid_size, BLOCK_SIZE, dev_, false,
+				execKernel((filter_window<T, T>), grid_size, BLOCK_SIZE, dev_, false,
 					nodeDegree.gdata(), node_num, bucket.mark.gdata(), level, bucket_level_end_ + KCL_LEVEL_SKIP_SIZE);
 
 				multi++;
@@ -984,7 +1021,7 @@ namespace graph
 			{
 				current.count.gdata()[0] = 0;
 				long grid_size = (bucket.count.gdata()[0] + BLOCK_SIZE - 1) / BLOCK_SIZE;
-				execKernel((filter_with_random_append<T,T>), grid_size, BLOCK_SIZE, false,
+				execKernel((filter_with_random_append<T, T>), grid_size, BLOCK_SIZE, dev_, false,
 					bucket.queue.gdata(), bucket.count.gdata()[0], nodeDegree.gdata(), current.mark.gdata(), current.queue.gdata(), &(current.count.gdata()[0]), level, span);
 			}
 			else
@@ -1018,7 +1055,7 @@ namespace graph
 
 
 				long grid_size = (node_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
-				execKernel(filter_pointer_window, grid_size, BLOCK_SIZE, dev_, false,
+				execKernel(filter_window, grid_size, BLOCK_SIZE, dev_, false,
 					nodeDegree.gdata(), node_num, bucket.mark.gdata(), level, bucket_level_end_ + KCL_LEVEL_SKIP_SIZE);
 
 				multi++;
@@ -1031,7 +1068,7 @@ namespace graph
 			{
 				current.count.gdata()[0] = 0;
 				long grid_size = (bucket.count.gdata()[0] + BLOCK_SIZE - 1) / BLOCK_SIZE;
-				execKernel((filter_with_random_append_pointer<T>), grid_size, BLOCK_SIZE, dev_, false,
+				execKernel((filter_with_random_append<T>), grid_size, BLOCK_SIZE, dev_, false,
 					bucket.queue.gdata(), bucket.count.gdata()[0], nodeDegree.gdata(), current.mark.gdata(), current.queue.gdata(), &(current.count.gdata()[0]), level, span);
 			}
 			else
@@ -1091,26 +1128,16 @@ namespace graph
 			GPUArray<T> identity_arr_asc;
 			AscendingGpu(g.numNodes, identity_arr_asc);
 
-		
-			GPUArray <uint64> counter("Temp level Counter", unified, 1, dev_) ;
 
-			GPUArray<T> 
+			GPUArray <uint64> counter("Temp level Counter", unified, 1, dev_);
+
+			GPUArray<T>
 				filter_level("Temp filter Counter", unified, g.numEdges, dev_),
 				filter_scan("Temp scan Counter", unified, g.numEdges, dev_);
 
 			GPUArray<char> current_level("Temp level Counter", unified, g.numEdges, dev_);
 			counter.setSingle(0, 0, true);
 			CUDA_RUNTIME(cudaStreamSynchronize(stream_));
-
-
-
-		/*	execKernel((try_block_scan<uint, 64>), 1, 64, false, 256, current_level.gdata());
-
-			for (int i = 0; i < 256; i++)
-				printf("%u, ", current_level.gdata()[i]);
-
-			printf("\n");*/
-
 			current_level.setAll(2, true);
 			getNodeDegree(g);
 			int todo = g.numNodes;
@@ -1120,7 +1147,7 @@ namespace graph
 			level = kcount - 1;
 			bucket_level_end_ = level;
 
-			
+
 			while (todo > 0)
 			{
 
@@ -1130,18 +1157,9 @@ namespace graph
 				//1 bucket fill
 				bucket_scan(nodeDegree, g.numNodes, level, span, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
 
-			/*	int newSpan = span;
-				if (current_q.count.gdata()[0] < 10000)
-					newSpan *= 4;*/
-
-
 				todo -= current_q.count.gdata()[0];
 				if (current_q.count.gdata()[0] > 0)
 				{
-					//printf("Queue = %d\n", current_q.count.gdata()[0]);
-
-					//current_q.count.gdata()[0] = 1100;
-
 					const auto block_size = 64;
 					auto grid_block_size = current_q.count.gdata()[0];
 
@@ -1158,14 +1176,9 @@ namespace graph
 					std::cout << "------------- Level = " << level << " Nodes = " << current_q.count.gdata()[0] << " Counter = " << counter.gdata()[0] << "\n";
 				}
 
-				/*std::cout.imbue(std::locale(""));
-				std::cout <<"Level = "<< level << " Nodes = " << current_q.count.gdata()[0] << " Counter = " << counter.gdata()[0] << "\n";*/
-
-				//printf("Level = %d, Counter = %'ul -------------------------------------------------------------------\n", level, counter.gdata()[0]);
 
 				level += span;
-				/*if (span < 256)
-					span = newSpan;*/
+
 			}
 
 			current_q.free();
@@ -1185,7 +1198,7 @@ namespace graph
 			constexpr int dimBlock = 128; //For edges and nodes
 
 			T level = 0;
-			T span = 1024;
+			T span = 128;
 			T bucket_level_end_ = level;
 
 			//Lets apply queues and buckets
@@ -1200,26 +1213,28 @@ namespace graph
 
 
 			GPUArray <uint64> counter("Temp level Counter", unified, 1, dev_);
-			
+
 			counter.setSingle(0, 0, true);
 			CUDA_RUNTIME(cudaStreamSynchronize(stream_));
-			int todo = g.numEdges;
+			T todo = g.numEdges;
 
-			GPUArray<T> edgePtr("Temp Edge Ptr", unified, g.numEdges + 1, dev_);
-			execKernel((init_edge_ptr<T, 128>), (g.numEdges + 128 - 1) / 128, 128, dev_, false, g, edgePtr.gdata());
-			T total = CUBScanExclusive(edgePtr.gdata(), edgePtr.gdata(), g.numEdges);
-			edgePtr.gdata()[g.numEdges] = total;
-			GPUArray<char> freeSpace("Temp Edge Space", unified, total, dev_);
-			freeSpace.setAll(2, true);
+			GPUArray<T> edgePtr("Temp Edge Ptr", unified, g.numEdges, dev_);
+			//execKernel((init_edge_ptr<T, 128>), (g.numEdges + 128 - 1) / 128, 128, dev_, false, g, edgePtr.gdata());
 
 
+			GPUArray <T> maxDegree("Temp Degree", unified, 1, dev_);
+			maxDegree.setSingle(0, 0, true);
+			execKernel((get_max_degree<T, 128>), (g.numEdges + 128 - 1) / 128, 128, dev_, false, g, edgePtr.gdata(), maxDegree.gdata());
+
+			printf("Max Dgree = %u vs %u\n", maxDegree.gdata()[0], g.numEdges);
 			bucket_edge_scan(edgePtr, g.numEdges, 0, kcount - 2, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
 			todo -= current_q.count.gdata()[0];
 			current_q.count.gdata()[0] = 0;
 			level = kcount - 2;
 			bucket_level_end_ = level;
 
-
+			GPUArray<char> freeSpace;
+			T prev = 0;
 			while (todo > 0)
 			{
 
@@ -1228,11 +1243,13 @@ namespace graph
 
 				//1 bucket fill
 				bucket_edge_scan(edgePtr, g.numEdges, level, span, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
-
-				/*	int newSpan = span;
-					if (current_q.count.gdata()[0] < 10000)
-						newSpan *= 4;*/
-
+				if (current_q.count.gdata()[0] > prev)
+				{
+					printf("Total needed = %u vs %u\n", maxDegree.gdata()[0] * current_q.count.gdata()[0], g.numEdges);
+					freeSpace.freeGPU();
+					freeSpace.initialize("Temp Edge Space", unified, maxDegree.gdata()[0] * current_q.count.gdata()[0], dev_);
+					prev = current_q.count.gdata()[0];
+				}
 
 				todo -= current_q.count.gdata()[0];
 				if (current_q.count.gdata()[0] > 0)
@@ -1250,21 +1267,20 @@ namespace graph
 						kcount,
 						level,
 						current_q.device_queue->gdata()[0],
-						freeSpace.gdata(), edgePtr.gdata());
-
-
-					std::cout.imbue(std::locale(""));
-					std::cout << "------------- Level = " << level << " Edges = " << current_q.count.gdata()[0] << " Counter = " << counter.gdata()[0] << "\n";
+						freeSpace.gdata(), maxDegree.gdata()[0]);
 				}
 
-				/*std::cout.imbue(std::locale(""));
-				std::cout <<"Level = "<< level << " Nodes = " << current_q.count.gdata()[0] << " Counter = " << counter.gdata()[0] << "\n";*/
+				 std::cout.imbue(std::locale(""));
+				 std::cout <<"Level = "<< level << " Nodes = " << current_q.count.gdata()[0] << " Counter = " << counter.gdata()[0] << "\n";
 
 				//printf("Level = %d, Counter = %'ul -------------------------------------------------------------------\n", level, counter.gdata()[0]);
 
 				level += span;
 				/*if (span < 256)
 					span = newSpan;*/
+
+
+
 			}
 
 			current_q.free();

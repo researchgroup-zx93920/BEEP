@@ -1186,10 +1186,10 @@ namespace graph {
                 kernel_binary_block_arrays<T, dimBlock> << <dimGridBlock, dimBlock, 0, TcBase<T>::stream_ >> > (TcBase<T>::count_, *g, ne, edgeOffset);
             else if (kernelType == Queue)
             {
-                GPUArray<T> warpQueue("Warp Queue", AllocationTypeEnum::unified, numEdges, 0);
-                GPUArray<T> blockQueue("Block Queue", AllocationTypeEnum::unified, numEdges, 0);
-                GPUArray<T> warpCount("Warp Count", AllocationTypeEnum::unified, 1, 0);
-                GPUArray<T> blockCount("block Count", AllocationTypeEnum::unified, 1, 0);
+                GPUArray<T> warpQueue("Warp Queue", AllocationTypeEnum::unified, numEdges, TcBase<T>::dev_);
+                GPUArray<T> blockQueue("Block Queue", AllocationTypeEnum::unified, numEdges, TcBase<T>::dev_);
+                GPUArray<T> warpCount("Warp Count", AllocationTypeEnum::unified, 1, TcBase<T>::dev_);
+                GPUArray<T> blockCount("block Count", AllocationTypeEnum::unified, 1, TcBase<T>::dev_);
 
                 /// This will launch a grid that can maximally fill the GPU, on the default stream with kernel arguments
                 
