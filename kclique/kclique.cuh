@@ -1595,7 +1595,7 @@ namespace graph
 		}
 
 		void findKclqueIncremental_node_async(int kcount, COOCSRGraph_d<T>& g,
-			const size_t nodeOffset = 0, const size_t edgeOffset = 0)
+			 ProcessingElementEnum pe, const size_t nodeOffset = 0, const size_t edgeOffset = 0)
 		{
 			CUDA_RUNTIME(cudaSetDevice(dev_));
 
@@ -1655,9 +1655,9 @@ namespace graph
 
 					
 
-					bool warp = true;
+					
 
-					if (warp)
+					if (pe == Warp)
 					{
 
 						const auto block_size = 64;
@@ -1670,7 +1670,7 @@ namespace graph
 							current_q.device_queue->gdata()[0],
 							current_level.gdata(), cpn.gdata());
 					}
-					else
+					else if(pe == Block)
 					{
 						const auto block_size = 64;
 						auto grid_block_size = current_q.count.gdata()[0];
@@ -1712,7 +1712,7 @@ namespace graph
 
 
 		void findKclqueIncremental_edge_async(int kcount, COOCSRGraph_d<T>& g,
-			const size_t nodeOffset = 0, const size_t edgeOffset = 0)
+			 ProcessingElementEnum pe, const size_t nodeOffset = 0, const size_t edgeOffset = 0)
 		{
 			CUDA_RUNTIME(cudaSetDevice(dev_));
 
