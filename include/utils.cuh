@@ -23,11 +23,10 @@
 #include "cuda.h" 
 #include <cuda_runtime_api.h>
 
-#ifdef __VS__
-	#include <cub/cub.cuh>
-#else
-#include "../cub/cub.h"
-#endif
+
+#include "../cub/cub.cuh"
+
+
 
 #define CUDA_RUNTIME(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=false) {

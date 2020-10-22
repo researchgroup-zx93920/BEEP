@@ -295,8 +295,8 @@ namespace graph
         void AdvanceWithMarketFile()
         {
             std::istream& input_stream = market_file;
-            int nodes = 0;
-            int edges = 0;
+            uint64 nodes = 0;
+            uint64 edges = 0;
             bool got_edge_values = false;
             bool symmetric = false;  // whether the graph is undirected
             bool skew = false;  // whether edge values are inverse for symmetric matrices
@@ -345,7 +345,7 @@ namespace graph
             edges = ll_edges;
 
 
-            Log(LogPriorityEnum::debug, "%d nodes, %d directed edges\n", ll_nodes_x, ll_edges);
+            Log(LogPriorityEnum::debug, "%llu nodes, %llu directed edges\n", ll_nodes_x, ll_edges);
         }
 
         /*! \brief attempt to read n edges from the file
@@ -428,8 +428,8 @@ namespace graph
 
             unsigned long long* l;
             l = (unsigned long long*)malloc(3 * n * sizeof(unsigned long long));
-            int elementCounter = 0;
-            for (int i = 0; i < n; i++)
+            uint64 elementCounter = 0;
+            for (uint64 i = 0; i < n; i++)
             {
                 EdgeTy<T> p = ptr[i];
 
@@ -588,7 +588,7 @@ namespace graph
                 }
             } // endfor
 
-            printf("File Edges = %d, Edges found = %d\n", edges, ptr.size());
+            printf("File Edges = %d, Edges found = %llu\n", edges, ptr.size());
             edges = ptr.size();
 
 
@@ -598,6 +598,7 @@ namespace graph
                 });
 
 
+            printf("Done Sorting ...\n");
 
             FILE* writer = fopen(outputPath.c_str(), "wb");
 
@@ -606,21 +607,29 @@ namespace graph
                 return;
             }
 
+            const T shard = 100000;
             unsigned long long* l;
-            l = (unsigned long long*)malloc(3 * edges * sizeof(unsigned long long));
-            unsigned long long elementCounter = 0;
-            for (unsigned long long i = 0; i < edges; i++)
+            l = (unsigned long long*)malloc(3 * shard * sizeof(unsigned long long));
+            printf("Done allocating total memory ...\n");
+
+            unsigned long long blocks = (edges + shard - 1) / shard;
+            for (unsigned long long i = 0; i < blocks; i++)
             {
-                EdgeTy<T> p = ptr[i];
+                unsigned long long startEdge = i * shard;
+                unsigned long long endEdge = (i + 1) * shard < edges ? (i + 1) * shard : edges;
 
-                //in TSV (d, s, w)
-                l[elementCounter++] = p.second;
-                l[elementCounter++] = p.first;
-                l[elementCounter++] = 0;
+                unsigned long long elementCounter = 0;
+                for (unsigned long long j = startEdge; j < endEdge; j++)
+                {
+                    EdgeTy<T> p = ptr[j];
+
+                    l[elementCounter++] = p.second;
+                    l[elementCounter++] = p.first;
+                    l[elementCounter++] = 0;
+                }
+
+                const unsigned long long numWritten = fwrite(l, 8, 3 * (endEdge - startEdge), writer);
             }
-
-
-            const unsigned long long numWritten = fwrite(l, 8, 3 * edges, writer);
 
             fclose(writer);
             free(l);
@@ -658,21 +667,29 @@ namespace graph
                 return;
             }
 
+            const T shard = 100000;
             unsigned long long* l;
-            l = (unsigned long long*)malloc(3 * n * sizeof(unsigned long long));
-            unsigned long long elementCounter = 0;
-            for (unsigned long long i = 0; i < n; i++)
+            l = (unsigned long long*)malloc(3 * shard * sizeof(unsigned long long));
+            printf("Done allocating total memory ...\n");
+
+            unsigned long long blocks = (n + shard - 1) / shard;
+            for (unsigned long long i = 0; i < blocks; i++)
             {
-                EdgeTy<T> p = fileEdges[i];
+                unsigned long long startEdge = i * shard;
+                unsigned long long endEdge = (i + 1) * shard < n ? (i + 1) * shard : n;
 
-                //in TSV (d, s, w)
-                l[elementCounter++] = p.second;
-                l[elementCounter++] = p.first;
-                l[elementCounter++] = 0;
+                unsigned long long elementCounter = 0;
+                for (unsigned long long j = startEdge; j < endEdge; j++)
+                {
+                    EdgeTy<T> p = fileEdges[j];
+
+                    l[elementCounter++] = p.second;
+                    l[elementCounter++] = p.first;
+                    l[elementCounter++] = 0;
+                }
+
+                const unsigned long long numWritten = fwrite(l, 8, 3 * (endEdge - startEdge), writer);
             }
-
-
-            const size_t numWritten = fwrite(l, 8, 3 * n, writer);
 
             fclose(writer);
             free(l);
@@ -843,21 +860,29 @@ namespace graph
                 return;
             }
 
+            const T shard = 100000;
             unsigned long long* l;
-            l = (unsigned long long*)malloc(3 * n * sizeof(unsigned long long));
-            unsigned long long elementCounter = 0;
-            for (unsigned long long i = 0; i < n; i++)
+            l = (unsigned long long*)malloc(3 * shard * sizeof(unsigned long long));
+            printf("Done allocating total memory ...\n");
+
+            unsigned long long blocks = (n + shard - 1) / shard;
+            for (unsigned long long i = 0; i < blocks; i++)
             {
-                EdgeTy<T> p = fileEdges[i];
+                unsigned long long startEdge = i * shard;
+                unsigned long long endEdge = (i + 1) * shard < n ? (i + 1) * shard : n;
 
-                //in TSV (d, s, w)
-                l[elementCounter++] = p.second;
-                l[elementCounter++] = p.first;
-                l[elementCounter++] = 0;
+                unsigned long long elementCounter = 0;
+                for (unsigned long long j = startEdge; j < endEdge; j++)
+                {
+                    EdgeTy<T> p = fileEdges[j];
+
+                    l[elementCounter++] = p.second;
+                    l[elementCounter++] = p.first;
+                    l[elementCounter++] = 0;
+                }
+
+                const unsigned long long numWritten = fwrite(l, 8, 3 * (endEdge - startEdge), writer);
             }
-
-
-            const size_t numWritten = fwrite(l, 8, 3 * n, writer);
 
             fclose(writer);
             free(l);

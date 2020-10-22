@@ -982,6 +982,77 @@ namespace graph
     }
 
 
+
+    template <size_t WARPS_PER_BLOCK, typename T, bool reduce = true>
+    __device__ __forceinline__ uint64 warp_sorted_count_and_set_binary(uint64 startCount, const T* const A, //!< [in] array A
+        const size_t aSz, //!< [in] the number of elements in A
+        T* B, //!< [in] array B
+        T bSz,  //!< [in] the number of elements in B
+
+        bool AisMaster,
+        T startIndex,
+        char* current_level,
+        T new_level,
+        T clique_number
+    )
+    {
+        const int warpIdx = threadIdx.x / 32; // which warp in thread block
+        const int laneIdx = threadIdx.x % 32; // which thread in warp
+
+        uint64 threadCount = startCount;
+        T lastIndex = 0;
+
+        // cover entirety of A with warp
+        for (T i = laneIdx; i < aSz; i += 32)
+        {
+            // one element of A per thread, just search for A into B
+            const T searchVal = A[i];
+            const T leftValue = B[lastIndex];
+            bool a = !AisMaster || (AisMaster && current_level[i] == new_level - 1);
+
+            if (searchVal >= leftValue && a)
+            {
+                const T lb = graph::binary_search<T>(B, lastIndex, bSz, searchVal);
+                bool b = AisMaster || (!AisMaster && current_level[lb] == new_level - 1);
+                if (lb < bSz && b)
+                {
+                    if (B[lb] == searchVal)
+                    {
+                        //printf("At %u, SearchVal = %u\n", lb, searchVal);
+                        threadCount++;
+                        //////////////////////////////Device function ///////////////////////
+                        if (new_level < clique_number)
+                        {
+                            T level_index = (AisMaster ? i : lb);
+                            current_level[level_index] = new_level;
+                        }
+                        /////////////////////////////////////////////////////////////////////
+                    }
+
+
+                }
+
+                lastIndex = lb;
+            }
+
+            unsigned int writemask_deq = __activemask();
+            lastIndex = __shfl_sync(writemask_deq, lastIndex, 31);
+        }
+
+        if (reduce) {
+            // give lane 0 the total count discovered by the warp
+            typedef cub::WarpReduce<uint64> WarpReduce;
+            __shared__ typename WarpReduce::TempStorage tempStorage[WARPS_PER_BLOCK];
+            uint64 aggregate = WarpReduce(tempStorage[warpIdx]).Sum(threadCount);
+            return aggregate;
+        }
+        else
+        {
+            return threadCount;
+        }
+    }
+
+
     ///////////////////////////////////////SERIAL INTERSECTION //////////////////////////////////////////////
     template <typename T>
     __host__ __device__ static size_t serial_sorted_count_linear(T min, const T* const A, //!< beginning of a

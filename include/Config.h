@@ -20,6 +20,8 @@ struct Config {
     bool verbosity;
     int k;
     bool sortEdges;
+    ProcessBy processBy;
+
 };
 
 static MAINTASK parseMainTask(const char* s)
@@ -112,6 +114,28 @@ static const char* asString(OrientGraphByEnum mt) {
 }
 
 
+static ProcessBy parseProcessBy(const char* s)
+{
+    if (strcmp(s, "node") == 0)
+        return ByNode;
+    if (strcmp(s, "edge") == 0)
+        return ByEdge;
+
+    fprintf(stderr, "Unrecognized -p option (Process By Node or Edge): %s\n", s);
+    exit(0);
+
+}
+
+static const char* asString(ProcessBy pb) {
+    switch (pb) {
+    case ByNode:            return "node";
+    case ByEdge:            return "edge";
+    default:
+        fprintf(stderr, "Unrecognized process by\n");
+        exit(0);
+    }
+}
+
 static AllocationTypeEnum parseAllocation(const char* s)
 {
     if (strcmp(s, "unified"))
@@ -141,6 +165,7 @@ static void usage() {
         "\n    -o <orientGraph>       How to orient undirected to directed graph (default = full)"
         "\n    -a <allocation>        Data allocation on GPU (default = unified)"
         "\n    -s <allocation>        Sort Read Edges by src then dst (default = false)"
+        "\n    -p <processBy>        Process by node or edge (default = node)"
         "\n    -h                       Help"
         "\n"
         "\n");
@@ -156,14 +181,15 @@ static Config parseArgs(int argc, char** argv) {
     config.printStats = false;
     config.orient = Degree;
     config.allocation = unified;
-    config.k = 5;
+    config.k =6;
     config.sortEdges = false;
+    config.processBy = ByNode;
 #ifndef __VS__
     int opt;
 
     printf("parsing configuration .... \n");
 
-    while ((opt = getopt(argc, argv, "g:r:d:m:x:o:a:k:h:v:s")) >= 0) {
+    while ((opt = getopt(argc, argv, "g:r:d:m:x:o:a:k:h:v:s:p")) >= 0) {
         switch (opt) {
         case 'g': config.srcGraph = optarg;                                break;
         case 'r': config.dstGraph = optarg;                                break;
@@ -175,6 +201,7 @@ static Config parseArgs(int argc, char** argv) {
         case 'v': config.verbosity = atoi(optarg);                          break;
         case 'k': config.k = atoi(optarg);                                  break;
         case 's': config.sortEdges = true;                                  break;
+        case 'p': config.processBy = parseProcessBy(optarg);                break;
         case 'h': usage(); exit(0);                                         break;
         default: fprintf(stderr, "\nUnrecognized option!\n");
             usage(); exit(0);
@@ -191,6 +218,6 @@ static void printConfig(Config config)
     printf("    Device Id = %u\n", config.deviceId);
     printf("    Main Task = %s\n", asString(config.mt));
     printf("    Graph Orientation = %s\n", asString(config.orient));
-
+    printf("    Process By = %s\n", asString(config.processBy));
     printf("    k: %u\n", config.k);
 }

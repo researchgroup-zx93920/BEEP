@@ -411,7 +411,10 @@ int main(int argc, char** argv) {
 
 		graph::SingleGPU_Kclique<uint> mohaclique(config.deviceId);
 		Timer t;
-		mohaclique.findKclqueIncremental_edge_async(config.k, *gd, 0, 0);
+		if (config.processBy == ByNode)
+			mohaclique.findKclqueIncremental_node_async(config.k, *gd, 0, 0);
+		else if(config.processBy == ByEdge)
+			mohaclique.findKclqueIncremental_edge_async(config.k, *gd, 0, 0);
 		mohaclique.sync();
 		double time = t.elapsed();
 		Log(info, "count time %f s", time);
