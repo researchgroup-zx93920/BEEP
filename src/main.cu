@@ -260,7 +260,7 @@ int main(int argc, char** argv) {
 
 	if (config.mt == TC)
 	{
-		CUDA_RUNTIME(cudaSetDevice(config.deviceId));
+		/*CUDA_RUNTIME(cudaSetDevice(config.deviceId));
 		graph::TiledCOOCSRGraph<uint>* gtiled;
 		coo2tiledcoocsrOnDevice(g, 16, gtiled, unified);
 		unsigned int numThreadsPerBlock = 128;
@@ -289,7 +289,7 @@ int main(int argc, char** argv) {
 		cudaDeviceSynchronize();
 		cudaGetLastError();
 
-		printf("Tiled Count = %lu, time = %f\n", *c.gdata(), ms / 1e3);
+		printf("Tiled Count = %lu, time = %f\n", *c.gdata(), ms / 1e3);*/
 
 
 		//Count traingles binary-search: Thread or Warp

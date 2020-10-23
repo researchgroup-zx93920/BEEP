@@ -132,7 +132,7 @@ namespace graph
         {
 
             assert(ptr != nullptr);
-            assert(fp_ != nullptr);
+           
             std::istream& input_stream = market_file;
             size_t i = 0;
             bool succeed = true;
@@ -252,10 +252,16 @@ namespace graph
             if (endswith(path, ".bel")) {
                 type_ = FileType::BEL;
                 fp_ = fopen(path_.c_str(), "rb");
+                if (nullptr == fp_) {
+                    Log(LogPriorityEnum::error, "unable to open \"{}\"", path_);
+                }
             }
             else if (endswith(path, ".tsv")) {
                 type_ = FileType::TSV;
                 fp_ = fopen(path_.c_str(), "r");
+                if (nullptr == fp_) {
+                    Log(LogPriorityEnum::error, "unable to open \"{}\"", path_);
+                }
 
             }
             else if (endswith(path, ".mtx"))
@@ -269,9 +275,7 @@ namespace graph
                 exit(-1);
             }
 
-            if (nullptr == fp_) {
-                Log(LogPriorityEnum::error, "unable to open \"{}\"", path_);
-            }
+          
         }
 
         ~EdgeListFile() {

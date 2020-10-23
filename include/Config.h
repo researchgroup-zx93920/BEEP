@@ -208,17 +208,18 @@ static void usage() {
 
 static Config parseArgs(int argc, char** argv) {
     Config config;
-    config.srcGraph = "D:\\graphs\\as-Skitter2.bel";
+    config.srcGraph = "D:\\graphs\\cit-Patents.mtx";
     config.dstGraph = "D:\\graphs\\as-Skitter2.bel";
     config.deviceId = 0;
-    config.mt = KCLIQUE;
-    config.printStats = false;
+    config.mt = TC;
+    config.printStats = true;
     config.orient = Degree;
     config.allocation = unified;
     config.k =6;
-    config.sortEdges = false;
+    config.sortEdges = true;;
     config.processBy = ByNode;
     config.processElement = Block;
+    
 #ifndef __VS__
     int opt;
 

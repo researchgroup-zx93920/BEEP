@@ -948,10 +948,11 @@ namespace graph
             if (searchVal >= leftValue && a)
             {
                 const T lb = graph::binary_search<T>(B, lastIndex, bSz, searchVal);
-                bool b = AisMaster || (!AisMaster && current_level[lb] == new_level - 1);
-                if (lb < bSz && b)
+             
+                if (lb < bSz)
                 {
-                    if (B[lb] == searchVal)
+                    bool b = AisMaster || (!AisMaster && current_level[lb] == new_level - 1);
+                    if (B[lb] == searchVal && b)
                     {
                         threadCount++;
 
@@ -1013,10 +1014,11 @@ namespace graph
             if (searchVal >= leftValue && a)
             {
                 const T lb = graph::binary_search<T>(B, lastIndex, bSz, searchVal);
-                bool b = AisMaster || (!AisMaster && current_level[lb] == new_level - 1);
-                if (lb < bSz && b)
+              
+                if (lb < bSz)
                 {
-                    if (B[lb] == searchVal)
+                    bool b = AisMaster || (!AisMaster && current_level[lb] == new_level - 1);
+                    if (B[lb] == searchVal && b)
                     {
                         //printf("At %u, SearchVal = %u\n", lb, searchVal);
                         threadCount++;
