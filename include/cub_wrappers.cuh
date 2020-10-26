@@ -4,12 +4,17 @@
 
 using namespace std;
 
+
+
+
+
 template<typename InputType, typename OutputType>
 OutputType CUBScanExclusive(
     InputType* input,
     OutputType* output,
     const int count,
-    cudaStream_t 	stream = 0)
+    cudaStream_t 	stream = 0,
+    AllocationTypeEnum at = unified)
 {
     float singleKernelTime, elaspedTime = 0;
     cudaEvent_t start, end;
@@ -17,7 +22,7 @@ OutputType CUBScanExclusive(
     size_t temp_storage_bytes = 0;
 
     /*record the last input item in case it is an in-place scan*/
-    auto last_input = input[count - 1];
+    auto last_input = getVal<InputType>(input, count - 1, at);// input[count - 1];
 
     CUDA_RUNTIME(cudaEventCreate(&start));
     CUDA_RUNTIME(cudaEventCreate(&end));
@@ -52,7 +57,7 @@ OutputType CUBScanExclusive(
 
     CUDA_RUNTIME(cudaFree(d_temp_storage));
 
-    return output[count - 1] + (OutputType)last_input;
+    return getVal<OutputType>(output, count - 1, at) + (OutputType)last_input;
 }
 
 template<typename DataType, typename SumType, typename CntType>

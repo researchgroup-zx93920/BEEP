@@ -15,8 +15,6 @@ __global__ void setelements(T* arr, uint64 count, T val)
 
 namespace graph
 {
-
-	
 	template<class T>
 	class GPUArray 
 	{
@@ -192,7 +190,7 @@ namespace graph
 			}
 		}
 
-		void setSingle(int index, T val, bool sync)
+		void setSingle(uint64 index, T val, bool sync)
 		{
 			if (N < 1)
 				return;
@@ -216,6 +214,18 @@ namespace graph
 				if (sync)
 					CUDA_RUNTIME(cudaStreamSynchronize(_stream));
 			}
+		}
+
+
+		T getSingle(uint64 index)
+		{
+			CUDA_RUNTIME(cudaSetDevice(_deviceId));
+			T val = 0;
+			if (_at == AllocationTypeEnum::unified)
+				return (gpu_data[index]);
+			
+			CUDA_RUNTIME(cudaMemcpy(&val, &(gpu_data[index]), sizeof(T), cudaMemcpyKind::cudaMemcpyDeviceToHost));
+			return val;
 		}
 
 		T* copytocpu(int startIndex, uint count=0, bool newAlloc=false)
@@ -244,7 +254,12 @@ namespace graph
 			if (_at == AllocationTypeEnum::unified)
 			{
 				CUDA_RUNTIME(cudaSetDevice(_deviceId));
-				//CUDA_RUNTIME(cudaMemPrefetchAsync (gpu_data, N*sizeof(T), _deviceId, _stream));
+
+		#ifndef __VS__
+				CUDA_RUNTIME(cudaMemPrefetchAsync (gpu_data, N*sizeof(T), _deviceId, _stream));
+		#endif // !__VS__
+
+				
 				if (sync)
 					CUDA_RUNTIME(cudaStreamSynchronize(_stream));
 			}

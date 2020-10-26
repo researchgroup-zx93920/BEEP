@@ -1159,7 +1159,7 @@ namespace graph {
 
             CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
             const size_t dimBlock = 256;
-            const size_t ne = numEdges;
+            const uint64 ne = numEdges;
 
             CUDA_RUNTIME(cudaMemset(TcBase<T>::count_, 0, sizeof(*TcBase<T>::count_)));
 

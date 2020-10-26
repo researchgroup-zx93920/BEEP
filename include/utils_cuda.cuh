@@ -174,3 +174,15 @@ struct CUDAContext {
         return conc_blocks_per_SM;
     }
 };
+
+template<typename T>
+T getVal(T* arr, T index, AllocationTypeEnum at)
+{
+
+    if (at == AllocationTypeEnum::unified)
+        return (arr[index]);
+
+    T val = 0;
+    CUDA_RUNTIME(cudaMemcpy(&val, &(arr[index]), sizeof(T), cudaMemcpyKind::cudaMemcpyDeviceToHost));
+    return val;
+}

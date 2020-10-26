@@ -214,7 +214,7 @@ static Config parseArgs(int argc, char** argv) {
     config.mt = TC;
     config.printStats = true;
     config.orient = Degree;
-    config.allocation = unified;
+    config.allocation = gpu;
     config.k =6;
     config.sortEdges = true;;
     config.processBy = ByNode;

@@ -42,7 +42,8 @@
 using namespace std;
 //#define TriListConstruct
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv) 
+{
 
 	//CUDA_RUNTIME(cudaDeviceReset());
 	Config config = parseArgs(argc, argv);
@@ -159,7 +160,7 @@ int main(int argc, char** argv) {
 
 	///Now we need to orient the graph
 	graph::COOCSRGraph_d<uint>* gd;
-	to_csrcoo_device(g, gd); //got to device !!
+	to_csrcoo_device(g, gd, config.allocation); //got to device !!
 	graph::SingleGPU_Kcore<uint, PeelType> mohacore(config.deviceId);
 	if (config.orient == Degree || config.orient == Degeneracy)
 	{
@@ -196,7 +197,7 @@ int main(int argc, char** argv) {
 
 
 		execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), new_rowPtr.gdata());
-		uint total = CUBScanExclusive<uint, uint>(new_rowPtr.gdata(), new_rowPtr.gdata(), n);
+		uint total = CUBScanExclusive<uint, uint>(new_rowPtr.gdata(), new_rowPtr.gdata(), n, 0, config.allocation);
 		new_rowPtr.gdata()[n] = total;
 		//assert(total == new_edge_num * 2);
 		cudaDeviceSynchronize();
@@ -213,7 +214,7 @@ int main(int argc, char** argv) {
 		g.rowPtr = &new_rowPtr;
 		g.rowInd = &rowInd_half;
 		g.colInd = &colInd_half;
-		to_csrcoo_device(g, gd); //got to device !!
+		to_csrcoo_device(g, gd, config.allocation); //got to device !!
 
 		double time_init = t_init.elapsed();
 		Log(info, "Create EID (by malmasri): %f s", time_init);
@@ -307,7 +308,7 @@ int main(int argc, char** argv) {
 
 		graph::BmpGpu<uint> bmp(config.deviceId);
 		bmp.InitBMP(*gd);
-		bmp.bmpConstruct(*gd);
+		bmp.bmpConstruct(*gd, config.allocation);
 
 		while (st < m)
 		{
@@ -351,7 +352,7 @@ int main(int argc, char** argv) {
 
 
 			uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", config.deviceId, tcBE, gd, ee, st, ProcessingElementEnum::Warp, 0);
-			CountTrianglesHash<uint>(config.deviceId,divideConstant, tchash, gd, ee, 0, ProcessingElementEnum::Warp, 0);
+			CountTrianglesHash<uint>(config.deviceId,divideConstant, tchash, g, gd, ee, 0, ProcessingElementEnum::Warp, 0);
 
 			uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", config.deviceId, tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
 

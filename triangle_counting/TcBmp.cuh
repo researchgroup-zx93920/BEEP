@@ -668,7 +668,7 @@ namespace graph {
   
 
 
-        void bmpConstruct(graph::COOCSRGraph_d<T> g)
+        void bmpConstruct(graph::COOCSRGraph_d<T> g, AllocationTypeEnum at)
         {
             
             Timer t;
@@ -686,7 +686,7 @@ namespace graph {
                 g.rowPtr, g.colInd, n, bmp_offs.gdata());
 
 
-            auto word_num = CUBScanExclusive<T, T>(bmp_offs.gdata(), bmp_offs.gdata(), n);
+            auto word_num = CUBScanExclusive<T, T>(bmp_offs.gdata(), bmp_offs.gdata(), n, 0, unified);
             if (word_num > 0)
             {
                 bmp_offs.setSingle(n, word_num,true); //unified !!
@@ -768,12 +768,12 @@ namespace graph {
             CUDAContext context;
             conc_blocks_per_SM = context.GetConCBlocks(block_size);
 
+
+            Log<false>(LogPriorityEnum::info, "Kernel Time= ");
             Timer t;
             const T elem_bits = sizeof(T) * 8; /*#bits in a bitmap element*/
             const T num_words_bmp = (n + elem_bits - 1) / elem_bits;
             const T num_word_bmp_idx = (num_words_bmp + BITMAP_SCALE - 1) / BITMAP_SCALE;
-
-            Log<false>(LogPriorityEnum::info, "Kernel Time= ");
             execKernelDynamicAllocation(bmp_bsr_count_kernel, n, t_dimension,
                 num_word_bmp_idx * sizeof(uint32_t), deviceId,true,
                 g.rowPtr, g.colInd, d_bitmaps.gdata(), d_bitmap_states.gdata(),
@@ -785,7 +785,6 @@ namespace graph {
             d_bitmaps.freeGPU();
             d_bitmap_states.freeGPU();
             d_vertex_count.freeGPU();
-
 
            printf("s Count = %u\n", *count);
 

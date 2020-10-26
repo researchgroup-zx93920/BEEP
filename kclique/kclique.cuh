@@ -556,6 +556,7 @@ kernel_block_level_kclique_count1(
 
 
 template <typename T, uint BLOCK_DIM_X>
+__launch_bounds__(BLOCK_DIM_X, 1)
 __global__ void
 kernel_warp_level_kclique_count(
 	uint64* counter,
@@ -576,7 +577,7 @@ kernel_warp_level_kclique_count(
 	__shared__ T level_index_all[warpsPerBlock][10];
 	__shared__ T level_count_all[warpsPerBlock][10];
 	__shared__ T level_prev_index_all[warpsPerBlock][10];
-	__shared__ char current_level_s_all[warpsPerBlock][32 * 8];
+	//__shared__ char current_level_s_all[warpsPerBlock][32 * 8];
 	__shared__ T current_node_index_all[warpsPerBlock];
 	__shared__ uint64 clique_count_all[warpsPerBlock];
 	__shared__ char l_all[warpsPerBlock];
@@ -585,7 +586,7 @@ kernel_warp_level_kclique_count(
 	T* level_index = &level_index_all[warpIdx][0];
 	T* level_count = &level_count_all[warpIdx][0];
 	T* level_prev_index = &level_prev_index_all[warpIdx][0];
-	char* current_level_s = &current_level_s_all[warpIdx][0];
+	//char* current_level_s = &current_level_s_all[warpIdx][0];
 	T* current_node_index = &current_node_index_all[warpIdx];
 	uint64* clique_count = &clique_count_all[warpIdx];
 	char* l = &l_all[warpIdx];
@@ -607,18 +608,18 @@ kernel_warp_level_kclique_count(
 		}
 
 		char* cl = &current_level[srcStart];
-		if (srcLen <= 8 * 32)
-		{
-			cl = current_level_s;
-			current_level_s[lx] = 2;
-			current_level_s[lx + 32] = 2;
-			current_level_s[lx + 32 * 2] = 2;
-			current_level_s[lx + 32 * 3] = 2;
-			current_level_s[lx + 32 * 4] = 2;
-			current_level_s[lx + 32 * 5] = 2;
-			current_level_s[lx + 32 * 6] = 2;
-			current_level_s[lx + 32 * 7] = 2;
-		}
+		// if (srcLen <= 8 * 32)
+		// {
+		// 	cl = current_level_s;
+		// 	current_level_s[lx] = 2;
+		// 	current_level_s[lx + 32] = 2;
+		// 	current_level_s[lx + 32 * 2] = 2;
+		// 	current_level_s[lx + 32 * 3] = 2;
+		// 	current_level_s[lx + 32 * 4] = 2;
+		// 	current_level_s[lx + 32 * 5] = 2;
+		// 	current_level_s[lx + 32 * 6] = 2;
+		// 	current_level_s[lx + 32 * 7] = 2;
+		// }
 
 		if (lx == 0)
 		{
@@ -755,6 +756,7 @@ kernel_warp_level_kclique_count(
 }
 
 template <typename T, uint BLOCK_DIM_X>
+__launch_bounds__(BLOCK_DIM_X, 1)
 __global__ void
 kernel_warp_sync_level_kclique_count(
 	uint64* counter,
@@ -775,12 +777,12 @@ kernel_warp_sync_level_kclique_count(
 	//__shared__ T level_index_all[warpsPerBlock][5];
 	//__shared__ T level_count_all[warpsPerBlock][5];
 	//__shared__ T level_prev_index_all[warpsPerBlock][5];
-	__shared__ char current_level_s_all[warpsPerBlock][32 * 4];
+	//__shared__ char current_level_s_all[warpsPerBlock][32 * 4];
 
 	T level_index[5];
 	T level_count[5];
 	T level_prev_index[5];
-	char* current_level_s = &current_level_s_all[warpIdx][0];
+	//char* current_level_s = &current_level_s_all[warpIdx][0];
 	T current_node_index;
 	uint64 clique_count;
 	char l;
@@ -910,6 +912,7 @@ kernel_warp_sync_level_kclique_count(
 
 
 template <typename T, uint BLOCK_DIM_X>
+__launch_bounds__(BLOCK_DIM_X, 1)
 __global__ void
 kernel_block_level_kclique_count(
 	uint64* counter,
@@ -921,10 +924,6 @@ kernel_block_level_kclique_count(
 	uint64* cpn
 )
 {
-	T threadData = 0;
-	T aggreagtedData = 0;
-	T accumAggData = 0;
-
 	auto tid = threadIdx.x;
 	const T gbx = blockIdx.x;
 
@@ -932,7 +931,7 @@ kernel_block_level_kclique_count(
 	__shared__ T level_count[10];
 	__shared__ T level_prev_index[10];
 
-	__shared__ char current_level_s[BLOCK_DIM_X * 8];
+	//__shared__ char current_level_s[BLOCK_DIM_X * 8];
 
 	__shared__ T current_node_index;
 	__shared__ uint64 clique_count;
@@ -958,29 +957,29 @@ kernel_block_level_kclique_count(
 		}
 
 		char* cl = &current_level[srcStart];
-		if (srcLen > 8 * BLOCK_DIM_X)
-		{
-			// for (unsigned long long k = 0; k < srcLenBlocks; k++)
-			// {
-			// 	unsigned long long index = k * BLOCK_DIM_X + tid;
-			// 	if (index < srcLen)
-			// 		cl[index] = 2;
-			// }
-		}
-		else
-		{
-			cl = current_level_s;
+		// if (srcLen > 8 * BLOCK_DIM_X)
+		// {
+		// 	// for (unsigned long long k = 0; k < srcLenBlocks; k++)
+		// 	// {
+		// 	// 	unsigned long long index = k * BLOCK_DIM_X + tid;
+		// 	// 	if (index < srcLen)
+		// 	// 		cl[index] = 2;
+		// 	// }
+		// }
+		// else
+		// {
+		// 	cl = current_level_s;
 
-			current_level_s[tid] = 2;
-			current_level_s[tid + BLOCK_DIM_X] = 2;
-			current_level_s[tid + BLOCK_DIM_X * 2] = 2;
-			current_level_s[tid + BLOCK_DIM_X * 3] = 2;
-			current_level_s[tid + BLOCK_DIM_X * 4] = 2;
-			current_level_s[tid + BLOCK_DIM_X * 5] = 2;
-			current_level_s[tid + BLOCK_DIM_X * 6] = 2;
-			current_level_s[tid + BLOCK_DIM_X * 7] = 2;
+		// 	current_level_s[tid] = 2;
+		// 	current_level_s[tid + BLOCK_DIM_X] = 2;
+		// 	current_level_s[tid + BLOCK_DIM_X * 2] = 2;
+		// 	current_level_s[tid + BLOCK_DIM_X * 3] = 2;
+		// 	current_level_s[tid + BLOCK_DIM_X * 4] = 2;
+		// 	current_level_s[tid + BLOCK_DIM_X * 5] = 2;
+		// 	current_level_s[tid + BLOCK_DIM_X * 6] = 2;
+		// 	current_level_s[tid + BLOCK_DIM_X * 7] = 2;
 
-		}
+		// }
 
 		__syncthreads();
 
@@ -1024,11 +1023,6 @@ kernel_block_level_kclique_count(
 
 				__syncthreads();
 			}
-
-
-
-
-
 
 
 			//__syncthreads();
@@ -1749,7 +1743,7 @@ namespace graph
 			CUDA_RUNTIME(cudaSetDevice(dev_));
 
 			T level = 0;
-			T span = 32;
+			T span = 1024;
 			T bucket_level_end_ = level;
 
 			//Lets apply queues and buckets
@@ -1782,7 +1776,8 @@ namespace graph
 			level = kcount - 1;
 			bucket_level_end_ = level;
 
-
+			//level = 32;
+			//bucket_level_end_ = level;
 			while (todo > 0)
 			{
 
@@ -1803,15 +1798,12 @@ namespace graph
 					//current_q.count.gdata()[0] = 1;
 
 
-
-
-
 					if (pe == Warp)
 					{
 
 						const auto block_size = 64;
 						auto grid_block_size = (32 * current_q.count.gdata()[0] + block_size - 1) / block_size;
-						execKernel((kernel_warp_sync_level_kclique_count<T, block_size>), grid_block_size, block_size, dev_, false,
+						execKernel((kernel_warp_level_kclique_count<T, block_size>), grid_block_size, block_size, dev_, false,
 							counter.gdata(),
 							g,
 							kcount,
@@ -1831,13 +1823,7 @@ namespace graph
 							current_q.device_queue->gdata()[0],
 							current_level.gdata(), cpn.gdata());
 					}
-					// execKernel((kernel_block_level_kclique_count_check<T, block_size>), grid_block_size, block_size, dev_, false,
-					// 	counter.gdata(),
-					// 	g,
-					// 	kcount,
-					// 	level,
-					// 	current_q.device_queue->gdata()[0],
-					// 	current_level.gdata(), cpn.gdata());
+
 
 
 					std::cout.imbue(std::locale(""));
@@ -1845,9 +1831,9 @@ namespace graph
 				}
 
 
-				level += span;
+				//level += span;
 
-
+				break;
 			}
 
 			current_q.free();

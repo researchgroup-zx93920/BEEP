@@ -323,7 +323,7 @@ uint64 CountTriangles(std::string message, int deviceId, graph::TcBase<T>* tc, g
 }
 
 template<typename T>
-void CountTrianglesHash(int deviceId, const int divideConstant, graph::TcBase<T>* tc, graph::COOCSRGraph_d<T>* g,
+void CountTrianglesHash(int deviceId, const int divideConstant, graph::TcBase<T>* tc, graph::COOCSRGraph<T> gH, graph::COOCSRGraph_d<T>* g,
 	const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
 {
 
@@ -354,10 +354,10 @@ void CountTrianglesHash(int deviceId, const int divideConstant, graph::TcBase<T>
 
 
 	//Mode data to hash tables
-	for (int i = 0; i < g->numNodes; i++)
+	for (int i = 0; i < gH.numNodes; i++)
 	{
-		const uint s = g->rowPtr[i];
-		const uint e = g->rowPtr[i + 1];
+		const uint s = gH.rowPtr->cdata()[i];
+		const uint e = gH.rowPtr->cdata()[i + 1];
 
 		uint bin_start = htp.cdata()[i];
 		uint bin_end = htp.cdata()[i + 1];
@@ -369,14 +369,14 @@ void CountTrianglesHash(int deviceId, const int divideConstant, graph::TcBase<T>
 				binCounter[n] = 0;
 			for (int j = s; j < e; j++)
 			{
-				uint val = g->colInd[j];
+				uint val = gH.colInd->cdata()[j];
 				uint bin = hash1(val, numBins);
 				uint elementBinStart = hts.cdata()[bin_start + bin];
 				uint nextBinStart = hts.cdata()[bin_start + bin + 1];
 				htd.cdata()[s + elementBinStart + binCounter[bin]] = val;
 
 				if (s + elementBinStart + binCounter[bin] > e)
-					printf("Shit\n");
+					printf("NO\n");
 
 				binCounter[bin]++;
 			}
@@ -385,7 +385,7 @@ void CountTrianglesHash(int deviceId, const int divideConstant, graph::TcBase<T>
 		{
 			for (int j = s; j < e; j++)
 			{
-				htd.cdata()[j] = g->colInd[j];
+				htd.cdata()[j] = gH.colInd->cdata()[j];
 			}
 		}
 	}
