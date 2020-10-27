@@ -160,7 +160,7 @@ int main(int argc, char** argv)
 
 	///Now we need to orient the graph
 	graph::COOCSRGraph_d<uint>* gd;
-	to_csrcoo_device(g, gd, config.allocation); //got to device !!
+	to_csrcoo_device(g, gd, config.deviceId, config.allocation); //got to device !!
 	graph::SingleGPU_Kcore<uint, PeelType> mohacore(config.deviceId);
 	if (config.orient == Degree || config.orient == Degeneracy)
 	{
@@ -214,7 +214,7 @@ int main(int argc, char** argv)
 		g.rowPtr = &new_rowPtr;
 		g.rowInd = &rowInd_half;
 		g.colInd = &colInd_half;
-		to_csrcoo_device(g, gd, config.allocation); //got to device !!
+		to_csrcoo_device(g, gd, config.deviceId, config.allocation); //got to device !!
 
 		double time_init = t_init.elapsed();
 		Log(info, "Create EID (by malmasri): %f s", time_init);
@@ -393,7 +393,7 @@ int main(int argc, char** argv)
 	if (config.mt == KCORE)
 	{
 		graph::COOCSRGraph_d<uint>* gd;
-		to_csrcoo_device(g, gd); //got to device !!
+		to_csrcoo_device(g, gd, config.deviceId, config.allocation); //got to device !!
 		cudaDeviceSynchronize();
 
 		graph::SingleGPU_Kcore<uint, PeelType> mohacore(config.deviceId);
@@ -428,7 +428,7 @@ int main(int argc, char** argv)
 	{
 		//The problem with Ktruss that it physically changes the graph structure due to stream compaction !!
 		graph::COOCSRGraph_d<uint>* gd;
-		to_csrcoo_device(g, gd); //got to device !!
+		to_csrcoo_device(g, gd, config.deviceId, unified); //got to device !!
 
 	//#define VLDB2020
 #ifdef VLDB2020

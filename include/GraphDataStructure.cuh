@@ -27,7 +27,7 @@ namespace graph
     };
 
     template<typename T>
-   void to_csrcoo_device(COOCSRGraph<T> g, COOCSRGraph_d<T>*& graph,AllocationTypeEnum at=unified) {
+   void to_csrcoo_device(COOCSRGraph<T> g, COOCSRGraph_d<T>*& graph, int dev, AllocationTypeEnum at=unified) {
         graph = (COOCSRGraph_d<T>*)malloc(sizeof(COOCSRGraph_d<T>));
         graph->numNodes = g.numNodes;
         graph->numEdges = g.numEdges;
@@ -35,15 +35,15 @@ namespace graph
 
         if (at == AllocationTypeEnum::unified)
         {
-            g.rowPtr->switch_to_unified(0, g.numNodes + 1);
-            g.rowInd->switch_to_unified(0, g.numEdges);
-            g.colInd->switch_to_unified(0, g.numEdges);
+            g.rowPtr->switch_to_unified(dev, g.numNodes + 1);
+            g.rowInd->switch_to_unified(dev, g.numEdges);
+            g.colInd->switch_to_unified(dev, g.numEdges);
         }
         else if (at == AllocationTypeEnum::gpu)
         {
-            g.rowPtr->switch_to_gpu(0, g.numNodes + 1);
-            g.rowInd->switch_to_gpu(0, g.numEdges);
-            g.colInd->switch_to_gpu(0, g.numEdges);
+            g.rowPtr->switch_to_gpu(dev, g.numNodes + 1);
+            g.rowInd->switch_to_gpu(dev, g.numEdges);
+            g.colInd->switch_to_gpu(dev, g.numEdges);
         }
 
         cudaDeviceSynchronize();

@@ -146,6 +146,19 @@ static const char* asString(ProcessingElementEnum mt) {
 }
 
 
+static const char* asString(AllocationTypeEnum mt) {
+    switch (mt) {
+    case gpu:            return "gpu";
+    case unified:            return "unified";
+    
+    default:
+        fprintf(stderr, "Unrecognized allocation (cpu, gpu, unified)\n");
+        exit(0);
+    }
+}
+
+
+
 
 static ProcessBy parseProcessBy(const char* s)
 {
@@ -253,6 +266,7 @@ static void printConfig(Config config)
     printf("    Graph: %s\n", config.srcGraph);
     printf("    DST Graph: %s\n", config.dstGraph);
     printf("    Device Id = %u\n", config.deviceId);
+    printf("    Allocation = %s\n", asString(config.allocation));
     printf("    Main Task = %s\n", asString(config.mt));
     printf("    Graph Orientation = %s\n", asString(config.orient));
     printf("    Process By = %s\n", asString(config.processBy));
