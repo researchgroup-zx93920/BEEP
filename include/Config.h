@@ -184,11 +184,11 @@ static const char* asString(ProcessBy pb) {
 
 static AllocationTypeEnum parseAllocation(const char* s)
 {
-    if (strcmp(s, "unified"))
+    if (strcmp(s, "unified") == 0)
         return unified;
-    if (strcmp(s, "gpu"))
+    if (strcmp(s, "gpu") == 0)
         return gpu;
-    if (strcmp(s, "cpu"))
+    if (strcmp(s, "cpu") == 0)
         return cpuonly;
 
 
@@ -221,11 +221,11 @@ static void usage() {
 
 static Config parseArgs(int argc, char** argv) {
     Config config;
-    config.srcGraph = "D:\\graphs\\cit-Patents.mtx";
+    config.srcGraph = "D:\\graphs\\as-Skitter2.bel";
     config.dstGraph = "D:\\graphs\\as-Skitter2.bel";
     config.deviceId = 0;
-    config.mt = TC;
-    config.printStats = true;
+    config.mt = KCLIQUE;
+    config.printStats = false;
     config.orient = Degree;
     config.allocation = gpu;
     config.k =6;

@@ -179,7 +179,7 @@ void MatrixStats(T nnz, T nr, T nc, T* csrRowPointers, T* csrColumns)
 template<typename T>
 void PrintMtarixStruct(T nnz, T nr, T nc, T* csrRowPointer, T* csrColumns)
 {
-	const int resolution = 20;
+	const int resolution = 10;
 	float st[resolution][resolution];
 	for (uint64 i = 0; i < resolution; i++)
 		for (uint64 j = 0; j < resolution; j++)

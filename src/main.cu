@@ -342,21 +342,21 @@ int main(int argc, char** argv)
 
 			bmp.Count(*gd);
 
-			uint64  serialTc = CountTriangles<uint>("Serial Thread", config.deviceId, tc, gd, ee, st, ProcessingElementEnum::Thread, 0);
+			uint64  serialTc = CountTriangles<uint>("Serial Thread", config.deviceId, config.allocation, tc, gd, ee, st, ProcessingElementEnum::Thread, 0);
 
 			////CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
-			uint64  binaryTc = CountTriangles<uint>("Binary Warp", config.deviceId, tcb, gd, ee, st, ProcessingElementEnum::Block, 0);
-			uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", config.deviceId, tcb, gd, ee, st, ProcessingElementEnum::WarpShared, 0);
-			uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", config.deviceId, tcb, gd, ee, st, ProcessingElementEnum::Test, 0);
+			uint64  binaryTc = CountTriangles<uint>("Binary Warp", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::Block, 0);
+			uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::WarpShared, 0);
+			uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::Test, 0);
 
 
 
-			uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", config.deviceId, tcBE, gd, ee, st, ProcessingElementEnum::Warp, 0);
+			uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", config.deviceId, config.allocation, tcBE, gd, ee, st, ProcessingElementEnum::Warp, 0);
 			CountTrianglesHash<uint>(config.deviceId,divideConstant, tchash, g, gd, ee, 0, ProcessingElementEnum::Warp, 0);
 
-			uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", config.deviceId, tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
+			uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
 
-			CountTriangles<uint>("NVGRAPH", config.deviceId, tcNV, gd, ee);
+			CountTriangles<uint>("NVGRAPH", config.deviceId, config.allocation, tcNV, gd, ee);
 
 			/*if (serialTc != binaryTc)
 				break;*/

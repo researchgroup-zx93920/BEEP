@@ -38,6 +38,36 @@ namespace graph
     }
 
     template <typename T>
+    __host__ __device__ T binary_search(const T* arr,         //!< [in] array to search
+        const T lt,
+        const T rt, //!< [in] size of array
+        const T searchVal,   //!< [in] value to search for
+        bool &found
+    ) {
+        found = false;
+        T left = lt;
+        T right = rt;
+        while (left < right) {
+            const T mid = (left + right) / 2;
+            T val = arr[mid];
+            if (val == searchVal)
+            {
+                found = true;
+                return mid;
+            }
+            bool pred = val < searchVal;
+            if (pred) {
+                left = mid + 1;
+            }
+            else {
+                right = mid;
+            }
+        }
+        return left;
+    }
+
+
+    template <typename T>
     __host__ __device__ T binary_search_left(const T* arr,         //!< [in] array to search
         const T lt,
         const T rt, //!< [in] size of array

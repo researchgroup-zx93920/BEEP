@@ -295,15 +295,18 @@ __global__ void InitEid(T numEdges, T* asc, T*newSrc, T* newDst, T* rowPtr, T* c
 
 
 template<typename T>
-uint64 CountTriangles(std::string message, int deviceId, graph::TcBase<T>* tc, graph::COOCSRGraph_d<T> *g,
+uint64 CountTriangles(std::string message, int deviceId, AllocationTypeEnum at, graph::TcBase<T>* tc, graph::COOCSRGraph_d<T>* g,
 	const size_t numEdges_upto, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
 {
 
 	#ifndef __VS__
-	CUDA_RUNTIME(cudaMemPrefetchAsync(g->rowPtr, (g->numNodes + 1) * sizeof(T), 0, tc->stream_));
-	CUDA_RUNTIME(cudaMemPrefetchAsync(g->rowInd, numEdges_upto * sizeof(T), 0, tc->stream_));
-	CUDA_RUNTIME(cudaMemPrefetchAsync(g->colInd, numEdges_upto * sizeof(T), 0, tc->stream_));
-	tc->sync();
+	if (at == unified)
+	{
+		CUDA_RUNTIME(cudaMemPrefetchAsync(g->rowPtr, (g->numNodes + 1) * sizeof(T), 0, tc->stream_));
+		CUDA_RUNTIME(cudaMemPrefetchAsync(g->rowInd, numEdges_upto * sizeof(T), 0, tc->stream_));
+		CUDA_RUNTIME(cudaMemPrefetchAsync(g->colInd, numEdges_upto * sizeof(T), 0, tc->stream_));
+		tc->sync();
+	}
 	#endif // !__VS__
 
 	tc->count_async(g, numEdges_upto, edgeOffset, kernelType, increasing);
