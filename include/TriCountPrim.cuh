@@ -1063,10 +1063,10 @@ namespace graph
                 bool found = false;
                 const T lb = graph::binary_search<T>(B, lastIndex, bSz, searchVal, found);
 
-                if (lb < bSz)
+                if (found)
                 {
                     bool b = AisMaster || (!AisMaster && current_level[lb] == new_level - 1);
-                    if (B[lb] == searchVal && b)
+                    if (b)
                     {
                         //printf("At %u, SearchVal = %u\n", lb, searchVal);
                         threadCount++;

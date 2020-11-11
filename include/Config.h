@@ -228,10 +228,10 @@ static Config parseArgs(int argc, char** argv) {
     config.printStats = false;
     config.orient = Degree;
     config.allocation = gpu;
-    config.k =6;
+    config.k =5;
     config.sortEdges = true;;
-    config.processBy = ByNode;
-    config.processElement = Block;
+    config.processBy = ByEdge;
+    config.processElement = Warp;
     
 #ifndef __VS__
     int opt;
