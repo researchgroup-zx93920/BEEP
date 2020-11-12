@@ -249,6 +249,34 @@ int main(int argc, char** argv)
 	if (config.printStats) {
 		MatrixStats(m, n, n, g.rowPtr->cdata(), g.colInd->cdata());
 		PrintMtarixStruct(m, n, n, g.rowPtr->cdata(), g.colInd->cdata());
+
+
+		////////////////// intersection !!
+		printf("Now # of bytes we need to make this matrix binary encoded !!\n");
+
+		uint64 sum = 0;
+		uint64 sumc = 0;
+		for (uint i = 0; i < n; i++)
+		{
+			uint s = g.rowPtr->cdata()[i];
+			uint d = g.rowPtr->cdata()[i + 1];
+			uint deg = d - s;
+
+			uint64 v = deg * (deg + 7) / 8;
+			sum += v;
+
+			//now the compressed one :D
+			uint64 nelem8 = deg / 8;
+			uint64 rem = deg - nelem8 * 8;
+
+			sumc += 8 * nelem8 * (1 + nelem8) / 2;
+			sumc += rem * (1 + nelem8);
+
+		}
+
+		printf("n = %u, m = %u, bytes = %llu, elements = %llu\n", n, m, sum, sum / 4);
+		printf("n = %u, m = %u, Compressed bytes = %llu, elements = %llu\n", n, m, sumc, sumc / 4);
+
 	}
 
 

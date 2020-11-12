@@ -72,15 +72,20 @@ namespace graph
     __host__ __device__ T binary_search_left(const T* arr,         //!< [in] array to search
         const T lt,
         const T rt, //!< [in] size of array
-        const T searchVal   //!< [in] value to search for
+        const T searchVal,   //!< [in] value to search for
+        bool& found
     ) {
         T left = lt;
         T right = rt;
+        found = false;
         while (left < right) {
             const T mid = (left + right) / 2;
             T val = arr[mid];
             if (val == searchVal)
+            {
+                found = true;
                 return mid;
+            }
             bool pred = val < searchVal;
             if (pred) {
                 left = mid + 1;
@@ -613,13 +618,14 @@ namespace graph
             // one element of A per thread, just search for A into B
             const T searchVal = A[i];
 
-            fl = graph::binary_search_left<T>(first_level, fl, numElements, searchVal);
+            bool found = false;
+            fl = graph::binary_search_left<T>(first_level, fl, numElements, searchVal, found);
             lastIndex = par * fl;
             T right = 0;
 
             if (bSz < pwMaxSize)
             {
-                if (searchVal == first_level[fl])
+                if (found)
                 {
                     threadCount++;
                     //printf("At %u, searchVal = %u, direct\n", fl * par, searchVal);
@@ -631,14 +637,10 @@ namespace graph
             else
                 right = (fl + 1) * par;
 
-            const T lb = graph::binary_search_left<T>(B, lastIndex, right, searchVal);
-            if (lb < bSz)
+            const T lb = graph::binary_search_left<T>(B, lastIndex, right, searchVal, found);
+            if (found)
             {
-                if (B[lb] == searchVal)
-                {
-                    //printf("At %u, searchVal = %u\n", lb, searchVal);
-                    threadCount++;
-                }
+                   threadCount++;
             }
 
             //lastIndex = lb;
@@ -1095,6 +1097,113 @@ namespace graph
             // __shared__ typename WarpReduce::TempStorage tempStorage[WARPS_PER_BLOCK];
             // uint64 aggregate = WarpReduce(tempStorage[warpIdx]).Sum(threadCount);
             // return aggregate;
+
+            threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 16);
+            threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 8);
+            threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 4);
+            threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 2);
+            threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 1);
+
+            return threadCount;
+        }
+        else
+        {
+            return threadCount;
+        }
+    }
+
+
+    template <size_t WARPS_PER_BLOCK, typename T, bool reduce = true>
+    __device__ __forceinline__ uint64_t warp_sorted_count_set_binary_s(const T* const A, //!< [in] array A
+        const size_t aSz, //!< [in] the number of elements in A
+        T* B, //!< [in] array B
+        T bSz,  //!< [in] the number of elements in B
+        T* first_level,
+        T par,
+        T numElements,
+        T pwMaxSize,
+
+        bool AisMaster,
+        char* current_level,
+        T new_level,
+        T clique_number
+    )
+    {
+        const int warpIdx = threadIdx.x / 32; // which warp in thread block
+        const int laneIdx = threadIdx.x % 32; // which thread in warp
+        uint64_t threadCount = 0;
+        T lastIndex = 0;
+        T fl = 0;
+
+        // cover entirety of A with warp
+        for (size_t i = laneIdx; i < aSz; i += 32)
+        {
+            // one element of A per thread, just search for A into B
+            const T searchVal = A[i];
+            bool a = !AisMaster || (AisMaster && current_level[i] == new_level - 1);
+            if (a)
+            {
+                bool found = false;
+                fl = graph::binary_search_left<T>(first_level, fl, numElements, searchVal, found);
+                lastIndex = par * fl;
+                T right = 0;
+
+                if (bSz < pwMaxSize)
+                {
+                    bool b = AisMaster || (!AisMaster && current_level[lastIndex] == new_level - 1);
+                    if (found && b)
+                    {
+                        threadCount++;
+
+                        /////////////////////////////////////////
+                        if (new_level < clique_number)
+                        {
+                            T level_index = (AisMaster ? i : lastIndex);
+                            current_level[level_index] = new_level;
+                        }
+                        ////////////////////////////////////////////////
+
+                        //printf("At %u, searchVal = %u, direct\n", fl * par, searchVal);
+                    }
+                    continue;
+                }
+                else if (fl == numElements - 1)
+                    right = bSz;
+                else
+                    right = (fl + 1) * par;
+
+                found = false;
+                const T lb = graph::binary_search_left<T>(B, lastIndex, right, searchVal, found);
+                if (found)
+                {
+                    bool b = AisMaster || (!AisMaster && current_level[lb] == new_level - 1);
+                    if (b)
+                    {
+                        //printf("At %u, searchVal = %u\n", lb, searchVal);
+                        threadCount++;
+                        if (new_level < clique_number)
+                        {
+                            T level_index = (AisMaster ? i : lb);
+                            current_level[level_index] = new_level;
+                        }
+                    }
+                    
+                }
+
+            }
+
+            //lastIndex = lb;
+
+
+           /* unsigned int writemask_deq = __activemask();
+            fl = __shfl_sync(writemask_deq, fl, 31);*/
+        }
+
+        if (reduce) {
+            // give lane 0 the total count discovered by the warp
+            // typedef cub::WarpReduce<uint64_t> WarpReduce;
+            // __shared__ typename WarpReduce::TempStorage tempStorage[WARPS_PER_BLOCK];
+            // uint64_t aggregate = WarpReduce(tempStorage[warpIdx]).Sum(threadCount);
 
             threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 16);
             threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 8);

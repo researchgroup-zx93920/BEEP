@@ -786,13 +786,14 @@ kernel_binary_block_pe_level_next(
             {
                 // one element of A per thread, just search for A into B
                 const T searchVal = colIndex_csr[dstStart + j];
-                fl = graph::binary_search_left<T>(first, fl, numElements, searchVal);
+                bool found = false;
+                fl = graph::binary_search_left<T>(first, fl, numElements, searchVal, found);
                 lastIndex = par * fl;
                 T right = 0;
 
                 if (srcLen < BLOCK_DIM_X)
                 {
-                    if (searchVal == first[fl])
+                    if (found)
                     {
                         T ap_e = eid[dstStart + j];
                         T bp_e = eid[srcStart + lastIndex];
@@ -808,19 +809,17 @@ kernel_binary_block_pe_level_next(
                 else
                     right = (fl + 1) * par;
 
-                const T lb = graph::binary_search_left<T>(&colIndex_csr[srcStart], lastIndex, right, searchVal);
-                if (lb < srcLen)
+                const T lb = graph::binary_search_left<T>(&colIndex_csr[srcStart], lastIndex, right, searchVal, found);
+                if (found)
                 {
-                    if (colIndex_csr[srcStart + lb] == searchVal)
-                    {
-                        T ap_e = eid[dstStart + j];
-                        T bp_e = eid[srcStart + lb];
-                        auto pos = atomicAdd(&size, 1);
-                        e1_arr[pos] = edgeId;
-                        e2_arr[pos] = ap_e;
-                        e3_arr[pos] = bp_e;
-                    }
+                    T ap_e = eid[dstStart + j];
+                    T bp_e = eid[srcStart + lb];
+                    auto pos = atomicAdd(&size, 1);
+                    e1_arr[pos] = edgeId;
+                    e2_arr[pos] = ap_e;
+                    e3_arr[pos] = bp_e;
                 }
+                
             }
         }
 

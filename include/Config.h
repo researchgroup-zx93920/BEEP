@@ -225,12 +225,12 @@ static Config parseArgs(int argc, char** argv) {
     config.dstGraph = "D:\\graphs\\as-Skitter2.bel";
     config.deviceId = 0;
     config.mt = KCLIQUE;
-    config.printStats = false;
+    config.printStats = true;
     config.orient = Degree;
     config.allocation = gpu;
-    config.k =5;
-    config.sortEdges = true;;
-    config.processBy = ByEdge;
+    config.k =6;
+    config.sortEdges = false;;
+    config.processBy = ByNode;
     config.processElement = Warp;
     
 #ifndef __VS__
