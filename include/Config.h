@@ -4,7 +4,7 @@
 #include "defs.cuh"
 
 #ifndef __VS__
-    #include <unistd.h>
+#include <unistd.h>
 #endif
 #include <stdio.h>
 
@@ -125,7 +125,7 @@ static ProcessingElementEnum parseElement(const char* s)
         return Block;
     if (strcmp(s, "g") == 0)
         return Grid;
-    
+
     fprintf(stderr, "Unrecognized -e option (Processing Element): %s\n", s);
     exit(0);
 }
@@ -150,7 +150,7 @@ static const char* asString(AllocationTypeEnum mt) {
     switch (mt) {
     case gpu:            return "gpu";
     case unified:            return "unified";
-    
+
     default:
         fprintf(stderr, "Unrecognized allocation (cpu, gpu, unified)\n");
         exit(0);
@@ -225,14 +225,14 @@ static Config parseArgs(int argc, char** argv) {
     config.dstGraph = "D:\\graphs\\as-Skitter2.bel";
     config.deviceId = 0;
     config.mt = KCLIQUE;
-    config.printStats = true;
+    config.printStats = false;
     config.orient = Degree;
     config.allocation = gpu;
-    config.k =6;
+    config.k = 6;
     config.sortEdges = false;;
     config.processBy = ByNode;
     config.processElement = Warp;
-    
+
 #ifndef __VS__
     int opt;
 

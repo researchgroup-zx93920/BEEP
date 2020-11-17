@@ -42,7 +42,7 @@
 using namespace std;
 //#define TriListConstruct
 
-int main(int argc, char** argv) 
+int main(int argc, char** argv)
 {
 
 	//CUDA_RUNTIME(cudaDeviceReset());
@@ -87,7 +87,7 @@ int main(int argc, char** argv)
 	/*const int size = 256;
 
 	graph::CubLarge<uint> s;
-	graph::GPUArray<uint> 
+	graph::GPUArray<uint>
 		asc("ASC temp", AllocationTypeEnum::unified, size, 0);
 	graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, size, 0);
 	keep.setAll(true, true);
@@ -245,7 +245,8 @@ int main(int argc, char** argv)
 	Log(info, "count time %f s", time);
 	Log(info, "MOHA %d kcore (%f teps)", mohacore.count(), m / time);*/
 
-
+	uint dv = 32;
+	typedef unsigned int ttt;
 	if (config.printStats) {
 		MatrixStats(m, n, n, g.rowPtr->cdata(), g.colInd->cdata());
 		PrintMtarixStruct(m, n, n, g.rowPtr->cdata(), g.colInd->cdata());
@@ -253,7 +254,7 @@ int main(int argc, char** argv)
 
 		////////////////// intersection !!
 		printf("Now # of bytes we need to make this matrix binary encoded !!\n");
-
+		
 		uint64 sum = 0;
 		uint64 sumc = 0;
 		for (uint i = 0; i < n; i++)
@@ -262,29 +263,119 @@ int main(int argc, char** argv)
 			uint d = g.rowPtr->cdata()[i + 1];
 			uint deg = d - s;
 
-			uint64 v = deg * (deg + 7) / 8;
-			sum += v;
 
-			//now the compressed one :D
-			uint64 nelem8 = deg / 8;
-			uint64 rem = deg - nelem8 * 8;
+			//if (deg > 128)
+			{
+				uint64 v = deg * (deg + dv -1) / dv;
+				sum += v;
 
-			sumc += 8 * nelem8 * (1 + nelem8) / 2;
-			sumc += rem * (1 + nelem8);
+				//now the compressed one :D
+				uint64 nelem8 = deg / dv;
+				uint64 rem = deg - nelem8 * dv;
+
+				sumc += dv * nelem8 * (1 + nelem8) / 2;
+				sumc += rem * (1 + nelem8);
+			}
+		}
+
+		printf("n = %u, m = %u, elements = %llu\n", n, m, sum);
+		printf("n = %u, m = %u, elements = %llu\n", n, m, sumc);
+
+		uint src = 500; // index id
+		uint s = g.rowPtr->cdata()[src];
+		uint d = g.rowPtr->cdata()[src + 1];
+		uint degree = d - s;
+
+
+		uint deg8 = degree / dv;
+		uint rem = degree - deg8 * dv;
+		uint totalBytes = dv * deg8 * (deg8 + 1) / 2;
+		totalBytes += rem * (deg8 + dv - 1) / dv;
+
+		graph::GPUArray<ttt> node_be("BE", unified, totalBytes, 0);
+		node_be.setAll(0, true);
+
+		for (uint i = 0; i < degree; i++)
+		{
+			uint dst = g.colInd->cdata()[i + s];
+			uint dstStart = g.rowPtr->cdata()[dst];
+			uint dstEnd = g.rowPtr->cdata()[dst + 1];
+			uint dstDegree = dstEnd - dstStart;
+
+			//Intersect Src, Dst
+			uint s1 = 0, s2 = 0;
+			bool loadA = true, loadB = true;
+			uint a, b;
+			uint rsi = 0;
+			uint offset = 0;
+			while (s1 < degree && s2 < dstDegree) 
+			{
+
+				if (loadA) {
+					a = g.colInd->cdata()[s1 + s];
+					loadA = false;
+				}
+				if (loadB) {
+					b = g.colInd->cdata()[s2 + dstStart];
+					loadB = false;
+				}
+
+				if (a == b) {
+					//i and s1
+					if (i > 0)
+					{
+						if (i > s1)
+						{
+							uint ss = i / dv;
+							uint sum = dv * ss * (ss + 1) / 2;
+							uint sr = i % dv;
+							uint sumr = sr * ((i + dv - 1) / dv) - 1;
+
+							rsi = sum + sumr;
+							offset = s1 / dv;
+							uint numBytes = (i + dv - 1) / dv;
+							uint byteIndex = s1 % dv;
+
+							//Encode
+							node_be.cdata()[rsi + offset] |= (1 << byteIndex);
+
+
+						}
+						else
+						{
+							uint ss = s1 / dv;
+							uint sum = dv * ss * (ss + 1) / 2;
+							uint sr = s1 % dv;
+							uint sumr = sr * ((s1 + dv - 1) / dv) - 1;
+
+							rsi = sum + sumr;
+							offset = i / dv;
+							uint numBytes = (s1 + dv - 1) / dv;
+							uint byteIndex = i % dv;
+							node_be.cdata()[rsi + offset] |= (1 << byteIndex);
+						}
+
+					}
+
+					++s1;
+					++s2;
+					loadA = true;
+					loadB = true;
+				}
+				else if (a < b) {
+					++s1;
+					loadA = true;
+				}
+				else {
+					++s2;
+					loadB = true;
+				}
+			}
 
 		}
 
-		printf("n = %u, m = %u, bytes = %llu, elements = %llu\n", n, m, sum, sum / 4);
-		printf("n = %u, m = %u, Compressed bytes = %llu, elements = %llu\n", n, m, sumc, sumc / 4);
 
 	}
-
-
-
-	//No try the ew storage format
-
-
-
 
 
 	if (config.mt == TC)
@@ -380,7 +471,7 @@ int main(int argc, char** argv)
 
 
 			uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", config.deviceId, config.allocation, tcBE, gd, ee, st, ProcessingElementEnum::Warp, 0);
-			CountTrianglesHash<uint>(config.deviceId,divideConstant, tchash, g, gd, ee, 0, ProcessingElementEnum::Warp, 0);
+			CountTrianglesHash<uint>(config.deviceId, divideConstant, tchash, g, gd, ee, 0, ProcessingElementEnum::Warp, 0);
 
 			uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
 
@@ -436,19 +527,25 @@ int main(int argc, char** argv)
 	if (config.mt == KCLIQUE)
 	{
 		if (config.orient == None)
-			Log(warn,"Redundunt K-cliques, Please orient the graph\n");
+			Log(warn, "Redundunt K-cliques, Please orient the graph\n");
 
-		graph::SingleGPU_Kclique<uint> mohaclique(config.deviceId);
-		Timer t;
-		if (config.processBy == ByNode)
-			mohaclique.findKclqueIncremental_node_async(config.k, *gd,config.processElement);
-		else if(config.processBy == ByEdge)
-			mohaclique.findKclqueIncremental_edge_async(config.k, *gd, config.processElement);
-		mohaclique.sync();
-		double time = t.elapsed();
-		Log(info, "count time %f s", time);
-		Log(info, "MOHA %d k-clique (%f teps)", mohaclique.count(), m / time);
+		graph::SingleGPU_Kclique<uint> mohaclique(config.deviceId, *gd);
 
+		for (int i = 0; i < 3; i++)
+		{
+			Timer t;
+			if (config.processBy == ByNode)
+				mohaclique.findKclqueIncremental_node_async(config.k, *gd, config.processElement);
+			else if (config.processBy == ByEdge)
+				mohaclique.findKclqueIncremental_edge_async(config.k, *gd, config.processElement);
+			mohaclique.sync();
+			double time = t.elapsed();
+			Log(info, "count time %f s", time);
+			Log(info, "MOHA %d k-clique (%f teps)", mohaclique.count(), m / time);
+		}
+
+
+		mohaclique.free();
 	}
 
 

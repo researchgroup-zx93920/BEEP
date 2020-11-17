@@ -24,7 +24,7 @@ template <typename NodeTy, typename WeightTy> using WEdgeTy = std::tuple<NodeTy,
 
 
 #define __VERBOSE__
-#define __VS__ //visual studio debug
+//#define __VS__ //visual studio debug
 
 
 
@@ -32,8 +32,8 @@ template <typename NodeTy, typename WeightTy> using WEdgeTy = std::tuple<NodeTy,
 enum ProcessingElementEnum { Thread, Warp, Block, Grid, WarpShared, Test, Queue };
 enum AllocationTypeEnum { cpuonly, gpu, unified, zerocopy };
 enum LogPriorityEnum { critical, warn, error, info, debug, none };
-enum OrientGraphByEnum {None, Upper, Lower, Degree, Degeneracy };
-enum ProcessBy { ByNode, ByEdge};
+enum OrientGraphByEnum { None, Upper, Lower, Degree, Degeneracy };
+enum ProcessBy { ByNode, ByEdge };
 
 enum MAINTASK {
     CONV_TSV_MTX,
