@@ -16,6 +16,16 @@
 
 
 template<typename T, typename PeelT>
+__global__
+void update_priority(graph::GraphQueue_d<T, bool> current, T priority, T* nodePriority) {
+	auto gtid = threadIdx.x + blockIdx.x * blockDim.x;
+	if (gtid < current.count[0]) {
+		auto edge_off = current.queue[gtid];
+		nodePriority[edge_off] = priority;
+	}
+}
+
+template<typename T, typename PeelT>
 __inline__ __device__
 void process_degree(
 	T nodeId, T level, PeelT* nodeDegree,
@@ -24,11 +34,11 @@ void process_degree(
 	T bucket_level_end_)
 {
 	auto cur = atomicSub(&nodeDegree[nodeId], 1);
-	if (cur == (level + 1)) 
+	if (cur == (level + 1))
 	{
 		add_to_queue_1(next, nodeId);
 	}
-	if (cur <= level) 
+	if (cur <= level)
 	{
 		atomicAdd(&nodeDegree[nodeId], 1);
 	}
@@ -47,7 +57,7 @@ __global__ void getNodeDegree_kernel(PeelT* nodeDegree, graph::COOCSRGraph_d<T> 
 {
 	uint64 gtid = threadIdx.x + blockIdx.x * blockDim.x;
 
-	for (uint64 i = gtid; i < g.numNodes; i+= blockDim.x*gridDim.x)
+	for (uint64 i = gtid; i < g.numNodes; i += blockDim.x * gridDim.x)
 	{
 		nodeDegree[i] = g.rowPtr[i + 1] - g.rowPtr[i];
 	}
@@ -77,7 +87,7 @@ kernel_thread_level_next(
 		for (T j = srcStart; j < srcStop; j++)
 		{
 			T affectedNode = g.colInd[j];
-			if(/*!processed[affectedNode] &&*/ !current.mark[affectedNode] )
+			if (/*!processed[affectedNode] &&*/ !current.mark[affectedNode])
 				process_degree<T, PeelT>(affectedNode, level, nodeDegree, next, bucket, bucket_level_end_);
 		}
 	}
@@ -100,7 +110,7 @@ kernel_warp_level_next(
 	const int warpIdx = threadIdx.x / 32; // which warp in thread block
 	const size_t gwx = (blockDim.x * blockIdx.x + threadIdx.x) / 32;
 
-	__shared__ T q[warpsPerBlock][32*2];
+	__shared__ T q[warpsPerBlock][32 * 2];
 	__shared__ int sizes[warpsPerBlock];
 	T* e1_arr = &q[warpIdx][0];
 	int* size = &sizes[warpIdx];
@@ -108,14 +118,14 @@ kernel_warp_level_next(
 	if (lx == 0)
 		*size = 0;
 
-	for (size_t i = gwx; i < current.count[0]; i += blockDim.x * gridDim.x/32)
+	for (size_t i = gwx; i < current.count[0]; i += blockDim.x * gridDim.x / 32)
 	{
 		T nodeId = current.queue[i];
 
 		T srcStart = g.rowPtr[nodeId];
 		T srcStop = g.rowPtr[nodeId + 1];
 
-		for (int j = srcStart + lx; j < (srcStop+31)/32 * 32; j+=32)
+		for (int j = srcStart + lx; j < (srcStop + 31) / 32 * 32; j += 32)
 		{
 			__syncwarp();
 			if (*size >= 32)
@@ -183,7 +193,7 @@ kernel_partition_level_next(
 		T srcStart = g.rowPtr[nodeId];
 		T srcStop = g.rowPtr[nodeId + 1];
 
-		for (auto j = srcStart + lx; j < (srcStop + P-1) / P * P; j += P)
+		for (auto j = srcStart + lx; j < (srcStop + P - 1) / P * P; j += P)
 		{
 			__syncwarp();
 			if (*size >= P)
@@ -235,7 +245,7 @@ kernel_block_level_next(
 	const size_t gbx = (BLOCK_DIM_X * blockIdx.x + threadIdx.x) / BLOCK_DIM_X;
 
 
-	__shared__ T q[BLOCK_DIM_X*2];
+	__shared__ T q[BLOCK_DIM_X * 2];
 	T* e1_arr = &q[0];
 	__shared__ T size;
 
@@ -253,10 +263,10 @@ kernel_block_level_next(
 		T srcStop = g.rowPtr[nodeId + 1];
 		T srcLen = srcStop - srcStart;
 
-		for (auto j = tid; j < (srcLen + BLOCK_DIM_X -1) / BLOCK_DIM_X * BLOCK_DIM_X; j += BLOCK_DIM_X)
+		for (auto j = tid; j < (srcLen + BLOCK_DIM_X - 1) / BLOCK_DIM_X * BLOCK_DIM_X; j += BLOCK_DIM_X)
 		{
 			__syncthreads();
-		    if (size >= BLOCK_DIM_X)
+			if (size >= BLOCK_DIM_X)
 			{
 				for (auto e = tid; e < size; e += BLOCK_DIM_X)
 				{
@@ -301,7 +311,7 @@ namespace graph
 		//Outputs:
 		//Max k of a complete ktruss kernel
 		int k;
-		
+
 
 		//Percentage of deleted edges for a specific k
 		float percentage_deleted_k;
@@ -406,6 +416,7 @@ namespace graph
 
 	public:
 		GPUArray<PeelT> nodeDegree;
+		GPUArray<T> nodePriority;
 
 		SingleGPU_Kcore(int dev) : dev_(dev) {
 			CUDA_RUNTIME(cudaSetDevice(dev_));
@@ -437,7 +448,7 @@ namespace graph
 			int level = 0;
 			int bucket_level_end_ = level;
 
-		
+
 			GPUArray<bool> node_kept;
 
 			//Lets apply queues and buckets
@@ -451,7 +462,7 @@ namespace graph
 			next_q.Create(unified, g.numNodes, dev_);
 
 			GPUArray<T> identity_arr_asc;
-			AscendingGpu(g.numNodes,identity_arr_asc);
+			AscendingGpu(g.numNodes, identity_arr_asc);
 
 			GPUArray <T> newRowPtr;
 			GPUArray <T> newColIndex_csr;
@@ -461,9 +472,13 @@ namespace graph
 
 
 			processed.initialize("is Deleted (Processed)", unified, g.numNodes, dev_);
-			
+
 			processed.setAll(false, false);
-			
+
+
+			nodePriority.initialize("Edge Support", unified, g.numNodes, dev_);
+			nodePriority.setAll(g.numEdges, false);
+
 
 			CUDA_RUNTIME(cudaStreamSynchronize(stream_));
 
@@ -471,12 +486,14 @@ namespace graph
 			float minPercentage = 0.8;
 			float percDeleted_l = 0.0;
 
-			
+
 			getNodeDegree(g);
 
 
 			int todo = g.numNodes;
 			const auto todo_original = g.numNodes;
+
+			T priority = 0;
 			while (todo > 0)
 			{
 				//	//printf("k=%d\n", k);
@@ -501,21 +518,13 @@ namespace graph
 					{
 						auto block_size = 256;
 						auto grid_size = (current_q.count.gdata()[0] + block_size - 1) / block_size;
-						//execKernel(update_processed, grid_size, block_size, false, current_q.queue.gdata(), current_q.count.gdata()[0], current_q.mark.gdata(), processed.gdata());
+						execKernel((update_priority<T, PeelT>), grid_size, block_size, dev_, false, current_q.device_queue->gdata()[0], priority, nodePriority.gdata());
 					}
 					else
 					{
-						//tcCounter->count_moveNext_per_edge_async(g, numEdges,
-						//	level, processed,
-						//	edgeSupport,
-						//	current_q,
-						//	next_q,
-						//	bucket_q, bucket_level_end_,
-						//	0, Warp);
-						//tcCounter->sync();
 						auto block_size = 256;
 						auto grid_size = (current_q.count.gdata()[0] + block_size - 1) / block_size;
-						auto grid_warp_size = (32*current_q.count.gdata()[0] + block_size - 1) / block_size;
+						auto grid_warp_size = (32 * current_q.count.gdata()[0] + block_size - 1) / block_size;
 						auto grid_block_size = current_q.count.gdata()[0];
 						if (level < 4)
 						{
@@ -540,7 +549,7 @@ namespace graph
 								bucket_q.device_queue->gdata()[0],
 								bucket_level_end_);
 						}
-						else if(level <= 32)
+						else if (level <= 32)
 						{
 							execKernel((kernel_partition_level_next<T, PeelT, 256, 32>), grid_warp_size, block_size, dev_, false,
 								g,
@@ -550,31 +559,6 @@ namespace graph
 								bucket_q.device_queue->gdata()[0],
 								bucket_level_end_);
 						}
-					/*	else if (level <= 64)
-						{
-							const int P = 64;
-							auto gridSize = (P * current_q.count.gdata()[0] + block_size - 1) / block_size;
-							execKernel((kernel_partition_level_next<T, 256, P>), gridSize, block_size, false,
-								g,
-								level, processed.gdata(), nodeDegree.gdata(),
-								current_q.device_queue->gdata()[0],
-								next_q.device_queue->gdata()[0],
-								bucket_q.device_queue->gdata()[0],
-								bucket_level_end_);
-						}
-
-						else if (level <= 128)
-						{
-							const int P = 128;
-							auto gridSize = (P * current_q.count.gdata()[0] + block_size - 1) / block_size;
-							execKernel((kernel_partition_level_next<T, 256, P>), gridSize, block_size, false,
-								g,
-								level, processed.gdata(), nodeDegree.gdata(),
-								current_q.device_queue->gdata()[0],
-								next_q.device_queue->gdata()[0],
-								bucket_q.device_queue->gdata()[0],
-								bucket_level_end_);
-						}*/
 						else
 						{
 							execKernel((kernel_block_level_next<T, PeelT, 256>), grid_block_size, block_size, dev_, false,
@@ -586,13 +570,14 @@ namespace graph
 								bucket_level_end_);
 						}
 
-						//execKernel(update_processed, grid_size, block_size, false, current_q.queue.gdata(), current_q.count.gdata()[0], current_q.mark.gdata(), processed.gdata());
+						execKernel((update_priority<T, PeelT>), grid_size, block_size, dev_, false, current_q.device_queue->gdata()[0], priority, nodePriority.gdata());
 					}
 
 					numDeleted_l = g.numNodes - todo;
 
 					swap(current_q, next_q);
 					iterations++;
+					priority++;
 					//swap(inCurr, inNext);
 					//current_q.count.gdata()[0] = next_q.count.gdata()[0];
 				}
@@ -638,7 +623,7 @@ namespace graph
 
 		void sync() { CUDA_RUNTIME(cudaStreamSynchronize(stream_)); }
 
-		uint count() const { return k-1; }
+		uint count() const { return k - 1; }
 		int device() const { return dev_; }
 		cudaStream_t stream() const { return stream_; }
 	};

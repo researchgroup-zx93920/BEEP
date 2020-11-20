@@ -178,7 +178,15 @@ int main(int argc, char** argv)
 			new_rowPtr("New", AllocationTypeEnum::unified, n + 1, config.deviceId),
 			asc("ASC temp", AllocationTypeEnum::unified, m, config.deviceId);
 		graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, config.deviceId);
-		execKernel((init<uint, PeelType>), (m + 512 - 1) / 512, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata());
+
+		if (config.orient == Degree)
+		{
+			execKernel((init<uint, PeelType>), (m + 512 - 1) / 512, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata());
+		}
+		else if (config.orient == Degeneracy)
+		{
+			execKernel((init<uint, PeelType>), (m + 512 - 1) / 512, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata(), mohacore.nodePriority.gdata());
+		}
 
 		graph::CubLarge<uint> s;
 		uint newNumEdges;
@@ -254,7 +262,7 @@ int main(int argc, char** argv)
 
 		////////////////// intersection !!
 		printf("Now # of bytes we need to make this matrix binary encoded !!\n");
-		
+
 		uint64 sum = 0;
 		uint64 sumc = 0;
 		for (uint i = 0; i < n; i++)
@@ -266,7 +274,7 @@ int main(int argc, char** argv)
 
 			//if (deg > 128)
 			{
-				uint64 v = deg * (deg + dv -1) / dv;
+				uint64 v = deg * (deg + dv - 1) / dv;
 				sum += v;
 
 				//now the compressed one :D
@@ -308,7 +316,7 @@ int main(int argc, char** argv)
 			uint a, b;
 			uint rsi = 0;
 			uint offset = 0;
-			while (s1 < degree && s2 < dstDegree) 
+			while (s1 < degree && s2 < dstDegree)
 			{
 
 				if (loadA) {
@@ -522,6 +530,54 @@ int main(int argc, char** argv)
 		double time = t.elapsed();
 		Log(info, "count time %f s", time);
 		Log(info, "MOHA %d kcore (%f teps)", mohacore.count(), m / time);
+
+
+		uint cc = 0;
+		for (uint i = 0; i < g.numNodes; i++)
+		{
+			uint srcStart = g.rowPtr->cdata()[i];
+			uint srcStop = g.rowPtr->cdata()[i + 1];
+
+			//if(mohacore.nodePriority.gdata()[i] == g.numEdges)
+			{
+				uint counter = 0;
+				uint max = 0;
+				for (uint j = srcStart; j < srcStop; j++)
+				{
+					uint dst = g.colInd->cdata()[j];
+
+					//printf("(%u, %u), ", dst, mohacore.nodePriority.gdata()[dst]);
+					// if(mohacore.nodeDegree.gdata()[i] < mohacore.nodeDegree.gdata()[dst])
+					// {
+					// 	counter++;
+					// 	if(max < mohacore.nodeDegree.gdata()[dst])
+					// 		max = mohacore.nodeDegree.gdata()[dst];
+					// }
+					// else 
+					//if(mohacore.nodeDegree.gdata()[i] == 111)
+					{
+						if (mohacore.nodePriority.gdata()[i] < mohacore.nodePriority.gdata()[dst])
+							counter++;
+
+						else if (mohacore.nodePriority.gdata()[i] == mohacore.nodePriority.gdata()[dst])
+						{
+							//if(dst < i)
+							counter++;
+						}
+					}
+				}
+				if (counter > mohacore.nodeDegree.gdata()[i])
+					printf("\n%u, %u, %u, %u, %u , (%u))\n", i, srcStop - srcStart, counter, mohacore.nodeDegree.gdata()[i], mohacore.nodePriority.gdata()[i], mohacore.nodePriority.gdata()[i]);
+
+				//break;
+			}
+
+
+		}
+		printf("Number of nodes = %u\n", cc);
+
+
+
 	}
 
 	if (config.mt == KCLIQUE)

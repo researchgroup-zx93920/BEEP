@@ -125,6 +125,8 @@ static ProcessingElementEnum parseElement(const char* s)
         return Block;
     if (strcmp(s, "g") == 0)
         return Grid;
+    if (strcmp(s, "bw") == 0)
+        return BlockWarp;
 
     fprintf(stderr, "Unrecognized -e option (Processing Element): %s\n", s);
     exit(0);
@@ -135,10 +137,11 @@ static ProcessingElementEnum parseElement(const char* s)
 
 static const char* asString(ProcessingElementEnum mt) {
     switch (mt) {
-    case Thread:            return "t";
+    case Thread:          return "t";
     case Warp:            return "w";
-    case Block:            return "b";
+    case Block:           return "b";
     case Grid:            return "g";
+    case BlockWarp:       return "bw";
     default:
         fprintf(stderr, "Unrecognized processing element\n");
         exit(0);
@@ -224,9 +227,9 @@ static Config parseArgs(int argc, char** argv) {
     config.srcGraph = "D:\\graphs\\as-Skitter2.bel";
     config.dstGraph = "D:\\graphs\\as-Skitter2.bel";
     config.deviceId = 0;
-    config.mt = KCLIQUE;
+    config.mt = KCORE;
     config.printStats = false;
-    config.orient = Degree;
+    config.orient = None;
     config.allocation = gpu;
     config.k = 6;
     config.sortEdges = false;;
