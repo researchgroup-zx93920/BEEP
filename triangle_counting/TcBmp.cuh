@@ -686,7 +686,7 @@ namespace graph {
                 g.rowPtr, g.colInd, n, bmp_offs.gdata());
 
 
-            auto word_num = CUBScanExclusive<T, T>(bmp_offs.gdata(), bmp_offs.gdata(), n, 0, unified);
+            auto word_num = CUBScanExclusive<T, T>(bmp_offs.gdata(), bmp_offs.gdata(), n, deviceId, 0, unified);
             if (word_num > 0)
             {
                 bmp_offs.setSingle(n, word_num,true); //unified !!

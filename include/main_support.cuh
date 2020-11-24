@@ -382,7 +382,7 @@ void CountTrianglesHash(int deviceId, const int divideConstant, graph::TcBase<T>
 	graph::GPUArray<uint> htd("hash table", AllocationTypeEnum::gpu, numEdges - edgeOffset, deviceId);
 
 	execKernel(createHashPointer2, (g->numNodes + 128 - 1) / 128, 128, deviceId, false, *g, htp.gdata(), minRowLen, maxRowLen, divideConstant);
-	T total = CUBScanExclusive(htp.gdata(), htp.gdata(), g->numNodes);
+	T total = CUBScanExclusive(htp.gdata(), htp.gdata(), g->numNodes, deviceId);
 	htp.gdata()[g->numNodes] = total;
 
 	uint totalBins = htp.gdata()[g->numNodes];

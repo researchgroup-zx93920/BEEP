@@ -13,9 +13,12 @@ OutputType CUBScanExclusive(
     InputType* input,
     OutputType* output,
     const int count,
+    int devId,
     cudaStream_t 	stream = 0,
     AllocationTypeEnum at = unified)
 {
+    CUDA_RUNTIME(cudaSetDevice(devId));
+
     float singleKernelTime, elaspedTime = 0;
     cudaEvent_t start, end;
     void* d_temp_storage = nullptr;
@@ -24,36 +27,36 @@ OutputType CUBScanExclusive(
     /*record the last input item in case it is an in-place scan*/
     auto last_input = getVal<InputType>(input, count - 1, at);// input[count - 1];
 
-    CUDA_RUNTIME(cudaEventCreate(&start));
-    CUDA_RUNTIME(cudaEventCreate(&end));
+   /* CUDA_RUNTIME(cudaEventCreate(&start));
+    CUDA_RUNTIME(cudaEventCreate(&end));*/
 
-    CUDA_RUNTIME(cudaEventRecord(start));
+    //CUDA_RUNTIME(cudaEventRecord(start));
     cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, input, output, count);
-    CUDA_RUNTIME(cudaEventRecord(end));
+   /* CUDA_RUNTIME(cudaEventRecord(end));
     CUDA_RUNTIME(cudaEventSynchronize(start));
     CUDA_RUNTIME(cudaEventSynchronize(end));
     CUDA_RUNTIME(cudaEventElapsedTime(&singleKernelTime, start, end));
     elaspedTime += singleKernelTime;
-    CHECK_KERNEL("CUB 1st scan");
+    CHECK_KERNEL("CUB 1st scan");*/
 
     CUDA_RUNTIME(cudaMalloc(&d_temp_storage, temp_storage_bytes));
 
     /*Run exclusive prefix sum*/
-    CUDA_RUNTIME(cudaEventRecord(start));
+    //CUDA_RUNTIME(cudaEventRecord(start));
     cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, input, output, count);
-    CUDA_RUNTIME(cudaEventRecord(end));
-    CUDA_RUNTIME(cudaEventSynchronize(start));
-    CUDA_RUNTIME(cudaEventSynchronize(end));
-    CUDA_RUNTIME(cudaDeviceSynchronize());
-
-    CUDA_RUNTIME(cudaEventElapsedTime(&singleKernelTime, start, end));
-    elaspedTime += singleKernelTime;
-
-    CHECK_KERNEL("CUB 2nd scan");
-
-#ifdef __VERBOSE__
-   // Log(LogPriorityEnum::info ,"Kernel: %s, count: %d, time: %.2f ms.", "CUB scan", count, elaspedTime);
-#endif // __VERBOSE__
+//    CUDA_RUNTIME(cudaEventRecord(end));
+//    CUDA_RUNTIME(cudaEventSynchronize(start));
+//    CUDA_RUNTIME(cudaEventSynchronize(end));
+//    CUDA_RUNTIME(cudaDeviceSynchronize());
+//
+//    CUDA_RUNTIME(cudaEventElapsedTime(&singleKernelTime, start, end));
+//    elaspedTime += singleKernelTime;
+//
+//    CHECK_KERNEL("CUB 2nd scan");
+//
+//#ifdef __VERBOSE__
+//   // Log(LogPriorityEnum::info ,"Kernel: %s, count: %d, time: %.2f ms.", "CUB scan", count, elaspedTime);
+//#endif // __VERBOSE__
 
     CUDA_RUNTIME(cudaFree(d_temp_storage));
 
@@ -119,8 +122,12 @@ template<typename InputType, typename OutputType, typename CountType, typename F
 uint32_t CUBSelect(
     InputType input, OutputType output,
     FlagIterator flags,
-    const CountType countInput)
+    const CountType countInput,
+    int devId)
 {
+
+    CUDA_RUNTIME(cudaSetDevice(devId));
+
     cudaEvent_t start, end;
     float elaspedTime = 0, singleKernelTime = 0;
 
@@ -166,8 +173,6 @@ uint32_t CUBSelect(
 #endif // __VERBOSE__
 
     CUDA_RUNTIME(cudaFree(d_temp_storage));
-
-   
     CUDA_RUNTIME(cudaFree(countOutput));
 
     return res;

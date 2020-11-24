@@ -227,14 +227,14 @@ static Config parseArgs(int argc, char** argv) {
     config.srcGraph = "D:\\graphs\\as-Skitter2.bel";
     config.dstGraph = "D:\\graphs\\as-Skitter2.bel";
     config.deviceId = 0;
-    config.mt = KCORE;
+    config.mt = KCLIQUE;
     config.printStats = false;
-    config.orient = None;
+    config.orient = Degree;
     config.allocation = gpu;
-    config.k = 6;
+    config.k = 5;
     config.sortEdges = false;;
     config.processBy = ByNode;
-    config.processElement = Warp;
+    config.processElement = BlockWarp;
 
 #ifndef __VS__
     int opt;

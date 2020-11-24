@@ -192,9 +192,9 @@ int main(int argc, char** argv)
 		uint newNumEdges;
 		if (m < INT_MAX)
 		{
-			CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m);
-			CUBSelect(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m);
-			newNumEdges = CUBSelect(gd->colInd, colInd_half.gdata(), keep.gdata(), m);
+			CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m, config.deviceId);
+			CUBSelect(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m, config.deviceId);
+			newNumEdges = CUBSelect(gd->colInd, colInd_half.gdata(), keep.gdata(), m, config.deviceId);
 		}
 		else
 		{
@@ -205,7 +205,7 @@ int main(int argc, char** argv)
 
 
 		execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), new_rowPtr.gdata());
-		uint total = CUBScanExclusive<uint, uint>(new_rowPtr.gdata(), new_rowPtr.gdata(), n, 0, config.allocation);
+		uint total = CUBScanExclusive<uint, uint>(new_rowPtr.gdata(), new_rowPtr.gdata(), n, config.deviceId, 0, config.allocation);
 		new_rowPtr.gdata()[n] = total;
 		//assert(total == new_edge_num * 2);
 		cudaDeviceSynchronize();
@@ -289,20 +289,21 @@ int main(int argc, char** argv)
 		printf("n = %u, m = %u, elements = %llu\n", n, m, sum);
 		printf("n = %u, m = %u, elements = %llu\n", n, m, sumc);
 
-		uint src = 500; // index id
+		uint src = 3541; // index id
 		uint s = g.rowPtr->cdata()[src];
 		uint d = g.rowPtr->cdata()[src + 1];
 		uint degree = d - s;
+		while (degree < 50)
+		{
+			src++;
+			s = g.rowPtr->cdata()[src];
+			d = g.rowPtr->cdata()[src + 1];
+			degree = d - s;
+		}
 
-
-		uint deg8 = degree / dv;
-		uint rem = degree - deg8 * dv;
-		uint totalBytes = dv * deg8 * (deg8 + 1) / 2;
-		totalBytes += rem * (deg8 + dv - 1) / dv;
-
-		graph::GPUArray<ttt> node_be("BE", unified, totalBytes, 0);
+		uint divisions = (degree + dv -1)/dv;
+		graph::GPUArray<ttt> node_be("BE", unified, divisions * degree, 0);
 		node_be.setAll(0, true);
-
 		for (uint i = 0; i < degree; i++)
 		{
 			uint dst = g.colInd->cdata()[i + s];
@@ -329,41 +330,46 @@ int main(int argc, char** argv)
 				}
 
 				if (a == b) {
+					uint startIndex = i * divisions;
+					uint divIndex = s1 / dv;
+					uint inDivIndex = s1 % dv;
+					node_be.cdata()[startIndex + divIndex] |= (1 << inDivIndex);
+
+
 					//i and s1
-					if (i > 0)
-					{
-						if (i > s1)
-						{
-							uint ss = i / dv;
-							uint sum = dv * ss * (ss + 1) / 2;
-							uint sr = i % dv;
-							uint sumr = sr * ((i + dv - 1) / dv) - 1;
+					//if (i > 0)
+					//{
+					//	if (i > s1)
+					//	{
+					//		uint ss = i / dv;
+					//		uint sum = dv * ss * (ss + 1) / 2;
+					//		uint sr = i % dv;
+					//		uint sumr = sr * ((i + dv - 1) / dv) - 1;
 
-							rsi = sum + sumr;
-							offset = s1 / dv;
-							uint numBytes = (i + dv - 1) / dv;
-							uint byteIndex = s1 % dv;
+					//		rsi = sum + sumr;
+					//		offset = s1 / dv;
+					//		uint numBytes = (i + dv - 1) / dv;
+					//		uint byteIndex = s1 % dv;
 
-							//Encode
-							node_be.cdata()[rsi + offset] |= (1 << byteIndex);
+					//		//Encode
+					//		node_be.cdata()[rsi + offset] |= (1 << byteIndex);
 
 
-						}
-						else
-						{
-							uint ss = s1 / dv;
-							uint sum = dv * ss * (ss + 1) / 2;
-							uint sr = s1 % dv;
-							uint sumr = sr * ((s1 + dv - 1) / dv) - 1;
+					//	}
+					//	else
+					//	{
+					//		uint ss = s1 / dv;
+					//		uint sum = dv * ss * (ss + 1) / 2;
+					//		uint sr = s1 % dv;
+					//		uint sumr = sr * ((s1 + dv - 1) / dv) - 1;
 
-							rsi = sum + sumr;
-							offset = i / dv;
-							uint numBytes = (s1 + dv - 1) / dv;
-							uint byteIndex = i % dv;
-							node_be.cdata()[rsi + offset] |= (1 << byteIndex);
-						}
+					//		rsi = sum + sumr;
+					//		offset = i / dv;
+					//		uint numBytes = (s1 + dv - 1) / dv;
+					//		uint byteIndex = i % dv;
+					//		node_be.cdata()[rsi + offset] |= (1 << byteIndex);
+					//	}
 
-					}
 
 					++s1;
 					++s2;
@@ -587,7 +593,7 @@ int main(int argc, char** argv)
 
 		graph::SingleGPU_Kclique<uint> mohaclique(config.deviceId, *gd);
 
-		for (int i = 0; i < 3; i++)
+		for (int i = 0; i < 1; i++)
 		{
 			Timer t;
 			if (config.processBy == ByNode)
@@ -647,20 +653,20 @@ int main(int argc, char** argv)
 #define OUR_NEW_KTRUSS
 #ifdef OUR_NEW_KTRUSS
 			//We need to change the graph representation
-			graph::GPUArray<uint> rowIndex("Half Row Index", AllocationTypeEnum::unified, m / 2, 0),
-			colIndex("Half Col Index", AllocationTypeEnum::unified, m / 2, 0),
-			EID("EID", AllocationTypeEnum::unified, m, 0),
-			asc("ASC temp", AllocationTypeEnum::unified, m, 0);
+			graph::GPUArray<uint> rowIndex("Half Row Index", AllocationTypeEnum::unified, m / 2, config.deviceId),
+			colIndex("Half Col Index", AllocationTypeEnum::unified, m / 2, config.deviceId),
+			EID("EID", AllocationTypeEnum::unified, m, config.deviceId),
+			asc("ASC temp", AllocationTypeEnum::unified, m, config.deviceId);
 
 		Timer t_init;
-		graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, 0);
+		graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, config.deviceId);
 
 
 		execKernel(init, (m + 512 - 1) / 512, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata());
 
-		CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m);
-		CUBSelect(gd->rowInd, rowIndex.gdata(), keep.gdata(), m);
-		uint newNumEdges = CUBSelect(gd->colInd, colIndex.gdata(), keep.gdata(), m);
+		CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m, config.deviceId);
+		CUBSelect(gd->rowInd, rowIndex.gdata(), keep.gdata(), m, config.deviceId);
+		uint newNumEdges = CUBSelect(gd->colInd, colIndex.gdata(), keep.gdata(), m, config.deviceId);
 		execKernel(InitEid, (newNumEdges + 512 - 1) / 512, 512, config.deviceId, false, newNumEdges, asc.gdata(), rowIndex.gdata(), colIndex.gdata(), gd->rowPtr, gd->colInd, EID.gdata());
 		asc.freeGPU();
 		keep.freeGPU();

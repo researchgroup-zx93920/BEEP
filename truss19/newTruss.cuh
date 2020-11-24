@@ -213,7 +213,7 @@ namespace graph
 				execKernel((filter_window<T, PeelT>), grid_size, BLOCK_SIZE, dev_, false,
 					edgeSupport.gdata(), edge_num, bucket.mark.gdata(), level, bucket_level_end_ + LEVEL_SKIP_SIZE);
 
-				bucket.count.gdata()[0] = CUBSelect(asc.gdata(), bucket.queue.gdata(), bucket.mark.gdata(), edge_num);
+				bucket.count.gdata()[0] = CUBSelect(asc.gdata(), bucket.queue.gdata(), bucket.mark.gdata(), edge_num, dev_);
 				bucket_level_end_ += LEVEL_SKIP_SIZE;
 			}
 			// SCAN the window.
@@ -276,7 +276,7 @@ namespace graph
 
 			uint total = 0;
 			if(n < INT_MAX)
-				total = CUBScanExclusive<uint, uint>(new_offset.gdata(), new_offset.gdata(), n);
+				total = CUBScanExclusive<uint, uint>(new_offset.gdata(), new_offset.gdata(), n, dev_);
 			else
 				total = s.ExclusiveSum(new_offset.gdata(), new_offset.gdata(), n);
 
@@ -289,8 +289,8 @@ namespace graph
 			/*new adj and eid construction*/
 			if (old_edge_num * 2 < INT_MAX)
 			{
-				CUBSelect(colInd, new_adj.gdata(), edge_deleted.gdata(), old_edge_num * 2);
-				CUBSelect(eid, new_eid.gdata(), edge_deleted.gdata(), old_edge_num * 2);
+				CUBSelect(colInd, new_adj.gdata(), edge_deleted.gdata(), old_edge_num * 2, dev_);
+				CUBSelect(eid, new_eid.gdata(), edge_deleted.gdata(), old_edge_num * 2, dev_);
 			}
 			else
 			{

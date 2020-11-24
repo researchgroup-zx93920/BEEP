@@ -59,7 +59,7 @@ namespace graph
             execKernel((filter_window<int>), grid_size, BLOCK_SIZE, deviceId, false,
                 EdgeSupport.gdata(), edge_num, in_bucket_window_.gdata(), level, bucket_level_end_);
 
-            *window_bucket_buf_size_ = CUBSelect(asc.gdata(), bucket_buf_.gdata(), in_bucket_window_.gdata(), edge_num);
+            *window_bucket_buf_size_ = CUBSelect(asc.gdata(), bucket_buf_.gdata(), in_bucket_window_.gdata(), edge_num, deviceId);
             #else
             auto& size = *window_bucket_buf_size_;
             size = 0;
@@ -129,7 +129,7 @@ namespace graph
         execKernel((warp_detect_deleted_edges<uint>), GRID_SIZE, block_size, deviceId, true,
             rowPtr.gdata(), n, bmp.eid.gdata(), processed.gdata(), new_offset.gdata(), edge_deleted.gdata());
 
-        uint total = CUBScanExclusive<uint, uint>(new_offset.gdata(), new_offset.gdata(), n);
+        uint total = CUBScanExclusive<uint, uint>(new_offset.gdata(), new_offset.gdata(), n, deviceId);
         new_offset.gdata()[n] = total;
         assert(total == new_edge_num * 2);
         cudaDeviceSynchronize();
@@ -137,8 +137,8 @@ namespace graph
         swap_ele(rowPtr.gdata(), new_offset.gdata());
 
         /*new adj and eid construction*/
-        CUBSelect(colInd.gdata(), new_adj.gdata(), edge_deleted.gdata(), old_edge_num * 2);
-        CUBSelect(bmp.eid.gdata(), new_eid.gdata(), edge_deleted.gdata(), old_edge_num * 2);
+        CUBSelect(colInd.gdata(), new_adj.gdata(), edge_deleted.gdata(), old_edge_num * 2, deviceId);
+        CUBSelect(bmp.eid.gdata(), new_eid.gdata(), edge_deleted.gdata(), old_edge_num * 2, deviceId);
 
         swap_ele(colInd.gdata(), new_adj.gdata());
         colInd.N = new_adj.N;

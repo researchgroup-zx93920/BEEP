@@ -1480,6 +1480,70 @@ namespace graph
     }
 
 
+    template <size_t WARPS_PER_BLOCK, typename T, bool reduce = true>
+    __device__ __forceinline__ uint64 warp_sorted_count_and_encode(const T* const A, //!< [in] array A
+        const size_t aSz, //!< [in] the number of elements in A
+        T* B, //!< [in] array B
+        T bSz,  //!< [in] the number of elements in B
+
+        bool AisMaster,
+        T* encode,
+        T new_level,
+        T clique_number
+    )
+    {
+        const int warpIdx = threadIdx.x / 32; // which warp in thread block
+        const int laneIdx = threadIdx.x % 32; // which thread in warp
+
+        uint64 threadCount = 0;
+        T lastIndex = 0;
+
+        // cover entirety of A with warp
+        for (T i = laneIdx; i < aSz; i += 32)
+        {
+            const T searchVal = A[i];
+            const T leftValue = B[lastIndex];
+            bool found = false;
+            const T lb = graph::binary_search<T>(B, lastIndex, bSz, searchVal, found);
+            if (found)
+            {
+                threadCount++;
+                //////////////////////////////Device function ///////////////////////
+                //if (new_level < clique_number)
+                {
+                    T intr_index = (AisMaster ? i : lb);
+                    T chunk_index = intr_index / 32;
+                    T inChunkIndex = intr_index % 32;
+                    atomicOr(&encode[chunk_index], 1 << inChunkIndex);
+                }
+                /////////////////////////////////////////////////////////////////////
+            }
+
+            lastIndex = lb;
+        }
+
+        if (reduce) {
+            // give lane 0 the total count discovered by the warp
+            // typedef cub::WarpReduce<uint64> WarpReduce;
+            // __shared__ typename WarpReduce::TempStorage tempStorage[WARPS_PER_BLOCK];
+            // uint64 aggregate = WarpReduce(tempStorage[warpIdx]).Sum(threadCount);
+            // return aggregate;
+
+            threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 16);
+            threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 8);
+            threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 4);
+            threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 2);
+            threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 1);
+
+            return threadCount;
+        }
+        else
+        {
+            return threadCount;
+        }
+    }
+
+
 
     ///////////////////////////////////////SERIAL INTERSECTION //////////////////////////////////////////////
     template <typename T>
