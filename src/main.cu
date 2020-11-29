@@ -164,15 +164,15 @@ int main(int argc, char** argv)
 	graph::SingleGPU_Kcore<uint, PeelType> mohacore(config.deviceId);
 	if (config.orient == Degree || config.orient == Degeneracy)
 	{
-		Timer t_init;
-
 		Timer t;
 		if (config.orient == Degeneracy)
 			mohacore.findKcoreIncremental_async(3, 1000, *gd, 0, 0);
 		else if (config.orient == Degree)
 			mohacore.getNodeDegree(*gd);
-		mohacore.sync();
+		double tt = t.elapsed();
+		Log(info, "Node ordering: %f s", tt);
 
+		Timer t_init;
 		graph::GPUArray<uint> rowInd_half("Half Row Index", AllocationTypeEnum::unified, m / 2, config.deviceId),
 			colInd_half("Half Col Index", AllocationTypeEnum::unified, m / 2, config.deviceId),
 			new_rowPtr("New", AllocationTypeEnum::unified, n + 1, config.deviceId),
@@ -188,17 +188,17 @@ int main(int argc, char** argv)
 			execKernel((init<uint, PeelType>), (m + 512 - 1) / 512, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata(), mohacore.nodePriority.gdata());
 		}
 
-		graph::CubLarge<uint> s;
+		graph::CubLarge<uint> s(config.deviceId);
 		uint newNumEdges;
 		if (m < INT_MAX)
 		{
-			CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m, config.deviceId);
+			//CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m, config.deviceId);
 			CUBSelect(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m, config.deviceId);
 			newNumEdges = CUBSelect(gd->colInd, colInd_half.gdata(), keep.gdata(), m, config.deviceId);
 		}
 		else
 		{
-			s.Select(asc.gdata(), asc.gdata(), keep.gdata(), m);
+			//s.Select(asc.gdata(), asc.gdata(), keep.gdata(), m);
 			s.Select(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m);
 			newNumEdges = s.Select(gd->colInd, colInd_half.gdata(), keep.gdata(), m);
 		}
@@ -225,7 +225,7 @@ int main(int argc, char** argv)
 		to_csrcoo_device(g, gd, config.deviceId, config.allocation); //got to device !!
 
 		double time_init = t_init.elapsed();
-		Log(info, "Create EID (by malmasri): %f s", time_init);
+		Log(info, "Orinebtation time: %f s", time_init);
 	}
 
 	//Just need to verify some new storage format
@@ -301,7 +301,7 @@ int main(int argc, char** argv)
 			degree = d - s;
 		}
 
-		uint divisions = (degree + dv -1)/dv;
+		uint divisions = (degree + dv - 1) / dv;
 		graph::GPUArray<ttt> node_be("BE", unified, divisions * degree, 0);
 		node_be.setAll(0, true);
 		for (uint i = 0; i < degree; i++)
@@ -593,7 +593,7 @@ int main(int argc, char** argv)
 
 		graph::SingleGPU_Kclique<uint> mohaclique(config.deviceId, *gd);
 
-		for (int i = 0; i < 1; i++)
+		for (int i = 0; i < 3; i++)
 		{
 			Timer t;
 			if (config.processBy == ByNode)
