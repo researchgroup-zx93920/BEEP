@@ -129,7 +129,7 @@ void update_queueu(int* curr, uint32_t curr_cnt, int* inCurr) {
 
 __global__ void  update_support(int* count,
 	int level, bool* processed,
-	int* affected, int *inAffected, int affected_cnt,
+	int* affected, int* inAffected, int affected_cnt,
 	int* next, bool* inNext, int& next_cnt,
 	bool* in_bucket_window_, uint* bucket_buf_, uint& window_bucket_buf_size_, int bucket_level_end_,
 	uint* reversed
@@ -140,7 +140,7 @@ __global__ void  update_support(int* count,
 	for (size_t i = gx; i < affected_cnt; i += blockDim.x * gridDim.x)
 	{
 		int edgeId = affected[i];
-		
+
 		count[edgeId] -= inAffected[edgeId];
 		inAffected[edgeId] = 0;
 		auto currCount = count[edgeId];
@@ -159,9 +159,9 @@ __global__ void  update_support(int* count,
 				bucket_buf_[insert_idx] = edgeId;
 			}
 		}
-		
 
-	}	
+
+	}
 }
 
 
@@ -207,7 +207,7 @@ namespace graph
 			if (level == bucket_level_end_)
 			{
 				// Clear the bucket_removed_indicator
-				
+
 
 				auto grid_size = (edge_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
 				execKernel((filter_window<T, PeelT>), grid_size, BLOCK_SIZE, dev_, false,
@@ -228,7 +228,7 @@ namespace graph
 			{
 				current.count.gdata()[0] = 0;
 			}
-			Log(LogPriorityEnum::info, "Level: %d, curr: %d/%d", level, current.count.gdata()[0] , bucket.count.gdata()[0]);
+			Log(LogPriorityEnum::info, "Level: %d, curr: %d/%d", level, current.count.gdata()[0], bucket.count.gdata()[0]);
 		}
 
 
@@ -251,7 +251,7 @@ namespace graph
 			int n, T& m,
 			T*& rowPtr, T*& colInd, T*& eid,
 			GPUArray<bool> processed,
-			 GPUArray<bool>& edge_deleted,
+			GPUArray<bool>& edge_deleted,
 			GPUArray <T>& new_offset, GPUArray<T>& new_eid, GPUArray <T>& new_adj,
 			T old_edge_num, T new_edge_num)
 		{
@@ -266,7 +266,7 @@ namespace graph
 				new_offset.initialize("New Row Pointer", unified, (n + 1), dev_);
 				edge_deleted.initialize("Edge deleted", gpu, old_edge_num * 2, dev_);
 			}
-			graph::CubLarge<uint> s;
+			graph::CubLarge<uint> s(dev_);
 
 			/*2. construct new CSR (offsets, adj) and rebuild the eid*/
 			int block_size = 128;
@@ -275,7 +275,7 @@ namespace graph
 				rowPtr, n, eid, processed.gdata(), new_offset.gdata(), edge_deleted.gdata());
 
 			uint total = 0;
-			if(n < INT_MAX)
+			if (n < INT_MAX)
 				total = CUBScanExclusive<uint, uint>(new_offset.gdata(), new_offset.gdata(), n, dev_);
 			else
 				total = s.ExclusiveSum(new_offset.gdata(), new_offset.gdata(), n);
@@ -300,7 +300,7 @@ namespace graph
 
 			swap_ele(colInd, new_adj.gdata());
 			swap_ele(eid, new_eid.gdata());
-			
+
 			m = new_edge_num * 2;
 		}
 
@@ -319,7 +319,7 @@ namespace graph
 			//zero_async<1>(gnumaffected, dev_, stream_); // zero on the device that will do the counting
 
 			gnumdeleted[0] = 0;
-		
+
 			CUDA_RUNTIME(cudaStreamSynchronize(stream_));
 		}
 
@@ -341,7 +341,7 @@ namespace graph
 			T bucket_level_end_ = level;
 
 			GPUArray<PeelT> edgeSupport;
-			GPUArray<bool> edge_kept; 
+			GPUArray<bool> edge_kept;
 
 			//Lets apply queues and buckets
 			//GPUArray <bool> in_bucket_window_;
@@ -359,7 +359,7 @@ namespace graph
 			graph::GraphQueue<T, bool> next_q;
 			next_q.Create(unified, numEdges, dev_);
 
-		
+
 			//Queues
 			GPUArray<T> identity_arr_asc;
 			AscendingGpu(g.numNodes, numEdges, identity_arr_asc);
@@ -368,9 +368,9 @@ namespace graph
 			GPUArray <uint> newColIndex_csr;
 			GPUArray <uint> new_eid;
 			GPUArray <uint> new_edge_offset_origin;
-		
+
 			GPUArray<bool> edge_deleted;           // Auxiliaries for shrinking graphs.
-		
+
 
 			processed.initialize("is Deleted (Processed)", unified, numEdges, dev_);
 			edgeSupport.initialize("Edge Support", unified, numEdges, dev_);
@@ -393,7 +393,7 @@ namespace graph
 			const auto todo_original = numEdges;
 			while (todo > 0)
 			{
-			//	//printf("k=%d\n", k);
+				//	//printf("k=%d\n", k);
 				numDeleted_l = 0;
 				CUDA_RUNTIME(cudaGetLastError());
 				cudaDeviceSynchronize();
@@ -403,14 +403,14 @@ namespace graph
 
 				while (current_q.count.gdata()[0] > 0)
 				{
-				
+
 					todo -= current_q.count.gdata()[0];
 					if (0 == todo) {
 						break;
 					}
 
 					next_q.count.gdata()[0] = 0;
-					if (level == 0) 
+					if (level == 0)
 					{
 						auto block_size = 256;
 						auto grid_size = (current_q.count.gdata()[0] + block_size - 1) / block_size;
@@ -424,7 +424,7 @@ namespace graph
 							current_q,
 							next_q,
 							bucket_q, bucket_level_end_,
-							0,Block);
+							0, Block);
 						tcCounter->sync();
 
 						auto block_size = 256;
@@ -439,7 +439,7 @@ namespace graph
 					//current_q.count.gdata()[0] = next_q.count.gdata()[0];
 
 
-					
+
 				}
 
 				percDeleted_l = (numDeleted_l) * 1.0 / (numEdges);
@@ -466,7 +466,7 @@ namespace graph
 			k = level + 1;
 		}
 
-		uint findKtrussIncremental_sync(int kmin, int kmax, TcBase<T> *tcCounter, EidGraph_d<T>& g, int* reverseIndex, EncodeDataType* bitMap, const size_t nodeOffset = 0, const size_t edgeOffset = 0)
+		uint findKtrussIncremental_sync(int kmin, int kmax, TcBase<T>* tcCounter, EidGraph_d<T>& g, int* reverseIndex, EncodeDataType* bitMap, const size_t nodeOffset = 0, const size_t edgeOffset = 0)
 		{
 			findKtrussIncremental_async(kmin, kmax, tcCounter, g, reverseIndex, bitMap, nodeOffset, edgeOffset);
 			sync();

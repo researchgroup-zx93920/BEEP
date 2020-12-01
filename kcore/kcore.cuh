@@ -189,7 +189,6 @@ kernel_partition_level_next(
 	for (auto i = gwx; i < current.count[0]; i += blockDim.x * gridDim.x / P)
 	{
 		T nodeId = current.queue[i];
-
 		T srcStart = g.rowPtr[nodeId];
 		T srcStop = g.rowPtr[nodeId + 1];
 
@@ -201,8 +200,7 @@ kernel_partition_level_next(
 				for (auto e = lx; e < *size; e += P)
 				{
 					T e1 = e1_arr[e];
-					if (!current.mark[e1])
-						process_degree<T>(e1, level, nodeDegree, next, bucket, bucket_level_end_);
+					process_degree<T>(e1, level, nodeDegree, next, bucket, bucket_level_end_);
 				}
 				__syncwarp();
 				if (lx == 0)
@@ -213,8 +211,11 @@ kernel_partition_level_next(
 			if (j < srcStop)
 			{
 				T affectedNode = g.colInd[j];
-				auto pos = atomicAdd(size, 1);
-				e1_arr[pos] = affectedNode;
+				if (!current.mark[affectedNode])
+				{
+					auto pos = atomicAdd(size, 1);
+					e1_arr[pos] = affectedNode;
+				}
 			}
 		}
 
@@ -222,8 +223,7 @@ kernel_partition_level_next(
 		for (auto e = lx; e < *size; e += P)
 		{
 			T e1 = e1_arr[e];
-			if (!current.mark[e1])
-				process_degree<T>(e1, level, nodeDegree, next, bucket, bucket_level_end_);
+			process_degree<T>(e1, level, nodeDegree, next, bucket, bucket_level_end_);
 		}
 	}
 }
@@ -431,7 +431,7 @@ namespace graph
 			const size_t nodeOffset = 0, const size_t edgeOffset = 0)
 		{
 			const int dimBlock = 256;
-			nodeDegree.initialize("Edge Support", unified, g.numNodes, 0);
+			nodeDegree.initialize("Node Degree", unified, g.numNodes, dev_);
 			uint dimGridNodes = (g.numNodes + dimBlock - 1) / dimBlock;
 			execKernel(getNodeDegree_kernel<T>, dimGridNodes, dimBlock, dev_, false, nodeDegree.gdata(), g);
 
@@ -447,10 +447,6 @@ namespace graph
 
 			int level = 0;
 			int bucket_level_end_ = level;
-
-
-			GPUArray<bool> node_kept;
-
 			//Lets apply queues and buckets
 			graph::GraphQueue<T, bool> bucket_q;
 			bucket_q.Create(unified, g.numNodes, dev_);
@@ -464,32 +460,18 @@ namespace graph
 			GPUArray<T> identity_arr_asc;
 			AscendingGpu(g.numNodes, identity_arr_asc);
 
-			GPUArray <T> newRowPtr;
-			GPUArray <T> newColIndex_csr;
-			GPUArray <T> new_eid;
-			GPUArray <T> new_edge_offset_origin;
-			GPUArray<bool> edge_deleted;           // Auxiliaries for shrinking graphs.
-
 
 			processed.initialize("is Deleted (Processed)", unified, g.numNodes, dev_);
-
 			processed.setAll(false, false);
 
 
 			nodePriority.initialize("Edge Support", unified, g.numNodes, dev_);
 			nodePriority.setAll(g.numEdges, false);
 
-
-			CUDA_RUNTIME(cudaStreamSynchronize(stream_));
-
 			uint numDeleted_l = 0;
 			float minPercentage = 0.8;
 			float percDeleted_l = 0.0;
-
-
 			getNodeDegree(g);
-
-
 			int todo = g.numNodes;
 			const auto todo_original = g.numNodes;
 
@@ -507,7 +489,6 @@ namespace graph
 				int iterations = 0;
 				while (current_q.count.gdata()[0] > 0)
 				{
-
 					todo -= current_q.count.gdata()[0];
 					if (0 == todo) {
 						break;
@@ -526,30 +507,30 @@ namespace graph
 						auto grid_size = (current_q.count.gdata()[0] + block_size - 1) / block_size;
 						auto grid_warp_size = (32 * current_q.count.gdata()[0] + block_size - 1) / block_size;
 						auto grid_block_size = current_q.count.gdata()[0];
-						if (level < 4)
-						{
-							execKernel((kernel_thread_level_next<T>), grid_size, block_size, dev_, false,
-								g,
-								level, processed.gdata(), nodeDegree.gdata(),
-								current_q.device_queue->gdata()[0],
-								next_q.device_queue->gdata()[0],
-								bucket_q.device_queue->gdata()[0],
-								bucket_level_end_);
-						}
-						else if (level <= 16)
-						{
-							const int P = 16;
-							auto gridSize = (P * current_q.count.gdata()[0] + block_size - 1) / block_size;
+						// if (level < 4)
+						// {
+						// 	execKernel((kernel_thread_level_next<T>), grid_size, block_size, dev_, false,
+						// 		g,
+						// 		level, processed.gdata(), nodeDegree.gdata(),
+						// 		current_q.device_queue->gdata()[0],
+						// 		next_q.device_queue->gdata()[0],
+						// 		bucket_q.device_queue->gdata()[0],
+						// 		bucket_level_end_);
+						// }
+						// else if (level <= 16)
+						// {
+						// 	const int P = 16;
+						// 	auto gridSize = (P * current_q.count.gdata()[0] + block_size - 1) / block_size;
 
-							execKernel((kernel_partition_level_next<T, PeelT, 256, P>), gridSize, block_size, dev_, false,
-								g,
-								level, processed.gdata(), nodeDegree.gdata(),
-								current_q.device_queue->gdata()[0],
-								next_q.device_queue->gdata()[0],
-								bucket_q.device_queue->gdata()[0],
-								bucket_level_end_);
-						}
-						else if (level <= 32)
+						// 	execKernel((kernel_partition_level_next<T, PeelT, 256, P>), gridSize, block_size, dev_, false,
+						// 		g,
+						// 		level, processed.gdata(), nodeDegree.gdata(),
+						// 		current_q.device_queue->gdata()[0],
+						// 		next_q.device_queue->gdata()[0],
+						// 		bucket_q.device_queue->gdata()[0],
+						// 		bucket_level_end_);
+						// }
+						// else if (level <= 32)
 						{
 							execKernel((kernel_partition_level_next<T, PeelT, 256, 32>), grid_warp_size, block_size, dev_, false,
 								g,
@@ -559,16 +540,16 @@ namespace graph
 								bucket_q.device_queue->gdata()[0],
 								bucket_level_end_);
 						}
-						else
-						{
-							execKernel((kernel_block_level_next<T, PeelT, 256>), grid_block_size, block_size, dev_, false,
-								g,
-								level, processed.gdata(), nodeDegree.gdata(),
-								current_q.device_queue->gdata()[0],
-								next_q.device_queue->gdata()[0],
-								bucket_q.device_queue->gdata()[0],
-								bucket_level_end_);
-						}
+						// else
+						// {
+						// 	execKernel((kernel_block_level_next<T, PeelT, 256>), grid_block_size, block_size, dev_, false,
+						// 		g,
+						// 		level, processed.gdata(), nodeDegree.gdata(),
+						// 		current_q.device_queue->gdata()[0],
+						// 		next_q.device_queue->gdata()[0],
+						// 		bucket_q.device_queue->gdata()[0],
+						// 		bucket_level_end_);
+						// }
 
 						execKernel((update_priority<T, PeelT>), grid_size, block_size, dev_, false, current_q.device_queue->gdata()[0], priority, nodePriority.gdata());
 					}
@@ -582,25 +563,6 @@ namespace graph
 					//current_q.count.gdata()[0] = next_q.count.gdata()[0];
 				}
 				//printf("Level %d took %d iterations \n", level, iterations);
-
-				percDeleted_l = (numDeleted_l) * 1.0 / (g.numNodes);
-				if (percDeleted_l >= 1.0)
-				{
-					break;
-				}
-				else
-				{
-					if (percDeleted_l > 0.2)
-					{
-						//StreamComapction(g.numNodes, g.numEdges, g.rowPtr_csr, g.colInd_csr, g.eid, processed,
-						//	edge_deleted,
-						//	newRowPtr, new_eid, newColIndex_csr,
-						//	numEdges, todo);
-
-						//numEdges = todo;
-					}
-
-				}
 				level++;
 			}
 

@@ -2616,3 +2616,258 @@ kckernel_node_block_warp_count(
 		atomicCAS(&levelStats[sm_id * conc_blocks_per_SM + levelPtr], 1, 0);
 	}
 }
+
+
+template <typename T, uint BLOCK_DIM_X>
+__launch_bounds__(BLOCK_DIM_X, 16)
+__global__ void
+kckernel_node_block_warp_binary_count(
+	uint64* counter,
+	graph::COOCSRGraph_d<T> g,
+	T kclique,
+	T maxDeg,
+	const  graph::GraphQueue_d<T, bool>  current,
+	T* current_level,
+	uint64* cpn,
+	T conc_blocks_per_SM,
+	T* levelStats,
+	T* adj_enc
+)
+{
+	//will be removed later
+	constexpr T warpsPerBlock = BLOCK_DIM_X / 32;
+	const int wx = threadIdx.x / 32; // which warp in thread block
+	const size_t lx = threadIdx.x % 32;
+	__shared__ T level_index[warpsPerBlock][7];
+	__shared__ T level_count[warpsPerBlock][7];
+	__shared__ T level_prev_index[warpsPerBlock][7];
+
+	__shared__ T current_node_index[warpsPerBlock], level_offset[warpsPerBlock];
+	__shared__ uint64 clique_count[warpsPerBlock];
+	__shared__ T l[warpsPerBlock];
+	__shared__ T new_level[warpsPerBlock];
+	__shared__ uint32_t  sm_id, levelPtr;
+	__shared__ T src, srcStart, srcLen;
+
+	__shared__ T num_divs, num_divs_local, encode_offset, * encode;
+
+	__shared__ T scl[896];
+	__syncthreads();
+
+	if (threadIdx.x == 0)
+	{
+		sm_id = __mysmid();
+		T temp = 0;
+		while (atomicCAS(&(levelStats[(sm_id * conc_blocks_per_SM) + temp]), 0, 1) != 0)
+		{
+			temp++;
+		}
+		levelPtr = temp;
+	}
+	__syncthreads();
+
+	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
+	{
+		//block things
+		if (threadIdx.x == 0)
+		{
+			T src = current.queue[i];
+			srcStart = g.rowPtr[src];
+			srcLen = g.rowPtr[src + 1] - srcStart;
+
+			//printf("src = %u, srcLen = %u\n", src, srcLen);
+		}
+		__syncthreads();
+		if (threadIdx.x == 1)
+			num_divs = (maxDeg + 32 - 1) / 32;
+		else if (threadIdx.x == 2)
+			num_divs_local = (srcLen + 32 - 1) / 32;
+		else if (threadIdx.x == 3)
+		{
+			encode_offset = sm_id * conc_blocks_per_SM * (maxDeg * num_divs) + levelPtr * (maxDeg * num_divs);
+			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
+		}
+		__syncthreads();
+		//Encode
+		for (unsigned long long j = wx; j < srcLen; j += warpsPerBlock)
+		{
+			for (unsigned long long k = lx; k < num_divs_local; k += 32)
+			{
+				encode[j * num_divs_local + k] = 0x00;
+			}
+			__syncwarp();
+			graph::warp_sorted_count_and_encode<WARPS_PER_BLOCK, T, true>(&g.colInd[srcStart], srcLen,
+				&g.colInd[g.rowPtr[g.colInd[srcStart + j]]], g.rowPtr[g.colInd[srcStart + j] + 1] - g.rowPtr[g.colInd[srcStart + j]],
+				true, &encode[j * num_divs_local], l[wx] + 1, kclique);
+		}
+
+		__syncthreads(); //Done encoding
+		T mm = (1 << srcLen) - 1;
+		for (unsigned long long j = wx; j < srcLen; j += warpsPerBlock)
+		{
+
+			//level_offset[wx] = sm_id * conc_blocks_per_SM * (warpsPerBlock * num_divs * 7) + levelPtr * (warpsPerBlock * num_divs * 7);
+			T* cl = &scl[/*level_offset[wx] +*/ wx * (num_divs * 7)];
+
+
+			if (lx < 7)
+			{
+				level_count[wx][lx] = 0;
+				level_index[wx][lx] = 0;
+				level_prev_index[wx][lx] = 0;
+			}
+			else if (lx == 7 + 1)
+			{
+				l[wx] = 2;
+				//new_level[wx] = 2;
+				current_node_index[wx] = UINT_MAX;
+				clique_count[wx] = 0;
+			}
+
+
+			for (unsigned long long k = lx; k < num_divs_local * 7; k += 32)
+			{
+				cl[k] = 0x00;
+			}
+
+
+			//get warp count ??
+			uint64 warpCount = 0;
+			for (unsigned long long k = lx; k < num_divs_local; k += 32)
+			{
+				warpCount += __popc(encode[j * num_divs_local + lx]);
+			}
+			warpCount += __shfl_down_sync(mm, warpCount, 16);
+			warpCount += __shfl_down_sync(mm, warpCount, 8);
+			warpCount += __shfl_down_sync(mm, warpCount, 4);
+			warpCount += __shfl_down_sync(mm, warpCount, 2);
+			warpCount += __shfl_down_sync(mm, warpCount, 1);
+
+			if (lx == 0 && l[wx] + 1 == kclique)
+				clique_count[wx] += warpCount;
+			else if (lx == 0 && l[wx] + 1 < kclique && warpCount >= kclique - l[wx])
+			{
+				(l[wx])++;
+				//(new_level[wx])++;
+				level_count[wx][l[wx] - 2] = warpCount;
+				level_index[wx][l[wx] - 2] = 0;
+				level_prev_index[wx][l[wx] - 2] = 0;
+			}
+			__syncwarp();
+			while (level_count[wx][l[wx] - 2] > level_index[wx][l[wx] - 2])
+			{
+				//First Index
+				T* from = l[wx] == 3 ? &(encode[num_divs_local * j]) : &(cl[num_divs_local * (l[wx] - 4)]);
+				T* to = &(cl[num_divs_local * (l[wx] - 3)]);
+				T startDiv = level_prev_index[wx][l[wx] - 2] / 32;
+				// for (T k = startDiv; k < num_divs_local; k++)
+				// {
+				// 	unsigned int mask = (k == startDiv) ? ~((1 << (level_prev_index[wx][l[wx] - 2] & 0x1F)) - 1) : 0xFFFFFFFF;
+				// 	T val = (from[k] & (1 << lx) & mask);
+				// 	unsigned int newmask = __ballot_sync(0xFFFFFFFF, val);
+				// 	if (newmask != 0)
+				// 	{
+				// 		uint elected_lane_deq = __ffs(newmask) - 1;
+				// 		current_node_index[wx] = __shfl_sync(0xFFFFFFFF, k * 32 + lx, elected_lane_deq, 32);
+				// 		break;
+				// 	}
+				// }
+
+				// for (T k = 0; k < (num_divs_local + 31) / 32; k++)
+				// {
+				// 	T index = startDiv + k * 32 + lx;
+				// 	T val = index < num_divs_local ? from[index] : 0;
+				// 	unsigned int mask = (index == startDiv) ? ~((1 << (level_prev_index[wx][l[wx] - 2] & 0x1F)) - 1) : 0xFFFFFFFF;
+				// 	unsigned int oneIndex = mask & val;
+				// 	unsigned int newmask = __ballot_sync(0xFFFFFFFF, oneIndex);
+				// 	if (newmask != 0)
+				// 	{
+				// 		uint elected_lane_deq = __ffs(newmask) - 1;
+				// 		// if (lx==elected_lane_deq)
+				// 		// {
+				// 		// 	current_node_index[wx] = index * 32 + __ffs(oneIndex) - 1;
+				// 		// }
+
+				// 		current_node_index[wx] = __shfl_sync(0xFFFFFFFF, index * 32 + __ffs(oneIndex) - 1, elected_lane_deq, 32);
+				// 		break;
+				// 	}
+				// }
+
+
+				T realindex = level_prev_index[wx][l[wx] - 2]; // start real Index
+				T maskBlock = realindex / 32;
+				T maskIndex = ~((1 << (realindex & 0x1F)) - 1);
+
+				T newIndex = __ffs(from[maskBlock] & maskIndex);
+				while (newIndex == 0)
+				{
+					maskIndex = 0xFFFFFFFF;
+					maskBlock++;
+					newIndex = __ffs(from[maskBlock] & maskIndex);
+				}
+
+				if (lx == 0)
+				{
+					current_node_index[wx] = 32 * maskBlock + newIndex - 1;
+					level_prev_index[wx][l[wx] - 2] = 32 * maskBlock + newIndex;
+					//level_prev_index[wx][l[wx] - 2] = current_node_index[wx] + 1;
+					level_index[wx][l[wx] - 2]++;
+					new_level[wx] = l[wx];
+				}
+
+				__syncwarp();
+				//Intersect
+				uint64 warpCount = 0;
+				for (T k = lx; k < num_divs_local; k += 32)
+				{
+					to[k] = from[k] & encode[current_node_index[wx] * num_divs_local + k];
+					warpCount += __popc(to[k]);
+				}
+				warpCount += __shfl_down_sync(mm, warpCount, 16);
+				warpCount += __shfl_down_sync(mm, warpCount, 8);
+				warpCount += __shfl_down_sync(mm, warpCount, 4);
+				warpCount += __shfl_down_sync(mm, warpCount, 2);
+				warpCount += __shfl_down_sync(mm, warpCount, 1);
+
+				if (lx == 0 && warpCount > 0)
+				{
+					if (l[wx] + 1 == kclique)
+						clique_count[wx] += warpCount;
+					else if (l[wx] + 1 < kclique && warpCount >= kclique - l[wx])
+					{
+						(l[wx])++;
+						//(new_level[wx])++;
+						level_count[wx][l[wx] - 2] = warpCount;
+						level_index[wx][l[wx] - 2] = 0;
+						level_prev_index[wx][l[wx] - 2] = 0;
+					}
+				}
+				//Readjust
+				if (lx == 0)
+				{
+					while (l[wx] > 3 && level_index[wx][l[wx] - 2] >= level_count[wx][l[wx] - 2])
+					{
+						(l[wx])--;
+					}
+
+					//l[wx] = new_level[wx];
+					//current_node_index[wx] = UINT_MAX;
+				}
+				__syncwarp();
+			}
+			if (lx == 0)
+			{
+				atomicAdd(counter, clique_count[wx]);
+				//cpn[current.queue[i]] = clique_count[wx];
+			}
+
+			__syncwarp();
+		}
+	}
+
+	__syncthreads();
+	if (threadIdx.x == 0)
+	{
+		atomicCAS(&levelStats[sm_id * conc_blocks_per_SM + levelPtr], 1, 0);
+	}
+}
