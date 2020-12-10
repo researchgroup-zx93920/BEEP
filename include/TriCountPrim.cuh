@@ -515,8 +515,8 @@ namespace graph
                 lastIndex = lb;
             }
 
-            unsigned int writemask_deq = __activemask();
-            lastIndex = __shfl_sync(writemask_deq, lastIndex, 31);
+            // unsigned int writemask_deq = __activemask();
+            // lastIndex = __shfl_sync(writemask_deq, lastIndex, 31);
         }
 
         if (reduce) {
@@ -1480,50 +1480,35 @@ namespace graph
     }
 
 
-    template <size_t WARPS_PER_BLOCK, typename T, bool reduce = true>
+    template <size_t WARPS_PER_BLOCK, typename T, bool reduce = true, uint CPARTSIZE = 32>
     __device__ __forceinline__ uint64 warp_sorted_count_and_encode(const T* const A, //!< [in] array A
         const size_t aSz, //!< [in] the number of elements in A
         T* B, //!< [in] array B
         T bSz,  //!< [in] the number of elements in B
 
-        bool AisMaster,
-        T* encode,
-        T new_level,
-        T clique_number
+        T* encode
     )
     {
-        const int warpIdx = threadIdx.x / 32; // which warp in thread block
-        const int laneIdx = threadIdx.x % 32; // which thread in warp
-
-        uint64 threadCount = 0;
-        T lastIndex = 0;
-
+        const int warpIdx = threadIdx.x / CPARTSIZE; // which warp in thread block
+        const int laneIdx = threadIdx.x % CPARTSIZE; // which thread in warp
         // cover entirety of A with warp
-        for (T i = laneIdx; i < aSz; i += 32)
+        for (T i = laneIdx; i < aSz; i += CPARTSIZE)
         {
             const T searchVal = A[i];
-            const T leftValue = B[lastIndex];
             bool found = false;
             const T lb = graph::binary_search<T>(B, 0, bSz, searchVal, found);
             if (found)
             {
-                threadCount++;
                 //////////////////////////////Device function ///////////////////////
-                //if (new_level < clique_number)
-                {
-                    T intr_index = i;
-                    T chunk_index = intr_index / 32;
-                    T inChunkIndex = intr_index % 32;
-                    atomicOr(&encode[chunk_index], 1 << inChunkIndex);
-                }
+                T chunk_index = i / 32; // 32 here is the division size of the encode
+                T inChunkIndex = i % 32;
+                atomicOr(&encode[chunk_index], 1 << inChunkIndex);
                 /////////////////////////////////////////////////////////////////////
             }
-
-            //lastIndex = lb;
         }
 
 
-        return threadCount;
+        return 0;
 
     }
 
@@ -1595,7 +1580,7 @@ namespace graph
 
 
     template <size_t BLOCK_DIM_X, typename T>
-    __device__ uint64_t block_sorted_count_and_set_tri(const T* const A, //!< [in] array A
+    __device__ __forceinline__ uint64_t block_sorted_count_and_set_tri(const T* const A, //!< [in] array A
         const size_t aSz, //!< [in] the number of elements in A
         const T* const B, //!< [in] array B
         const size_t bSz,  //!< [in] the number of elements in B
@@ -1605,6 +1590,40 @@ namespace graph
         T lastIndex = 0;
         // cover entirety of A with block
         for (size_t i = threadIdx.x; i < aSz; i += BLOCK_DIM_X)
+        {
+            // one element of A per thread, just search for A into B
+            const T searchVal = A[i];
+            const T leftValue = B[lastIndex];
+            if (searchVal >= leftValue)
+            {
+                bool found = false;
+                const T lb = graph::binary_search<T>(B, lastIndex, bSz, searchVal, found);
+                if (found)
+                {
+                    T old = atomicAdd(counter, 1);
+                    tri[old] = searchVal;
+                }
+
+                lastIndex = lb;
+            }
+
+        }
+
+        return 0;
+    }
+
+    template <size_t WARPS_PER_BLOCK, typename T>
+    __device__ __forceinline__ uint64_t warp_sorted_count_and_set_tri(const T* const A, //!< [in] array A
+        const size_t aSz, //!< [in] the number of elements in A
+        const T* const B, //!< [in] array B
+        const size_t bSz,  //!< [in] the number of elements in B
+        T* tri,
+        T* counter
+    ) {
+        T lastIndex = 0;
+        const int laneIdx = threadIdx.x % 32;
+        // cover entirety of A with block
+        for (size_t i = laneIdx; i < aSz; i += 32)
         {
             // one element of A per thread, just search for A into B
             const T searchVal = A[i];

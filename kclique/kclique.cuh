@@ -23,43 +23,49 @@
 #include "kckernels.cuh"
 
 
-template <typename T, uint BLOCK_DIM_X>
+__constant__ uint KCCOUNT;
+__constant__ uint MAXDEG;
+__constant__ uint PARTSIZE;
+__constant__ uint NUMPART;
+__constant__ uint MAXLEVEL;
+__constant__ uint NUMDIVS;
+__constant__ uint CBPSM;
+
+
+template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
 kckernel_edge_block_warp_binary_count(
 	uint64* counter,
 	graph::COOCSRGraph_d<T> g,
-	T kclique,
-	T maxDeg,
 	const  graph::GraphQueue_d<T, bool>  current,
 	T* current_level,
 	uint64* cpn,
-	T conc_blocks_per_SM,
 	T* levelStats,
 	T* adj_enc,
 	T* adj_tri
 )
 {
 	//will be removed later
-	constexpr T warpsPerBlock = BLOCK_DIM_X / 32;
-	const int wx = threadIdx.x / 32; // which warp in thread block
-	const size_t lx = threadIdx.x % 32;
-	__shared__ T level_index[warpsPerBlock][7];
-	__shared__ T level_count[warpsPerBlock][7];
-	__shared__ T level_prev_index[warpsPerBlock][7];
+	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
+	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
+	const size_t lx = threadIdx.x % CPARTSIZE;
+	__shared__ T level_index[numPartitions][7];
+	__shared__ T level_count[numPartitions][7];
+	__shared__ T level_prev_index[numPartitions][7];
 
-	__shared__ T current_node_index[warpsPerBlock], level_offset[warpsPerBlock];
-	__shared__ uint64 clique_count[warpsPerBlock];
-	__shared__ T l[warpsPerBlock];
-	__shared__ T new_level[warpsPerBlock];
+	__shared__ T level_offset[numPartitions];
+	__shared__ uint64 clique_count[numPartitions];
+	__shared__ T l[numPartitions];
 	__shared__ uint32_t  sm_id, levelPtr;
 	__shared__ T srcStart, srcLen;
 	__shared__ T src2Start, src2Len;
 
-	__shared__ T num_divs, num_divs_local, encode_offset, * encode, tri_offset, * tri, scounter;
+	__shared__ T num_divs_local, encode_offset, * encode, tri_offset, * tri, scounter;
 
 
-	__shared__ T scl[896];
+
+	//__shared__ T scl[896];
 
 	__syncthreads();
 
@@ -67,7 +73,7 @@ kckernel_edge_block_warp_binary_count(
 	{
 		sm_id = __mysmid();
 		T temp = 0;
-		while (atomicCAS(&(levelStats[(sm_id * conc_blocks_per_SM) + temp]), 0, 1) != 0)
+		while (atomicCAS(&(levelStats[(sm_id * CBPSM) + temp]), 0, 1) != 0)
 		{
 			temp++;
 		}
@@ -93,9 +99,8 @@ kckernel_edge_block_warp_binary_count(
 		}
 		else if (threadIdx.x == 2)
 		{
-			tri_offset = sm_id * conc_blocks_per_SM * (maxDeg)+levelPtr * (maxDeg);
+			tri_offset = sm_id * CBPSM * (MAXDEG)+levelPtr * (MAXDEG);
 			tri = &adj_tri[tri_offset  /*srcStart[wx]*/];
-
 			scounter = 0;
 		}
 
@@ -110,55 +115,54 @@ kckernel_edge_block_warp_binary_count(
 			num_divs_local = (scounter + 32 - 1) / 32;
 		else if (threadIdx.x == 1)
 		{
-			num_divs = (maxDeg + 32 - 1) / 32;
-			encode_offset = sm_id * conc_blocks_per_SM * (maxDeg * num_divs) + levelPtr * (maxDeg * num_divs);
+			encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
 			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
 		}
 
-		if (kclique == 3 && threadIdx.x == 0)
+		if (KCCOUNT == 3 && threadIdx.x == 0)
 			atomicAdd(counter, scounter);
 
 
 		__syncthreads();
 		//Encode
-		for (unsigned long long j = wx; j < scounter; j += warpsPerBlock)
+		T partMask = (1 << CPARTSIZE) - 1;
+		partMask = partMask << ((wx % 4) * CPARTSIZE);
+		T mm = (1 << scounter) - 1;
+		mm = mm << ((wx / numPartitions) * CPARTSIZE);
+		for (unsigned long long j = wx; j < scounter; j += numPartitions)
 		{
-			for (unsigned long long k = lx; k < num_divs_local; k += 32)
+			for (unsigned long long k = lx; k < num_divs_local; k += CPARTSIZE)
 			{
 				encode[j * num_divs_local + k] = 0x00;
 			}
-			__syncwarp();
-			graph::warp_sorted_count_and_encode<WARPS_PER_BLOCK, T, true>(tri, scounter,
+			__syncwarp(partMask);
+			graph::warp_sorted_count_and_encode<WARPS_PER_BLOCK, T, true, CPARTSIZE>(tri, scounter,
 				&g.colInd[g.rowPtr[tri[j]]], g.rowPtr[tri[j] + 1] - g.rowPtr[tri[j]],
-				true, &encode[j * num_divs_local], l[wx] + 1, kclique);
+				&encode[j * num_divs_local]);
 		}
 
 		__syncthreads(); //Done encoding
 
-		T mm = (1 << scounter) - 1;
-		for (unsigned long long j = wx; j < scounter; j += warpsPerBlock)
+
+		for (unsigned long long j = wx; j < scounter; j += numPartitions)
 		{
 
-			//level_offset[wx] = sm_id * conc_blocks_per_SM * (warpsPerBlock * num_divs * 7) + levelPtr * (warpsPerBlock * num_divs * 7);
-			T* cl = &scl[/*level_offset[wx] +*/ wx * (num_divs * 7)];
-
-
+			level_offset[wx] = sm_id * CBPSM * (numPartitions * NUMDIVS * 7) + levelPtr * (numPartitions * NUMDIVS * 7);
+			T* cl = &current_level[level_offset[wx] + wx * (NUMDIVS * 7)];
 			if (lx < 7)
 			{
 				level_count[wx][lx] = 0;
 				level_index[wx][lx] = 0;
 				level_prev_index[wx][lx] = 0;
 			}
-			else if (lx == 7 + 1)
+			if (lx == 0)
 			{
-				l[wx] = 3;
-				//new_level[wx] = 3;
-				current_node_index[wx] = UINT_MAX;
+				l[wx] = 4;
 				clique_count[wx] = 0;
 			}
 
 
-			for (unsigned long long k = lx; k < num_divs_local * 7; k += 32)
+			for (unsigned long long k = lx; k < num_divs_local * 7; k += CPARTSIZE)
 			{
 				cl[k] = 0x00;
 			}
@@ -166,52 +170,32 @@ kckernel_edge_block_warp_binary_count(
 
 			//get warp count ??
 			uint64 warpCount = 0;
-			for (unsigned long long k = lx; k < num_divs_local; k += 32)
+			for (unsigned long long k = lx; k < num_divs_local; k += CPARTSIZE)
 			{
 				warpCount += __popc(encode[j * num_divs_local + k]);
 			}
-			warpCount += __shfl_down_sync(mm, warpCount, 16);
-			warpCount += __shfl_down_sync(mm, warpCount, 8);
-			warpCount += __shfl_down_sync(mm, warpCount, 4);
-			warpCount += __shfl_down_sync(mm, warpCount, 2);
-			warpCount += __shfl_down_sync(mm, warpCount, 1);
+			//warpCount += __shfl_down_sync(partMask, warpCount, 16);
+			//warpCount += __shfl_down_sync(partMask, warpCount, 8);
+			warpCount += __shfl_down_sync(partMask, warpCount, 4);
+			warpCount += __shfl_down_sync(partMask, warpCount, 2);
+			warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
-			if (lx == 0 && l[wx] + 1 == kclique)
+			if (lx == 0 && l[wx] == KCCOUNT)
 				clique_count[wx] += warpCount;
-			else if (lx == 0 && l[wx] + 1 < kclique && warpCount >= kclique - l[wx])
+			else if (lx == 0 && KCCOUNT > 4 && warpCount >= KCCOUNT - 3)
 			{
-				(l[wx])++;
-				//(new_level[wx])++;
-				level_count[wx][l[wx] - 2] = warpCount;
-				level_index[wx][l[wx] - 2] = 0;
-				level_prev_index[wx][l[wx] - 2] = 0;
+				level_count[wx][l[wx] - 4] = warpCount;
+				level_index[wx][l[wx] - 4] = 0;
+				level_prev_index[wx][l[wx] - 4] = 0;
 			}
-			__syncwarp();
-			while (level_count[wx][l[wx] - 2] > level_index[wx][l[wx] - 2])
+			__syncwarp(partMask);
+			while (level_count[wx][l[wx] - 4] > level_index[wx][l[wx] - 4])
 			{
-				//First Index
+				// 	//First Index
 				T* from = l[wx] == 4 ? &(encode[num_divs_local * j]) : &(cl[num_divs_local * (l[wx] - 4)]);
 				T* to = &(cl[num_divs_local * (l[wx] - 3)]);
-				T startDiv = level_prev_index[wx][l[wx] - 2] / 32;
-				// for (T k = startDiv; k < num_divs_local; k++)
-				// {
-				// 	unsigned int mask = (k == startDiv) ? ~((1 << (level_prev_index[wx][l[wx] - 2] & 0x1F)) - 1) : 0xFFFFFFFF;
-				// 	T val = (from[k] & (1 << lx) & mask);
-				// 	unsigned int newmask = __ballot_sync(0xFFFFFFFF, val);
-				// 	if (newmask != 0)
-				// 	{
-				// 		uint elected_lane_deq = __ffs(newmask) - 1;
-				// 		current_node_index[wx] = __shfl_sync(0xFFFFFFFF, k * 32 + lx, elected_lane_deq, 32);
-				// 		break;
-				// 	}
-				// }
-
-
-
-				T realindex = level_prev_index[wx][l[wx] - 2]; // start real Index
-				T maskBlock = realindex / 32;
-				T maskIndex = ~((1 << (realindex & 0x1F)) - 1);
-
+				T maskBlock = level_prev_index[wx][l[wx] - 4] / 32;
+				T maskIndex = ~((1 << (level_prev_index[wx][l[wx] - 4] & 0x1F)) - 1);
 				T newIndex = __ffs(from[maskBlock] & maskIndex);
 				while (newIndex == 0)
 				{
@@ -219,77 +203,46 @@ kckernel_edge_block_warp_binary_count(
 					maskBlock++;
 					newIndex = __ffs(from[maskBlock] & maskIndex);
 				}
-
-
-
-
-				// for (T k = 0; k < (num_divs_local + 31) / 32; k++)
-				// {
-				// 	T index = startDiv + k * 32 + lx;
-				// 	T val = index < num_divs_local ? from[index] : 0;
-				// 	unsigned int mask = (index == startDiv) ? ~((1 << (level_prev_index[wx][l[wx] - 2] & 0x1F)) - 1) : 0xFFFFFFFF;
-				// 	unsigned int oneIndex = mask & val;
-				// 	unsigned int newmask = __ballot_sync(mm, oneIndex);
-				// 	if (newmask != 0)
-				// 	{
-				// 		uint elected_lane_deq = __ffs(newmask) - 1;
-				// 		// if (lx==elected_lane_deq)
-				// 		// {
-				// 		// 	current_node_index[wx] = index * 32 + __ffs(oneIndex) - 1;
-				// 		// }
-
-				// 		current_node_index[wx] = __shfl_sync(mm, index * 32 + __ffs(oneIndex) - 1, elected_lane_deq, 32);
-				// 		break;
-				// 	}
-				// }
+				newIndex = 32 * maskBlock + newIndex - 1;
 
 				if (lx == 0)
 				{
-					current_node_index[wx] = 32 * maskBlock + newIndex - 1;
-					level_prev_index[wx][l[wx] - 2] = 32 * maskBlock + newIndex;
-					level_index[wx][l[wx] - 2]++;
-					//new_level[wx] = l[wx];
+					level_prev_index[wx][l[wx] - 4] = newIndex + 1;
+					level_index[wx][l[wx] - 4]++;
 				}
 
-				__syncwarp();
-				//Intersect
+				// 	//Intersect
 				uint64 warpCount = 0;
-				for (T k = lx; k < num_divs_local; k += 32)
+				for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 				{
-					to[k] = from[k] & encode[current_node_index[wx] * num_divs_local + k];
+					to[k] = from[k] & encode[newIndex * num_divs_local + k];
 					warpCount += __popc(to[k]);
 				}
-				warpCount += __shfl_down_sync(mm, warpCount, 16);
-				warpCount += __shfl_down_sync(mm, warpCount, 8);
-				warpCount += __shfl_down_sync(mm, warpCount, 4);
-				warpCount += __shfl_down_sync(mm, warpCount, 2);
-				warpCount += __shfl_down_sync(mm, warpCount, 1);
+				// //warpCount += __shfl_down_sync(mm, warpCount, 16);
+				//warpCount += __shfl_down_sync(partMask, warpCount, 8);
+				warpCount += __shfl_down_sync(partMask, warpCount, 4);
+				warpCount += __shfl_down_sync(partMask, warpCount, 2);
+				warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
-				if (lx == 0 && warpCount > 0)
-				{
-					if (l[wx] + 1 == kclique)
-						clique_count[wx] += warpCount;
-					else if (l[wx] + 1 < kclique && warpCount >= kclique - l[wx])
-					{
-						(l[wx])++;
-						//(new_level[wx])++;
-						level_count[wx][l[wx] - 2] = warpCount;
-						level_index[wx][l[wx] - 2] = 0;
-						level_prev_index[wx][l[wx] - 2] = 0;
-					}
-				}
-				//Readjust
 				if (lx == 0)
 				{
-					while (l[wx] > 4 && level_index[wx][l[wx] - 2] >= level_count[wx][l[wx] - 2])
+					if (l[wx] + 1 == KCCOUNT)
+						clique_count[wx] += warpCount;
+					else if (l[wx] + 1 < KCCOUNT && warpCount >= KCCOUNT - l[wx])
+					{
+						(l[wx])++;
+						level_count[wx][l[wx] - 4] = warpCount;
+						level_index[wx][l[wx] - 4] = 0;
+						level_prev_index[wx][l[wx] - 4] = 0;
+					}
+
+					//Readjust
+					while (l[wx] > 4 && level_index[wx][l[wx] - 4] >= level_count[wx][l[wx] - 4])
 					{
 						(l[wx])--;
 					}
-
-					//l[wx] = new_level[wx];
-					//current_node_index[wx] = UINT_MAX;
 				}
-				__syncwarp();
+				__syncwarp(partMask);
 			}
 			if (lx == 0)
 			{
@@ -297,18 +250,16 @@ kckernel_edge_block_warp_binary_count(
 				//cpn[current.queue[i]] = clique_count[wx];
 			}
 
-			__syncwarp();
+			__syncwarp(partMask);
 		}
 	}
 
 	__syncthreads();
 	if (threadIdx.x == 0)
 	{
-		atomicCAS(&levelStats[sm_id * conc_blocks_per_SM + levelPtr], 1, 0);
+		atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
 	}
 }
-
-
 
 namespace graph
 {
@@ -512,7 +463,7 @@ namespace graph
 
 					// std::sort(current_q.queue.gdata(), current_q.queue.gdata() + current_q.count.gdata()[0]);
 					// current_q.count.gdata()[0] = current_q.count.gdata()[0]< 128? current_q.count.gdata()[0]: 128;
-					//current_q.count.gdata()[0] = 64;
+					//current_q.count.gdata()[0] = 1; 
 					if (pe == Warp)
 					{
 						GPUArray<char> current_level("Temp level Counter", unified, num_SMs * conc_blocks_per_SM * factor * maxDegree.gdata()[0], dev_);
@@ -589,15 +540,12 @@ namespace graph
 			k = level;
 			printf("Max Degree (+span) = %d\n", k - 1);
 		}
-
-
-
 		void findKclqueIncremental_edge_async(int kcount, COOCSRGraph_d<T>& g,
 			ProcessingElementEnum pe, const size_t nodeOffset = 0, const size_t edgeOffset = 0)
 		{
 			CUDA_RUNTIME(cudaSetDevice(dev_));
 
-			const auto block_size = 64;
+			const auto block_size = 128;
 			CUDAContext context;
 			T num_SMs = context.num_SMs;
 
@@ -642,20 +590,52 @@ namespace graph
 				{
 					//std::sort(current_q.queue.gdata(), current_q.queue.gdata() + current_q.count.gdata()[0]);
 					//current_q.count.gdata()[0] = current_q.count.gdata()[0]< 5000? current_q.count.gdata()[0]: 5000;
-					//current_q.count.gdata()[0] = 2000;
+					//current_q.count.gdata()[0] = 1;
 
 					if (pe == Warp)
 					{
+						// auto grid_block_size = (32 * current_q.count.gdata()[0] + block_size - 1) / block_size;
+						// execKernel((kckernel_edge_warp_count2_shared<T, block_size>), grid_block_size, block_size, dev_, false,
+						// 	counter.gdata(),
+						// 	g,
+						// 	kcount,
+						// 	maxDegree.gdata()[0],
+						// 	current_q.device_queue->gdata()[0],
+						// 	current_level.gdata(),
+						// 	NULL,
+						// 	conc_blocks_per_SM, d_bitmap_states.gdata());
+
+
+
+						const uint dv = 32;
+						const uint max_level = 7;
+						uint num_divs = (maxDegree.gdata()[0] + dv - 1) / dv;
+						const uint64 level_size = num_SMs * conc_blocks_per_SM * factor * max_level * num_divs;
+						const uint64 encode_size = num_SMs * conc_blocks_per_SM * factor * maxDegree.gdata()[0] * num_divs;
+						const uint64 tri_size = num_SMs * conc_blocks_per_SM * factor * maxDegree.gdata()[0];
+						printf("Level Size = %llu, Encode Size = %llu\n", level_size, encode_size);
+						GPUArray<T> current_level2("Temp level Counter", unified, level_size, dev_);
+						GPUArray<T> node_be("Temp level Counter", unified, encode_size, dev_);
+						GPUArray<T> tri_list("Temp level Counter", unified, tri_size, dev_);
+						current_level2.setAll(0, true);
+						node_be.setAll(0, true);
+						tri_list.setAll(0, true);
+
+
+
 						auto grid_block_size = (32 * current_q.count.gdata()[0] + block_size - 1) / block_size;
-						execKernel((kckernel_edge_warp_count2_shared<T, block_size>), grid_block_size, block_size, dev_, false,
+						execKernel((kckernel_edge_warp_binary_count<T, block_size>), grid_block_size, block_size, dev_, false,
 							counter.gdata(),
 							g,
 							kcount,
 							maxDegree.gdata()[0],
 							current_q.device_queue->gdata()[0],
-							current_level.gdata(),
-							NULL,
-							conc_blocks_per_SM, d_bitmap_states.gdata());
+							current_level2.gdata(), NULL,
+							conc_blocks_per_SM, d_bitmap_states.gdata(), node_be.gdata(), tri_list.gdata());
+
+
+						current_level2.freeGPU();
+
 
 					}
 					else if (pe == Block)
@@ -673,6 +653,9 @@ namespace graph
 					}
 					else if (pe == BlockWarp)
 					{
+						const T partitionSize = 8;
+						factor = (block_size / partitionSize);
+
 						const uint dv = 32;
 						const uint max_level = 7;
 						uint num_divs = (maxDegree.gdata()[0] + dv - 1) / dv;
@@ -687,17 +670,22 @@ namespace graph
 						node_be.setAll(0, true);
 						tri_list.setAll(0, true);
 
-
+						const T numPartitions = block_size / partitionSize;
+						cudaMemcpyToSymbol(KCCOUNT, &kcount, sizeof(KCCOUNT));
+						cudaMemcpyToSymbol(PARTSIZE, &partitionSize, sizeof(PARTSIZE));
+						cudaMemcpyToSymbol(NUMPART, &numPartitions, sizeof(NUMPART));
+						cudaMemcpyToSymbol(MAXLEVEL, &max_level, sizeof(MAXLEVEL));
+						cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
+						cudaMemcpyToSymbol(MAXDEG, &(maxDegree.gdata()[0]), sizeof(MAXDEG));
+						cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM), sizeof(CBPSM));
 
 						auto grid_block_size = current_q.count.gdata()[0];
-						execKernel((kckernel_edge_block_warp_binary_count<T, block_size>), grid_block_size, block_size, dev_, false,
+						execKernel((kckernel_edge_block_warp_binary_count<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
 							counter.gdata(),
 							g,
-							kcount,
-							maxDegree.gdata()[0],
 							current_q.device_queue->gdata()[0],
 							current_level2.gdata(), NULL,
-							conc_blocks_per_SM, d_bitmap_states.gdata(), node_be.gdata(), tri_list.gdata());
+							d_bitmap_states.gdata(), node_be.gdata(), tri_list.gdata());
 
 
 						current_level2.freeGPU();
@@ -707,7 +695,7 @@ namespace graph
 
 				}
 				level += span;
-
+				//break;
 				std::cout.imbue(std::locale(""));
 				std::cout << "Level = " << level << " Nodes = " << current_q.count.gdata()[0] << " Counter = " << counter.gdata()[0] << "\n";
 			}
