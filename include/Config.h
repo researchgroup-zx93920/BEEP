@@ -231,7 +231,7 @@ static Config parseArgs(int argc, char** argv) {
     config.printStats = false;
     config.orient = Degree;
     config.allocation = gpu;
-    config.k = 5;
+    config.k = 7;
     config.sortEdges = false;;
     config.processBy = ByNode;
     config.processElement = BlockWarp;

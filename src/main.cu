@@ -225,7 +225,7 @@ int main(int argc, char** argv)
 		to_csrcoo_device(g, gd, config.deviceId, config.allocation); //got to device !!
 
 		double time_init = t_init.elapsed();
-		Log(info, "Orinebtation time: %f s", time_init);
+		Log(info, "Orientation time: %f s", time_init);
 	}
 
 	//Just need to verify some new storage format
@@ -591,23 +591,46 @@ int main(int argc, char** argv)
 		if (config.orient == None)
 			Log(warn, "Redundunt K-cliques, Please orient the graph\n");
 
-		graph::SingleGPU_Kclique<uint> mohaclique(config.deviceId, *gd);
 
-		for (int i = 0; i < 3; i++)
+
+		// if(config.processElement == BlockWarp)
+		// {
+		// 	graph::SingleGPU_Kclique_NoOutQueue<uint> mohaclique(config.deviceId, *gd);
+		// 	for (int i = 0; i < 3; i++)
+		// 	{
+		// 		Timer t;
+		// 		if (config.processBy == ByNode)
+		// 			mohaclique.findKclqueIncremental_node_async(config.k, *gd, config.processElement);
+		// 		else if (config.processBy == ByEdge)
+		// 			mohaclique.findKclqueIncremental_edge_async(config.k, *gd, config.processElement);
+		// 		mohaclique.sync();
+		// 		double time = t.elapsed();
+		// 		Log(info, "count time %f s", time);
+		// 		Log(info, "MOHA %d k-clique (%f teps)", mohaclique.count(), m / time);
+		// 	}
+		// 	mohaclique.free();
+		// }
+		// else
 		{
-			Timer t;
-			if (config.processBy == ByNode)
-				mohaclique.findKclqueIncremental_node_async(config.k, *gd, config.processElement);
-			else if (config.processBy == ByEdge)
-				mohaclique.findKclqueIncremental_edge_async(config.k, *gd, config.processElement);
-			mohaclique.sync();
-			double time = t.elapsed();
-			Log(info, "count time %f s", time);
-			Log(info, "MOHA %d k-clique (%f teps)", mohaclique.count(), m / time);
+
+			graph::SingleGPU_Kclique<uint> mohaclique(config.deviceId, *gd);
+
+			for (int i = 0; i < 3; i++)
+			{
+				Timer t;
+				if (config.processBy == ByNode)
+					mohaclique.findKclqueIncremental_node_async(config.k, *gd, config.processElement);
+				else if (config.processBy == ByEdge)
+					mohaclique.findKclqueIncremental_edge_async(config.k, *gd, config.processElement);
+				mohaclique.sync();
+				double time = t.elapsed();
+				Log(info, "count time %f s", time);
+				Log(info, "MOHA %d k-clique (%f teps)", mohaclique.count(), m / time);
+			}
+
+
+
 		}
-
-
-		mohaclique.free();
 	}
 
 
