@@ -7,6 +7,18 @@ __constant__ uint MAXLEVEL;
 __constant__ uint NUMDIVS;
 __constant__ uint CBPSM;
 
+template<typename T>
+__inline__ __device__ void reduce_part(T mask, uint64& count)
+{
+	// count += __shfl_down_sync(mask, count, 16);
+	// count += __shfl_down_sync(mask, count, 8);
+	//count += __shfl_down_sync(mask, count, 4);
+	// count += __shfl_down_sync(mask, count, 2);
+	// count += __shfl_down_sync(mask, count, 1);
+}
+
+
+#define PART_SIZE 1
 template <typename T, int BLOCK_DIM_X>
 __global__ void try_block_scan(T count, T* output)
 {
@@ -2121,11 +2133,7 @@ kckernel_node_block_warp_binary_count(
 			{
 				warpCount += __popc(encode[j * num_divs_local + k]);
 			}
-			// warpCount += __shfl_down_sync(partMask, warpCount, 16);
-			//warpCount += __shfl_down_sync(partMask, warpCount, 8);
-			//warpCount += __shfl_down_sync(partMask, warpCount, 4);
-			warpCount += __shfl_down_sync(partMask, warpCount, 2);
-			warpCount += __shfl_down_sync(partMask, warpCount, 1);
+			reduce_part<T>(partMask, warpCount);
 
 			if (lx == 0 && l[wx] == KCCOUNT)
 				clique_count[wx] += warpCount;
@@ -2166,11 +2174,7 @@ kckernel_node_block_warp_binary_count(
 					to[k] = from[k] & encode[newIndex * num_divs_local + k];
 					warpCount += __popc(to[k]);
 				}
-				// warpCount += __shfl_down_sync(partMask, warpCount, 16);
-				//warpCount += __shfl_down_sync(partMask, warpCount, 8);
-				//warpCount += __shfl_down_sync(partMask, warpCount, 4);
-				warpCount += __shfl_down_sync(partMask, warpCount, 2);
-				warpCount += __shfl_down_sync(partMask, warpCount, 1);
+				reduce_part<T>(partMask, warpCount);
 
 				if (lx == 0)
 				{
@@ -2346,11 +2350,7 @@ kckernel_edge_warp_binary_count(
 			{
 				warpCount += __popc(encode[wx][j * num_divs_local[wx] + k]);
 			}
-			warpCount += __shfl_down_sync(mm, warpCount, 16);
-			warpCount += __shfl_down_sync(mm, warpCount, 8);
-			warpCount += __shfl_down_sync(mm, warpCount, 4);
-			warpCount += __shfl_down_sync(mm, warpCount, 2);
-			warpCount += __shfl_down_sync(mm, warpCount, 1);
+			reduce_part<T>(mm, warpCount);
 
 			if (lx == 0 && l[wx] == kclique)
 				clique_count[wx] += warpCount;
@@ -2391,11 +2391,7 @@ kckernel_edge_warp_binary_count(
 					to[k] = from[k] & encode[wx][newIndex * num_divs_local[wx] + k];
 					warpCount += __popc(to[k]);
 				}
-				warpCount += __shfl_down_sync(mm, warpCount, 16);
-				warpCount += __shfl_down_sync(mm, warpCount, 8);
-				warpCount += __shfl_down_sync(mm, warpCount, 4);
-				warpCount += __shfl_down_sync(mm, warpCount, 2);
-				warpCount += __shfl_down_sync(mm, warpCount, 1);
+				reduce_part<T>(mm, warpCount);
 
 				if (lx == 0)
 				{
@@ -2564,10 +2560,10 @@ kckernel_edge_block_warp_binary_count_o(
 			}
 
 
-			for (unsigned long long k = lx; k < num_divs_local * 7; k += CPARTSIZE)
-			{
-				cl[k] = 0x00;
-			}
+			// for (unsigned long long k = lx; k < num_divs_local * 7; k += CPARTSIZE)
+			// {
+			// 	cl[k] = 0x00;
+			// }
 
 
 			//get warp count ??
@@ -2576,11 +2572,7 @@ kckernel_edge_block_warp_binary_count_o(
 			{
 				warpCount += __popc(encode[j * num_divs_local + k]);
 			}
-			//warpCount += __shfl_down_sync(partMask, warpCount, 16);
-			//warpCount += __shfl_down_sync(partMask, warpCount, 8);
-			//warpCount += __shfl_down_sync(partMask, warpCount, 4);
-			warpCount += __shfl_down_sync(partMask, warpCount, 2);
-			warpCount += __shfl_down_sync(partMask, warpCount, 1);
+			reduce_part<T>(partMask, warpCount);
 
 			if (lx == 0 && l[wx] == KCCOUNT)
 				clique_count[wx] += warpCount;
@@ -2593,7 +2585,7 @@ kckernel_edge_block_warp_binary_count_o(
 			//__syncwarp(partMask);
 			while (level_count[wx][l[wx] - 4] > level_index[wx][l[wx] - 4])
 			{
-				// 	//First Index
+				//First Index
 				T* from = l[wx] == 4 ? &(encode[num_divs_local * j]) : &(cl[num_divs_local * (l[wx] - 4)]);
 				T* to = &(cl[num_divs_local * (l[wx] - 3)]);
 				T maskBlock = level_prev_index[wx][l[wx] - 4] / 32;
@@ -2613,18 +2605,14 @@ kckernel_edge_block_warp_binary_count_o(
 					level_index[wx][l[wx] - 4]++;
 				}
 
-				// 	//Intersect
+				//Intersect
 				uint64 warpCount = 0;
 				for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 				{
 					to[k] = from[k] & encode[newIndex * num_divs_local + k];
 					warpCount += __popc(to[k]);
 				}
-				// //warpCount += __shfl_down_sync(mm, warpCount, 16);
-				//warpCount += __shfl_down_sync(partMask, warpCount, 8);
-				//warpCount += __shfl_down_sync(partMask, warpCount, 4);
-				warpCount += __shfl_down_sync(partMask, warpCount, 2);
-				warpCount += __shfl_down_sync(partMask, warpCount, 1);
+				reduce_part<T>(partMask, warpCount);
 
 				if (lx == 0)
 				{
@@ -2662,4 +2650,509 @@ kckernel_edge_block_warp_binary_count_o(
 		atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
 	}
 }
+
+
+
+
+template<typename T>
+struct KCTask
+{
+	T queue_encode_index;
+	T level;
+	T level_count;
+};
+
+
+template<typename T, uint CPARTSIZE, uint numPartitions>
+__device__ __forceinline__ uint64 explore_branch_o(uint start_level, uint num_divs_local, uint* l, uint partMask,
+	T startEncodeIndex, T* encode, T* cl, T* level_count, T* level_index, T* level_prev_index)
+{
+	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
+	const size_t lx = threadIdx.x % CPARTSIZE;
+	uint64 globalCount = 0;
+
+
+	while (level_count[l[wx] - start_level] > level_index[l[wx] - start_level])
+	{
+		T l_mi_sl = l[wx] - start_level;
+		T* from = (l_mi_sl == 0) ? &(encode[num_divs_local * startEncodeIndex]) : &(cl[num_divs_local * l_mi_sl]);
+		T* to = &(cl[num_divs_local * (l_mi_sl + 1)]);
+		T maskBlock = level_prev_index[l_mi_sl] / 32;
+		T maskIndex = ~((1 << (level_prev_index[l_mi_sl] & 0x1F)) - 1);
+		T newIndex = __ffs(from[maskBlock] & maskIndex);
+		while (newIndex == 0)
+		{
+			maskIndex = 0xFFFFFFFF;
+			maskBlock++;
+			newIndex = __ffs(from[maskBlock] & maskIndex);
+		}
+		newIndex = 32 * maskBlock + newIndex - 1;
+
+		if (lx == 0)
+		{
+			level_prev_index[l_mi_sl] = newIndex + 1;
+			level_index[l_mi_sl]++;
+		}
+
+		uint64 warpCount = 0;
+		for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+		{
+			to[k] = from[k] & encode[newIndex * num_divs_local + k];
+			warpCount += __popc(to[k]);
+		}
+		reduce_part<T>(partMask, warpCount);
+
+		if (lx == 0)
+		{
+			if (l[wx] + 1 == KCCOUNT)
+				globalCount += warpCount;
+			else if (l[wx] + 1 < KCCOUNT && warpCount >= KCCOUNT - l[wx])
+			{
+				(l[wx])++;
+				level_count[l[wx] - start_level] = warpCount;
+				level_index[l[wx] - start_level] = 0;
+				level_prev_index[l[wx] - start_level] = 0;
+			}
+
+
+			//Readjust
+			while (l[wx] > start_level && level_index[l[wx] - start_level] >= level_count[l[wx] - start_level])
+			{
+				(l[wx])--;
+			}
+
+		}
+
+		__syncwarp(partMask);
+
+	}
+
+	return globalCount;
+}
+
+
+
+//very bad: sync_shfl is very low performance !!
+template<typename T, uint CPARTSIZE, uint numPartitions>
+__device__ __forceinline__ uint64 explore_branch_sync(uint start_level, uint num_divs_local, uint* l, uint partMask,
+	T startEncodeIndex, T* encode, T* cl, T* level_count, T* level_index, T* level_prev_index)
+{
+	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
+	const size_t lx = threadIdx.x % CPARTSIZE;
+	uint64 globalCount = 0;
+
+	T ll = l[wx];
+
+
+
+	while (level_count[ll - start_level] > level_index[ll - start_level])
+	{
+		T l_mi_sl = ll - start_level;
+		T* from = (l_mi_sl == 0) ? &(encode[num_divs_local * startEncodeIndex]) : &(cl[num_divs_local * l_mi_sl]);
+		T* to = &(cl[num_divs_local * (l_mi_sl + 1)]);
+		T maskBlock = level_prev_index[l_mi_sl] / 32;
+		T maskIndex = ~((1 << (level_prev_index[l_mi_sl] & 0x1F)) - 1);
+		T newIndex = __ffs(from[maskBlock] & maskIndex);
+		while (newIndex == 0)
+		{
+			maskIndex = 0xFFFFFFFF;
+			maskBlock++;
+			newIndex = __ffs(from[maskBlock] & maskIndex);
+		}
+		newIndex = 32 * maskBlock + newIndex - 1;
+
+		if (lx == 0)
+		{
+			level_prev_index[l_mi_sl] = newIndex + 1;
+			level_index[l_mi_sl]++;
+		}
+
+		uint64 warpCount = 0;
+		for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+		{
+			to[k] = from[k] & encode[newIndex * num_divs_local + k];
+			warpCount += __popc(to[k]);
+		}
+		reduce_part<T>(partMask, warpCount);
+
+		warpCount = __shfl_sync(partMask, warpCount, 0, CPARTSIZE);
+
+		if (ll + 1 == KCCOUNT)
+			globalCount += warpCount;
+		else if (ll + 1 < KCCOUNT && warpCount >= KCCOUNT - ll)
+		{
+			(ll)++;
+			if (lx == 0)
+			{
+				level_count[ll - start_level] = warpCount;
+				level_index[ll - start_level] = 0;
+				level_prev_index[ll - start_level] = 0;
+			}
+		}
+
+		__syncwarp(partMask);
+
+		//Readjust
+		while (ll > start_level && level_index[ll - start_level] >= level_count[ll - start_level])
+		{
+			(ll)--;
+		}
+	}
+
+	return globalCount;
+}
+
+
+template<typename T, uint CPARTSIZE, uint numPartitions>
+__device__ __forceinline__ uint64 explore_branch(KCTask<T>* task, T* queue_encode, uint num_divs_local, uint partMask,
+	T* encode, T* cl, T* level_count, T* level_index, T* level_prev_index, int j)
+{
+	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
+	const size_t lx = threadIdx.x % CPARTSIZE;
+	uint64 globalCount = 0;
+
+
+	__shared__ T ll[numPartitions];
+
+	T l = task->level;
+	ll[wx] = task->level;
+	level_count[0] = task->level_count;
+	level_index[0] = 0;
+	level_prev_index[0] = 0;
+	__syncwarp(partMask);
+
+	while (level_count[ll[wx] - l] > level_index[ll[wx] - l])
+	{
+		T l_mi_sl = ll[wx] - l;
+		T* from = (l_mi_sl == 0) ?  /*&(encode[num_divs_local * j])*/ &(queue_encode[task->queue_encode_index]) : &(cl[num_divs_local * l_mi_sl]);
+		T* to = &(cl[num_divs_local * (l_mi_sl + 1)]);
+		T maskBlock = level_prev_index[l_mi_sl] / 32;
+		T maskIndex = ~((1 << (level_prev_index[l_mi_sl] & 0x1F)) - 1);
+		T newIndex = __ffs(from[maskBlock] & maskIndex);
+		while (newIndex == 0)
+		{
+			maskIndex = 0xFFFFFFFF;
+			maskBlock++;
+			newIndex = __ffs(from[maskBlock] & maskIndex);
+		}
+		newIndex = 32 * maskBlock + newIndex - 1;
+
+		if (lx == 0)
+		{
+			level_prev_index[l_mi_sl] = newIndex + 1;
+			level_index[l_mi_sl]++;
+		}
+
+		uint64 warpCount = 0;
+		for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+		{
+			to[k] = from[k] & encode[newIndex * num_divs_local + k];
+			warpCount += __popc(to[k]);
+		}
+		reduce_part<T>(partMask, warpCount);
+
+		if (lx == 0)
+		{
+			if (ll[wx] + 1 == KCCOUNT)
+				globalCount += warpCount;
+			else if (ll[wx] + 1 < KCCOUNT && warpCount >= KCCOUNT - ll[wx])
+			{
+				(ll[wx])++;
+				level_count[ll[wx] - l] = warpCount;
+				level_index[ll[wx] - l] = 0;
+				level_prev_index[ll[wx] - l] = 0;
+			}
+
+
+			//Readjust
+			while (ll[wx] > l && level_index[ll[wx] - l] >= level_count[ll[wx] - l])
+			{
+				(ll[wx])--;
+			}
+
+		}
+
+		__syncwarp(partMask);
+	}
+
+	return globalCount;
+}
+
+
+template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
+__launch_bounds__(BLOCK_DIM_X, 16)
+__global__ void
+kckernel_edge_block_warp_binary_count(
+	uint64* counter,
+	graph::COOCSRGraph_d<T> g,
+	const  graph::GraphQueue_d<T, bool>  current,
+	T* current_level,
+	uint64* cpn,
+	T* levelStats,
+	T* adj_enc,
+	T* adj_tri,
+	//simt::atomic<KCTask<T>, simt::thread_scope_device> *queue_data
+	KCTask<T>* queue_data,
+	T* queue_encode
+)
+{
+	__shared__ T queue_count;
+
+
+	//will be removed later
+	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
+	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
+	const size_t lx = threadIdx.x % CPARTSIZE;
+	__shared__ T level_index[numPartitions][7];
+	__shared__ T level_count[numPartitions][7];
+	__shared__ T level_prev_index[numPartitions][7];
+
+	__shared__ T level_offset[numPartitions];
+	__shared__ uint64 clique_count[numPartitions];
+	__shared__ T l[numPartitions], tc, wtc[numPartitions];
+	__shared__ uint32_t  sm_id, levelPtr;
+	__shared__ T srcStart, srcLen;
+	__shared__ T src2Start, src2Len;
+
+	__shared__ T num_divs_local, encode_offset, * encode, tri_offset, * tri, scounter;
+
+
+	__syncthreads();
+
+	if (threadIdx.x == 0)
+	{
+		sm_id = __mysmid();
+		T temp = 0;
+		while (atomicCAS(&(levelStats[(sm_id * CBPSM) + temp]), 0, 1) != 0)
+		{
+			temp++;
+		}
+		levelPtr = temp;
+	}
+	__syncthreads();
+
+	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
+	{
+		//block things
+		if (threadIdx.x == 0)
+		{
+			T src = g.rowInd[current.queue[i]];
+			srcStart = g.rowPtr[src];
+			srcLen = g.rowPtr[src + 1] - srcStart;
+			//printf("src = %u, srcLen = %u\n", src, srcLen);
+		}
+		else if (threadIdx.x == 1)
+		{
+			T src2 = g.colInd[current.queue[i]];
+			src2Start = g.rowPtr[src2];
+			src2Len = g.rowPtr[src2 + 1] - src2Start;
+		}
+		else if (threadIdx.x == 2)
+		{
+			tri_offset = sm_id * CBPSM * (MAXDEG)+levelPtr * (MAXDEG);
+			tri = &adj_tri[tri_offset  /*srcStart[wx]*/];
+			scounter = 0;
+			tc = 0;
+		}
+		else if (threadIdx.x == 3)
+		{
+			queue_count = 0;
+		}
+
+		// //get tri list: by block :!!
+		__syncthreads();
+		graph::block_sorted_count_and_set_tri<BLOCK_DIM_X, T>(&g.colInd[srcStart], srcLen, &g.colInd[src2Start], src2Len,
+			tri, &scounter);
+
+		__syncthreads();
+
+		if (threadIdx.x == 0)
+			num_divs_local = (scounter + 32 - 1) / 32;
+		else if (threadIdx.x == 1)
+		{
+			encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
+			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
+		}
+
+		if (KCCOUNT == 3 && threadIdx.x == 0)
+			atomicAdd(counter, scounter);
+
+
+		__syncthreads();
+		//Encode
+		T partMask = (1 << CPARTSIZE) - 1;
+		partMask = partMask << ((wx % (32 / CPARTSIZE)) * CPARTSIZE);
+		for (unsigned long long j = wx; j < scounter; j += numPartitions)
+		{
+
+			for (unsigned long long k = lx; k < num_divs_local; k += CPARTSIZE)
+			{
+				encode[j * num_divs_local + k] = 0x00;
+			}
+			__syncwarp(partMask);
+			graph::warp_sorted_count_and_encode<WARPS_PER_BLOCK, T, true, CPARTSIZE>(tri, scounter,
+				&g.colInd[g.rowPtr[tri[j]]], g.rowPtr[tri[j] + 1] - g.rowPtr[tri[j]],
+				&encode[j * num_divs_local]);
+		}
+
+		__syncthreads(); //Done encoding
+		level_offset[wx] = sm_id * CBPSM * (numPartitions * NUMDIVS * 7) + levelPtr * (numPartitions * NUMDIVS * 7);
+		T* cl = &current_level[level_offset[wx] + wx * (NUMDIVS * 7)];
+		KCTask<T>* queue_data_block = &(queue_data[sm_id * CBPSM * (QUEUE_SIZE)+levelPtr * (QUEUE_SIZE)]);
+		T* queue_encode_block = &(queue_encode[sm_id * CBPSM * (QUEUE_SIZE * NUMDIVS) + levelPtr * (QUEUE_SIZE * NUMDIVS)]);
+		// if(lx == 0)
+		// 	wtc[wx] = atomicAdd(&(tc), 1);
+		// __syncwarp(partMask);
+
+		//while(wtc[wx] < scounter)
+		for (unsigned long long j = wx; j < scounter; j += numPartitions)
+		{
+			//T j = wtc[wx];
+			if (lx < 7)
+			{
+				level_count[wx][lx] = 0;
+				level_index[wx][lx] = 0;
+				level_prev_index[wx][lx] = 0;
+			}
+			if (lx == 0)
+			{
+				l[wx] = 4;
+				clique_count[wx] = 0;
+			}
+
+			//get warp count ??
+			uint64 warpCount = 0;
+			for (unsigned long long k = lx; k < num_divs_local; k += CPARTSIZE)
+			{
+				warpCount += __popc(encode[j * num_divs_local + k]);
+			}
+			reduce_part<T>(partMask, warpCount);
+
+			if (lx == 0 && l[wx] == KCCOUNT)
+				atomicAdd(counter, warpCount);
+			else if (lx == 0 && KCCOUNT > 4 && warpCount >= KCCOUNT - 3)
+			{
+				level_count[wx][l[wx] - 4] = warpCount;
+				level_index[wx][l[wx] - 4] = 0;
+				level_prev_index[wx][l[wx] - 4] = 0;
+			}
+			__syncwarp(partMask);
+			// uint64 wc = explore_branch_o<T, CPARTSIZE, numPartitions>(4, num_divs_local, l, partMask,
+			// 		j, encode, cl, level_count[wx], level_index[wx], level_prev_index[wx]);
+
+			// if(lx == 0 && KCCOUNT > 4 && warpCount >= KCCOUNT - 3)
+			// 	atomicAdd(counter, wc); //clique_count[wx] = wc;
+			while (level_count[wx][l[wx] - 4] > level_index[wx][l[wx] - 4])
+			{
+				//First Index
+				T* from = l[wx] == 4 ? &(encode[num_divs_local * j]) : &(cl[num_divs_local * (l[wx] - 4)]);
+				T* to = &(cl[num_divs_local * (l[wx] - 3)]);
+				T maskBlock = level_prev_index[wx][l[wx] - 4] / 32;
+				T maskIndex = ~((1 << (level_prev_index[wx][l[wx] - 4] & 0x1F)) - 1);
+				T newIndex = __ffs(from[maskBlock] & maskIndex);
+				while (newIndex == 0)
+				{
+					maskIndex = 0xFFFFFFFF;
+					maskBlock++;
+					newIndex = __ffs(from[maskBlock] & maskIndex);
+				}
+				newIndex = 32 * maskBlock + newIndex - 1;
+
+				if (lx == 0)
+				{
+					level_prev_index[wx][l[wx] - 4] = newIndex + 1;
+					level_index[wx][l[wx] - 4]++;
+				}
+
+				//Intersect
+				uint64 warpCount = 0;
+				for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+				{
+					to[k] = from[k] & encode[newIndex * num_divs_local + k];
+					warpCount += __popc(to[k]);
+				}
+				reduce_part<T>(partMask, warpCount);
+
+				if (lx == 0)
+				{
+					if (l[wx] + 1 == KCCOUNT)
+						clique_count[wx] = 1; //+= warpCount;
+					else if (l[wx] + 1 < KCCOUNT && warpCount >= KCCOUNT - l[wx])
+					{
+						(l[wx])++;
+						level_count[wx][l[wx] - 4] = warpCount;
+						level_index[wx][l[wx] - 4] = 0;
+						level_prev_index[wx][l[wx] - 4] = 0;
+
+						// if(warpCount > 100)
+						// {
+						// 	if(queue_count < QUEUE_SIZE)
+						// 	{
+						// 		T index = atomicAdd(&queue_count, 1);
+						// 		if(index < QUEUE_SIZE)
+						// 		{
+						// 			level_count[wx][l[wx] - 4] = 0;
+
+						// 			queue_data_block[index].level = l[wx];
+						// 			queue_data_block[index].level_count = warpCount;
+						// 			queue_data_block[index].queue_encode_index = index * num_divs_local;
+						// 			for (unsigned long long k = 0; k < num_divs_local; k++)
+						// 			{
+						// 				queue_encode_block[queue_data_block[index].queue_encode_index + k] = to[k];
+						// 			}
+						// 		}
+						// 	}
+
+						// }
+					}
+
+					//Readjust
+					while (l[wx] > 4 && level_index[wx][l[wx] - 4] >= level_count[wx][l[wx] - 4])
+					{
+						(l[wx])--;
+					}
+				}
+				__syncwarp(partMask);
+			}
+			if (lx == 0)
+			{
+				atomicAdd(counter, clique_count[wx] == 1 ? 0 : 1);
+				//cpn[current.queue[i]] = clique_count[wx];
+			}
+
+			__syncwarp(partMask);
+
+			// if(lx == 0)
+			// 	wtc[wx] = atomicAdd(&(tc), 1);
+			// __syncwarp(partMask);
+		}
+		__syncthreads();
+		//dequeue simply
+
+		T limit = (queue_count > QUEUE_SIZE) ? QUEUE_SIZE : queue_count;
+		for (unsigned long long j = wx; j < limit; j += numPartitions)
+		{
+			KCTask<T> t = queue_data_block[j];
+			uint64 wc = explore_branch<T, CPARTSIZE, numPartitions>(&t, queue_encode_block, num_divs_local, partMask,
+				encode, cl, level_count[wx], level_index[wx], level_prev_index[wx], j);
+			if (lx == 0)
+				atomicAdd(counter, wc); //clique_count[wx] = wc;
+		}
+
+		__syncthreads();
+	}
+
+
+	//search in the queue
+
+	__syncthreads();
+	if (threadIdx.x == 0)
+	{
+		atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
+	}
+}
+
+
+
+
 

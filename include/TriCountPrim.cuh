@@ -1514,6 +1514,47 @@ namespace graph
 
 
 
+    template <size_t WARPS_PER_BLOCK, typename T, bool reduce = true, uint CPARTSIZE = 32>
+    __device__ __forceinline__ uint64 warp_sorted_count_and_encode_full(const T* const A, //!< [in] array A
+        const size_t aSz, //!< [in] the number of elements in A
+        T* B, //!< [in] array B
+        T bSz,  //!< [in] the number of elements in B
+
+        T j,
+        T num_divs_local,
+        T* encode
+    )
+    {
+        const int warpIdx = threadIdx.x / CPARTSIZE; // which warp in thread block
+        const int laneIdx = threadIdx.x % CPARTSIZE; // which thread in warp
+        // cover entirety of A with warp
+        for (T i = laneIdx; i < aSz; i += CPARTSIZE)
+        {
+            const T searchVal = A[i];
+            bool found = false;
+            const T lb = graph::binary_search<T>(B, 0, bSz, searchVal, found);
+            if (found)
+            {
+                //////////////////////////////Device function ///////////////////////
+                T chunk_index = i / 32; // 32 here is the division size of the encode
+                T inChunkIndex = i % 32;
+                atomicOr(&encode[j * num_divs_local + chunk_index], 1 << inChunkIndex);
+
+                T chunk_index1 = j / 32; // 32 here is the division size of the encode
+                T inChunkIndex1 = j % 32;
+                atomicOr(&encode[i * num_divs_local + chunk_index1], 1 << inChunkIndex1);
+
+                /////////////////////////////////////////////////////////////////////
+            }
+        }
+
+
+        return 0;
+
+    }
+
+
+
     template <size_t WARPS_PER_BLOCK, typename T, bool reduce = true>
     __device__ __forceinline__ uint64 warp_sorted_count_and_encode_old(const T* const A, //!< [in] array A
         const size_t aSz, //!< [in] the number of elements in A

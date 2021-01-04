@@ -271,6 +271,11 @@ int main(int argc, char** argv)
 			uint d = g.rowPtr->cdata()[i + 1];
 			uint deg = d - s;
 
+			// if(i >=37 && i<44)
+			// {
+			// 	printf("For %u, %u, %u, %u\n", i, d-s, g.colInd->cdata()[s], g.colInd->cdata()[s + 1]);
+			// }
+
 
 			//if (deg > 128)
 			{
@@ -482,8 +487,6 @@ int main(int argc, char** argv)
 			uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::WarpShared, 0);
 			uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::Test, 0);
 
-
-
 			uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", config.deviceId, config.allocation, tcBE, gd, ee, st, ProcessingElementEnum::Warp, 0);
 			CountTrianglesHash<uint>(config.deviceId, divideConstant, tchash, g, gd, ee, 0, ProcessingElementEnum::Warp, 0);
 
@@ -613,15 +616,21 @@ int main(int argc, char** argv)
 		// else
 		{
 
+
+
+			//read the nCr values, to be saved in (Constant or global or )
+
+
+
 			graph::SingleGPU_Kclique<uint> mohaclique(config.deviceId, *gd);
 
-			for (int i = 0; i < 3; i++)
+			for (int i = 0; i < 5; i++)
 			{
 				Timer t;
 				if (config.processBy == ByNode)
-					mohaclique.findKclqueIncremental_node_async(config.k, *gd, config.processElement);
+					mohaclique.findKclqueIncremental_node_pivot_async(config.k, *gd, config.processElement);
 				else if (config.processBy == ByEdge)
-					mohaclique.findKclqueIncremental_edge_async(config.k, *gd, config.processElement);
+					mohaclique.findKclqueIncremental_edge_pivot_async(config.k, *gd, config.processElement);
 				mohaclique.sync();
 				double time = t.elapsed();
 				Log(info, "count time %f s", time);
