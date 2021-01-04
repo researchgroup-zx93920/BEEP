@@ -24,7 +24,7 @@ template <typename NodeTy, typename WeightTy> using WEdgeTy = std::tuple<NodeTy,
 
 
 #define __VERBOSE__
-#define __VS__ //visual studio debug
+//#define __VS__ //visual studio debug
 
 
 

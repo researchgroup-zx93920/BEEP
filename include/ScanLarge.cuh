@@ -190,10 +190,6 @@ namespace graph {
             CUDA_RUNTIME(cudaEventCreate(&kernelStop_));
         }
 
-        /*! default ctor - counter on device 0
-         */
-        CubLarge() : CubLarge(0) {}
-
         /*! copy ctor - create a new counter on the same device
 
         All fields are reset
@@ -231,18 +227,19 @@ namespace graph {
             size_t temp_storage_bytes = 0;
             const auto blockSize = 512;
             const auto gridSize = (count + blockSize - 1) / blockSize;
-            graph::GPUArray<T> blockReduction("Block Reduction", AllocationTypeEnum::unified, gridSize, 0);
-            graph::GPUArray<T> totalCount("Block Reduction", AllocationTypeEnum::unified, 1, 0);
+            graph::GPUArray<T> blockReduction("Block Reduction", AllocationTypeEnum::unified, gridSize, dev_);
+            graph::GPUArray<T> totalCount("Block Reduction", AllocationTypeEnum::unified, 1, dev_);
 
-            kernel_per_block_reduce<T, blockSize> << <gridSize, blockSize, 0, stream_ >> > (input, count, blockReduction.gdata(), totalCount.gdata());
-            cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, blockReduction.gdata(), blockReduction.gdata(), gridSize, stream_);
+            kernel_per_block_reduce<T, blockSize> << <gridSize, blockSize>> > (input, count, blockReduction.gdata(), totalCount.gdata());
+            cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, blockReduction.gdata(), blockReduction.gdata(), gridSize);
             CUDA_RUNTIME(cudaMalloc(&d_temp_storage, temp_storage_bytes));
-            cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, blockReduction.gdata(), blockReduction.gdata(), gridSize, stream_);
-            kernel_per_block_scatter<T, blockSize> << <gridSize, blockSize, 0, stream_ >> > (input, count, blockReduction.gdata(), output);
+            cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, blockReduction.gdata(), blockReduction.gdata(), gridSize);
+            kernel_per_block_scatter<T, blockSize> << <gridSize, blockSize>> > (input, count, blockReduction.gdata(), output);
             sync();
             cudaGetLastError();
             CUDA_RUNTIME(cudaFree(d_temp_storage));
-
+            blockReduction.freeGPU();
+            
             return totalCount.gdata()[0] + blockReduction.gdata()[gridSize - 1];
         }
 
@@ -251,15 +248,15 @@ namespace graph {
             CUDA_RUNTIME(cudaSetDevice(dev_));
             void* d_temp_storage = nullptr;
             size_t temp_storage_bytes = 0;
-            const auto blockSize = 32;
+            const auto blockSize = 512;
             const auto gridSize = (count + blockSize - 1) / blockSize;
-            graph::GPUArray<T> blockReduction("Block Reduction", AllocationTypeEnum::unified, gridSize, 0);
-            graph::GPUArray<T> totalCount("Block Reduction", AllocationTypeEnum::unified, 1, 0);
-            kernel_per_block_reduce<T, blockSize> << <gridSize, blockSize, 0, stream_ >> > (input, keep, count, blockReduction.gdata(), totalCount.gdata());
-            cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, blockReduction.gdata(), blockReduction.gdata(), gridSize, stream_);
+            graph::GPUArray<T> blockReduction("Block Reduction", AllocationTypeEnum::unified, gridSize, dev_);
+            graph::GPUArray<T> totalCount("Block Reduction", AllocationTypeEnum::unified, 1, dev_);
+            kernel_per_block_reduce<T, blockSize> << <gridSize, blockSize, 0 >> > (input, keep, count, blockReduction.gdata(), totalCount.gdata());
+            cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, blockReduction.gdata(), blockReduction.gdata(), gridSize);
             CUDA_RUNTIME(cudaMalloc(&d_temp_storage, temp_storage_bytes));
-            cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, blockReduction.gdata(), blockReduction.gdata(), gridSize, stream_);
-            kernel_per_block_scatter<T, blockSize> << <gridSize, blockSize, 0, stream_ >> > (input, keep, count, blockReduction.gdata(), output);
+            cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, blockReduction.gdata(), blockReduction.gdata(), gridSize);
+            kernel_per_block_scatter<T, blockSize> << <gridSize, blockSize, 0 >> > (input, keep, count, blockReduction.gdata(), output);
             sync();
             cudaGetLastError();
             CUDA_RUNTIME(cudaFree(d_temp_storage));

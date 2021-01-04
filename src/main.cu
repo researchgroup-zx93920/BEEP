@@ -164,15 +164,15 @@ int main(int argc, char** argv)
 	graph::SingleGPU_Kcore<uint, PeelType> mohacore(config.deviceId);
 	if (config.orient == Degree || config.orient == Degeneracy)
 	{
-		Timer t_init;
-
 		Timer t;
 		if (config.orient == Degeneracy)
 			mohacore.findKcoreIncremental_async(3, 1000, *gd, 0, 0);
 		else if (config.orient == Degree)
 			mohacore.getNodeDegree(*gd);
-		mohacore.sync();
+		double tt = t.elapsed();
+		Log(info, "Node ordering: %f s", tt);
 
+		Timer t_init;
 		graph::GPUArray<uint> rowInd_half("Half Row Index", AllocationTypeEnum::unified, m / 2, config.deviceId),
 			colInd_half("Half Col Index", AllocationTypeEnum::unified, m / 2, config.deviceId),
 			new_rowPtr("New", AllocationTypeEnum::unified, n + 1, config.deviceId),
@@ -188,17 +188,17 @@ int main(int argc, char** argv)
 			execKernel((init<uint, PeelType>), (m + 512 - 1) / 512, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata(), mohacore.nodePriority.gdata());
 		}
 
-		graph::CubLarge<uint> s;
+		graph::CubLarge<uint> s (config.deviceId);
 		uint newNumEdges;
 		if (m < INT_MAX)
 		{
-			CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m, config.deviceId);
+			//CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m, config.deviceId);
 			CUBSelect(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m, config.deviceId);
 			newNumEdges = CUBSelect(gd->colInd, colInd_half.gdata(), keep.gdata(), m, config.deviceId);
 		}
 		else
 		{
-			s.Select(asc.gdata(), asc.gdata(), keep.gdata(), m);
+			//s.Select(asc.gdata(), asc.gdata(), keep.gdata(), m);
 			s.Select(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m);
 			newNumEdges = s.Select(gd->colInd, colInd_half.gdata(), keep.gdata(), m);
 		}
@@ -225,7 +225,7 @@ int main(int argc, char** argv)
 		to_csrcoo_device(g, gd, config.deviceId, config.allocation); //got to device !!
 
 		double time_init = t_init.elapsed();
-		Log(info, "Create EID (by malmasri): %f s", time_init);
+		Log(info, "Orientation time: %f s", time_init);
 	}
 
 	//Just need to verify some new storage format
@@ -271,6 +271,11 @@ int main(int argc, char** argv)
 			uint d = g.rowPtr->cdata()[i + 1];
 			uint deg = d - s;
 
+			// if(i >=37 && i<44)
+			// {
+			// 	printf("For %u, %u, %u, %u\n", i, d-s, g.colInd->cdata()[s], g.colInd->cdata()[s + 1]);
+			// }
+			
 
 			//if (deg > 128)
 			{
@@ -482,8 +487,6 @@ int main(int argc, char** argv)
 			uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::WarpShared, 0);
 			uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::Test, 0);
 
-
-
 			uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", config.deviceId, config.allocation, tcBE, gd, ee, st, ProcessingElementEnum::Warp, 0);
 			CountTrianglesHash<uint>(config.deviceId, divideConstant, tchash, g, gd, ee, 0, ProcessingElementEnum::Warp, 0);
 
@@ -591,23 +594,52 @@ int main(int argc, char** argv)
 		if (config.orient == None)
 			Log(warn, "Redundunt K-cliques, Please orient the graph\n");
 
-		graph::SingleGPU_Kclique<uint> mohaclique(config.deviceId, *gd);
 
-		for (int i = 0; i < 1; i++)
+
+		// if(config.processElement == BlockWarp)
+		// {
+		// 	graph::SingleGPU_Kclique_NoOutQueue<uint> mohaclique(config.deviceId, *gd);
+		// 	for (int i = 0; i < 3; i++)
+		// 	{
+		// 		Timer t;
+		// 		if (config.processBy == ByNode)
+		// 			mohaclique.findKclqueIncremental_node_async(config.k, *gd, config.processElement);
+		// 		else if (config.processBy == ByEdge)
+		// 			mohaclique.findKclqueIncremental_edge_async(config.k, *gd, config.processElement);
+		// 		mohaclique.sync();
+		// 		double time = t.elapsed();
+		// 		Log(info, "count time %f s", time);
+		// 		Log(info, "MOHA %d k-clique (%f teps)", mohaclique.count(), m / time);
+		// 	}
+		// 	mohaclique.free();
+		// }
+		// else
 		{
-			Timer t;
-			if (config.processBy == ByNode)
-				mohaclique.findKclqueIncremental_node_async(config.k, *gd, config.processElement);
-			else if (config.processBy == ByEdge)
-				mohaclique.findKclqueIncremental_edge_async(config.k, *gd, config.processElement);
-			mohaclique.sync();
-			double time = t.elapsed();
-			Log(info, "count time %f s", time);
-			Log(info, "MOHA %d k-clique (%f teps)", mohaclique.count(), m / time);
+
+
+
+			//read the nCr values, to be saved in (Constant or global or )
+			
+
+
+			graph::SingleGPU_Kclique<uint> mohaclique(config.deviceId, *gd);
+
+			for (int i = 0; i < 5; i++)
+			{
+				Timer t;
+				if (config.processBy == ByNode)
+					mohaclique.findKclqueIncremental_node_pivot_async(config.k, *gd, config.processElement);
+				else if (config.processBy == ByEdge)
+					mohaclique.findKclqueIncremental_edge_pivot_async(config.k, *gd, config.processElement);
+				mohaclique.sync();
+				double time = t.elapsed();
+				Log(info, "count time %f s", time);
+				Log(info, "MOHA %d k-clique (%f teps)", mohaclique.count(), m / time);
+			}
+
+
+			
 		}
-
-
-		mohaclique.free();
 	}
 
 

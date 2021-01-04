@@ -266,7 +266,7 @@ namespace graph
 				new_offset.initialize("New Row Pointer", unified, (n + 1), dev_);
 				edge_deleted.initialize("Edge deleted", gpu, old_edge_num * 2, dev_);
 			}
-			graph::CubLarge<uint> s;
+			graph::CubLarge<uint> s(dev_);
 
 			/*2. construct new CSR (offsets, adj) and rebuild the eid*/
 			int block_size = 128;
