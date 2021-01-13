@@ -624,17 +624,24 @@ int main(int argc, char** argv)
 
 			graph::SingleGPU_Kclique<uint> mohaclique(config.deviceId, *gd);
 
-			for (int i = 0; i < 5; i++)
+			// int k = 4;
+			// while ( k < 11)
 			{
-				Timer t;
-				if (config.processBy == ByNode)
-					mohaclique.findKclqueIncremental_node_pivot_async(config.k, *gd, config.processElement);
-				else if (config.processBy == ByEdge)
-					mohaclique.findKclqueIncremental_edge_pivot_async(config.k, *gd, config.processElement);
-				mohaclique.sync();
-				double time = t.elapsed();
-				Log(info, "count time %f s", time);
-				Log(info, "MOHA %d k-clique (%f teps)", mohaclique.count(), m / time);
+				//printf("------------------ K=%d ----------------------\n", k);
+				for (int i = 0; i < 1; i++)
+				{
+					Timer t;
+					if (config.processBy == ByNode)
+						mohaclique.findKclqueIncremental_node_nobin_pivot_async(config.k, *gd, config.processElement);
+					else if (config.processBy == ByEdge)
+						mohaclique.findKclqueIncremental_edge_nobin_pivot_async(config.k, *gd, config.processElement);
+					mohaclique.sync();
+					double time = t.elapsed();
+					Log(info, "count time %f s", time);
+					Log(info, "MOHA %d k-clique (%f teps)", mohaclique.count(), m / time);
+				}
+
+				//k++;
 			}
 
 

@@ -25,14 +25,10 @@
 #include "kckernels.cuh"
 
 
-
-
-
-
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
-kckernel_node_block_warp_binary_pivot_count(
+kckernel_node_block_warp_pivot_count_nocub(
 	uint64* counter,
 	graph::COOCSRGraph_d<T> g,
 	const  graph::GraphQueue_d<T, bool>  current,
@@ -58,23 +54,19 @@ kckernel_node_block_warp_binary_pivot_count(
 
 	//__shared__ T  level_offset[numPartitions], level_item_offset[numPartitions]; //for l and p
 	__shared__ T level_pivot[512];
-	__shared__ uint64 clique_count[numPartitions];
 	__shared__ uint64 path_more_explore;
 	__shared__ T l;
 	__shared__ uint64 maxIntersection;
 	__shared__ uint32_t  sm_id, levelPtr;
-	__shared__ T src, srcStart, srcLen;
+	__shared__ T src, srcStart, srcLen, srcLenBlocks;
 	__shared__ bool  partition_set[numPartitions];
-
-	__shared__ T num_divs_local, encode_offset, *encode;
+	__shared__ T encode_offset, *encode;
 	__shared__ T *pl, *cl;
 	__shared__ T *level_count, *level_index, *level_prev_index, *rsize, *drop;
-
 	__shared__ T lo, level_item_offset;
-
 	__shared__ T maxCount[numPartitions], maxIndex[numPartitions], partMask[numPartitions];
-
-	__shared__ 	T lastMask_i, lastMask_ii;
+	__shared__ T cl_counter[512];
+	__shared__ T subgraph_counters[512];
 
 	if (threadIdx.x == 0)
 	{
@@ -97,23 +89,24 @@ kckernel_node_block_warp_binary_pivot_count(
 			src = current.queue[i];
 			srcStart = g.rowPtr[src];
 			srcLen = g.rowPtr[src + 1] - srcStart;
+			srcLenBlocks = (srcLen + BLOCK_DIM_X - 1) / BLOCK_DIM_X;
+
+			//printf("SRC = %u, SRCLEN = %u, %llu\n", src, srcLen, *counter);
 
 			//printf("src = %u, srcLen = %u\n", src, srcLen);
-		
-			num_divs_local = (srcLen + 32 - 1) / 32;
-			encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
-			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
+			encode_offset = sm_id * CBPSM * (MAXDEG * MAXDEG) + levelPtr * (MAXDEG * MAXDEG);
+			encode = &adj_enc[encode_offset];
 
-			lo = sm_id * CBPSM * (/*numPartitions **/ NUMDIVS * MAXDEG) + levelPtr * (/*numPartitions **/ NUMDIVS * MAXDEG);
-			cl = &current_level[lo/*level_offset[wx]/* + wx * (NUMDIVS * MAXDEG)*/];
-			pl = &possible[lo/*level_offset[wx] /*+ wx * (NUMDIVS * MAXDEG)*/];
+			lo = sm_id * CBPSM * (MAXDEG* MAXDEG) + levelPtr * (MAXDEG* MAXDEG);
+			cl = &current_level[lo];
+			pl = &possible[lo];
 
-			level_item_offset = sm_id * CBPSM * (/*numPartitions **/ MAXDEG) + levelPtr * (/*numPartitions **/ MAXDEG);
-			level_count = &level_count_g[level_item_offset /*+ wx*MAXDEG*/];
-			level_index = &level_index_g[level_item_offset /*+ wx*MAXDEG*/];
-			level_prev_index = &level_prev_g[level_item_offset /*+ wx*MAXDEG*/];
-			rsize = &level_r[level_item_offset /*+ wx*MAXDEG*/]; // will be removed
-			drop = &level_d[level_item_offset /*+ wx*MAXDEG*/];  //will be removed
+			level_item_offset = sm_id * CBPSM * (MAXDEG) + levelPtr * (MAXDEG);
+			level_count = &level_count_g[level_item_offset];
+			level_index = &level_index_g[level_item_offset];
+			level_prev_index = &level_prev_g[level_item_offset];
+			rsize = &level_r[level_item_offset ]; // will be removed
+			drop = &level_d[level_item_offset];  //will be removed
 
 			level_count[0] = 0;
 			level_prev_index[0] = 0;
@@ -123,33 +116,47 @@ kckernel_node_block_warp_binary_pivot_count(
 			drop[0] = 0;
 
 			level_pivot[0] = 0xFFFFFFFF;
-
 			maxIntersection = 0;
-
-			lastMask_i = srcLen / 32;
-			lastMask_ii = (1 << (srcLen & 0x1F)) - 1;
+			cl_counter[0] = 0;
 		}
 		__syncthreads();
+
 		//Encode Clear
-	
 		for (T j = wx; j < srcLen; j += numPartitions)
 		{
-			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+			for (T k = lx; k < srcLen; k += CPARTSIZE)
 			{
-				encode[j * num_divs_local + k] = 0x00;
+				encode[j * srcLen + k] = 0xFFFFFFFF;
 			}
 		}
 		__syncthreads();
-		//Full Encode
+		//Full Subgraph
 		for (T j = wx; j < srcLen; j += numPartitions)
 		{
-			// if(current.queue[i] == 40 && lx == 0)
-			// 	printf("%llu -> %u, ", j, g.colInd[srcStart + j]);
-			graph::warp_sorted_count_and_encode_full<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&g.colInd[srcStart], srcLen,
+			graph::warp_sorted_count_and_subgraph_full<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&g.colInd[srcStart], srcLen,
 				&g.colInd[g.rowPtr[g.colInd[srcStart + j]]], g.rowPtr[g.colInd[srcStart + j] + 1] - g.rowPtr[g.colInd[srcStart + j]],
-				j, num_divs_local, encode);
+				j, srcLen, encode);
 		}
 		__syncthreads(); //Done encoding
+
+		//compact: simpler than cub
+		for (T j = wx; j < srcLen; j += numPartitions)
+		{
+			if(lx == 0)
+			{
+				subgraph_counters[j] = 0;
+				for(T k = 0; k< srcLen; k++)
+				{
+					if(encode[j*srcLen + k] != 0xFFFFFFFF)
+					{
+						encode[j*srcLen + subgraph_counters[j]] = encode[j*srcLen + k];
+						subgraph_counters[j]++;
+					}
+				}
+			}
+		}
+
+		__syncthreads();
 
 		//Find the first pivot
 		if(lx == 0)
@@ -163,19 +170,13 @@ kckernel_node_block_warp_binary_pivot_count(
 	
 		for (T j = wx; j < srcLen; j += numPartitions)
 		{
-			uint64 warpCount = 0;
-			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+			if(lx == 0 && maxCount[wx] < subgraph_counters[j])
 			{
-				warpCount += __popc(encode[j * num_divs_local + k]);
-			}
-			reduce_part<T>(partMask[wx], warpCount);
-
-			if(lx == 0 && maxCount[wx] < warpCount)
-			{
-				maxCount[wx] = warpCount;
+				maxCount[wx] = subgraph_counters[j];
 				maxIndex[wx] = j;
 			}	
 		}
+		__syncthreads();
 		if(lx == 0)
 		{
 			atomicMax(&(maxIntersection), maxCount[wx]);
@@ -183,25 +184,32 @@ kckernel_node_block_warp_binary_pivot_count(
 		__syncthreads();
 		if(lx == 0)
 		{
-			if(maxIntersection == maxCount[wx]) // unsafe, but okay I need any one with this max count
+			if(maxIntersection == maxCount[wx])
 			{
 				atomicMin(&(level_pivot[0]),maxIndex[wx]);
 			}
 		}
 		__syncthreads();
 
-		//Prepare the Possible and Intersection Encode Lists
+		//Creat the first/top Possible (Pivot list)
 		uint64 warpCount = 0;
-	
-		for (T j = threadIdx.x; j < num_divs_local && maxIntersection > 0; j += BLOCK_DIM_X)
+		for (T j = threadIdx.x; j < srcLen && maxIntersection > 0; j += BLOCK_DIM_X)
 		{
-			T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
-			pl[j] = ~(encode[(level_pivot[0])*num_divs_local + j]) & m;
-			cl[j] = 0xFFFFFFFF;
-			warpCount += __popc(pl[j]);
+			bool found = false;
+			const T searchVal =  j;
+			const T lb = graph::binary_search<T>(&encode[level_pivot[0] * srcLen], 0, subgraph_counters[level_pivot[0]], searchVal, found);
+			if(!found)
+			{
+				pl[j] = j;
+				warpCount++;
+			}
+			else
+			{
+				pl[j] = 0xFFFFFFFF;
+			}
 		}
 		reduce_part<T>(partMask[wx], warpCount);
-		if(lx == 0 && threadIdx.x < num_divs_local)
+		if(lx == 0 && threadIdx.x < srcLen)
 		{
 			atomicAdd(&(level_count[0]), (T)warpCount);
 		}
@@ -210,17 +218,13 @@ kckernel_node_block_warp_binary_pivot_count(
 		//Explore the tree
 		while((level_count[l - 2] > level_index[l - 2]))
 		{
-			T maskBlock = level_prev_index[l- 2] / 32;
-			T maskIndex = ~((1 << (level_prev_index[l - 2] & 0x1F)) -1);
-			T newIndex = __ffs(pl[num_divs_local*(l-2) + maskBlock] & maskIndex);
-			while(newIndex == 0)
+			T startIndex = level_prev_index[l- 2];
+			T newIndex = pl[(l-2)*srcLen + startIndex];
+			while(newIndex == 0xFFFFFFFF)
 			{
-				maskIndex = 0xFFFFFFFF;
-				maskBlock++;
-				newIndex = __ffs(pl[num_divs_local*(l-2) + maskBlock] & maskIndex);
+				startIndex++;
+				newIndex = pl[(l-2)*srcLen + startIndex];
 			}
-			newIndex =  32*maskBlock + newIndex - 1;
-			T sameBlockMask = (~((1 << (newIndex & 0x1F)) - 1))   | ~pl[num_divs_local*(l-2) + maskBlock];
 			__syncthreads();
 			if (threadIdx.x == 0)
 			{
@@ -235,8 +239,8 @@ kckernel_node_block_warp_binary_pivot_count(
 					drop[l-1] = drop[l-2] + 1;
 			}
 			__syncthreads();
-			//assert(level_prev_index[l - 2] == newIndex + 1);
-
+			
+			//Stop condition based on k
 			if(rsize[l-1] - drop[l-1] > KCCOUNT)
 			{	
 				__syncthreads();
@@ -257,15 +261,62 @@ kckernel_node_block_warp_binary_pivot_count(
 			}
 			else
 			{
-				// Now prepare intersection list
-				T* from = &(cl[num_divs_local * (l - 2)]);
-				T* to =  &(cl[num_divs_local * (l - 1)]);
-				for (T k = threadIdx.x; k < num_divs_local; k += BLOCK_DIM_X)
+				__syncthreads();
+
+				//Clear CL and PL of the new level
+				for (T j = threadIdx.x; j < srcLen; j += BLOCK_DIM_X)
 				{
-					to[k] = from[k] & encode[newIndex* num_divs_local + k];
-					//remove previous pivots from here
-					to[k] = to[k] & ( (maskBlock < k) ? ~pl[num_divs_local*(l-2) + k] : ( (maskBlock > k) ? 0xFFFFFFFF:  sameBlockMask) );
+					pl[(l-1)*srcLen + j] = 0xFFFFFFFF;
+					cl[(l-1)*srcLen + j] = 0xFFFFFFFF;
 				}
+				__syncthreads();
+				// Now prepare intersection list
+				T* to =  &(cl[srcLen * (l - 1)]);
+				T len = l == 2? subgraph_counters[newIndex] : cl_counter[l-2];
+				if(l == 2)
+				{
+					for (T j = threadIdx.x; j < len; j += BLOCK_DIM_X)
+					{
+						T dest = encode[newIndex* srcLen + j];
+						if(dest > newIndex || (dest < newIndex && pl[dest] == 0xFFFFFFFF))
+							to[j] = dest;
+					}
+					__syncthreads();
+				}
+				else
+				{
+					T* from = &(cl[srcLen * (l - 2)]);
+					for (T j = threadIdx.x; j < len; j += BLOCK_DIM_X)
+					{
+						bool found = false;
+						const T searchVal =  from[j];
+						const T lb = graph::binary_search<T>(&encode[newIndex * srcLen], 0, subgraph_counters[newIndex], searchVal, found);
+						if(found &&  (searchVal > newIndex || (searchVal < newIndex && pl[(l-2)*srcLen + searchVal] == 0xFFFFFFFF)))
+						{
+							to[j] = searchVal;
+						}
+						else
+							to[j] = 0xFFFFFFFF;
+					}
+					__syncthreads();
+				}
+
+				//Please use cub here 
+				if(threadIdx.x == 0)
+				{
+					cl_counter[l-1] = 0;
+					for(T k = 0; k< len; k++)
+					{
+						if(to[k] != 0xFFFFFFFF)
+						{
+							to[cl_counter[l-1]] = to[k];
+							cl_counter[l-1]++;
+						}
+					}
+				}
+				__syncthreads();
+
+
 				if(lx == 0)
 				{	
 					partition_set[wx] = false;
@@ -275,36 +326,38 @@ kckernel_node_block_warp_binary_pivot_count(
 				__syncthreads();
 				//////////////////////////////////////////////////////////////////////
 				//Now new pivot generation, then check to extend to new level or not
-
-				//T limit = (srcLen + numPartitions -1)/numPartitions;
-				for (T j = wx; j < /*numPartitions*limit*/srcLen; j += numPartitions)
+				for (T j = wx; j < cl_counter[l-1]; j += numPartitions)
 				{
 					uint64 warpCount = 0;
-					T bi = j / 32;
-					T ii = j & 0x1F;
-					if( (to[bi] & (1<<ii)) != 0)
+					T searchIndex = to[j];
+					for (T k = lx; k < cl_counter[l-1]; k += CPARTSIZE)
 					{
-						for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+						bool found = false;
+						const T searchVal =  to[k];
+						const T lb = graph::binary_search<T>(&encode[searchIndex * srcLen], 0, subgraph_counters[searchIndex], searchVal, found);
+						if(found)
 						{
-							warpCount += __popc(to[k] & encode[j * num_divs_local + k]);
+							warpCount++;
 						}
-						reduce_part<T>(partMask[wx], warpCount);
-						if(lx == 0 && maxCount[wx] == srcLen + 1)
-						{
-							partition_set[wx] = true;
-							path_more_explore = true; //shared, unsafe, but okay
-							maxCount[wx] = warpCount;
-							maxIndex[wx] = j;
-						}
-						else if(lx == 0 && maxCount[wx] < warpCount)
-						{
-							maxCount[wx] = warpCount;
-							maxIndex[wx] = j;
-						}	
 					}
+					reduce_part<T>(partMask[wx], warpCount);
+					if(lx == 0 && maxCount[wx] == srcLen + 1)
+					{
+						partition_set[wx] = true;
+						path_more_explore = true; //shared, unsafe, but okay
+						maxCount[wx] = warpCount;
+						maxIndex[wx] = to[j];
+					}
+					else if(lx == 0 && maxCount[wx] < warpCount)
+					{
+						maxCount[wx] = warpCount;
+						maxIndex[wx] = to[j];
+					}	
+					
 				}
-		
-				__syncthreads();
+
+				__syncthreads(); //All wait here to check to go further
+				
 				if(!path_more_explore)
 				{
 					__syncthreads();
@@ -326,6 +379,7 @@ kckernel_node_block_warp_binary_pivot_count(
 				}
 				else
 				{
+					__syncthreads();
 					if(lx == 0 && partition_set[wx])
 					{
 						atomicMax(&(maxIntersection), maxCount[wx]);
@@ -334,19 +388,26 @@ kckernel_node_block_warp_binary_pivot_count(
 
 					if(lx == 0 && maxIntersection == maxCount[wx])
 					{	
-							atomicMin(&(level_pivot[l-1]), maxIndex[wx]);
+						atomicMin(&(level_pivot[l-1]), maxIndex[wx]);
 					}
+				
 					__syncthreads();
-
 					uint64 warpCount = 0;
-					for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+					for (T j = threadIdx.x; j < cl_counter[l-1]; j += BLOCK_DIM_X)
 					{
-						T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
-						pl[(l-1)*num_divs_local + j] = ~(encode[level_pivot[l - 1] * num_divs_local + j]) & to[j] & m;
-						warpCount += __popc(pl[(l-1)*num_divs_local + j]);
+
+						bool found = false;
+						const T searchVal =  to[j];
+						const T lb = graph::binary_search<T>(&encode[level_pivot[l - 1] * srcLen], 0, subgraph_counters[level_pivot[l - 1]], searchVal, found);
+						if(!found)
+						{
+							pl[(l-1)*srcLen + searchVal] = searchVal;
+							warpCount++;
+						}
 					}
 					reduce_part<T>(partMask[wx], warpCount);
 
+					__syncthreads();
 					if(threadIdx.x == 0)
 					{
 						l++;
@@ -356,10 +417,15 @@ kckernel_node_block_warp_binary_pivot_count(
 					}
 
 					__syncthreads();
-					if(lx == 0 && threadIdx.x < num_divs_local)
+					if(lx == 0 && threadIdx.x < cl_counter[l-2])
 					{
 						atomicAdd(&(level_count[l-2]), warpCount);
 					}
+
+					
+					__syncthreads();
+
+
 				}
 				
 			}
@@ -376,10 +442,471 @@ kckernel_node_block_warp_binary_pivot_count(
 }
 
 
+
+template <typename T, int BLOCK_DIM_X>
+__device__ void block_filter_pivot(T count, T* output, unsigned short* gl)
+{
+	typedef cub::BlockScan<T, BLOCK_DIM_X> BlockScan;
+	__shared__ typename BlockScan::TempStorage temp_storage;
+	auto tid = threadIdx.x;
+	T srcLenBlocks = (count + BLOCK_DIM_X - 1) / BLOCK_DIM_X;
+	T threadData = 0;
+	T aggreagtedData = 0;
+	T total = 0;
+
+	for (T k = 0; k < srcLenBlocks; k++)
+	{
+		T index = k * BLOCK_DIM_X + tid;
+		T dataread = output[index];
+		threadData = 0;
+		aggreagtedData = 0;
+
+		if (index < count && dataread != 0xFFFFFFFF)
+		{
+			threadData = 1;
+		}
+
+		__syncthreads();
+		BlockScan(temp_storage).ExclusiveSum(threadData, threadData, aggreagtedData);
+		__syncthreads();
+
+
+		if (index < count && dataread != 0xFFFFFFFF)
+			output[threadData + total] = dataread;
+
+		total += aggreagtedData;
+		__syncthreads();
+	}
+
+	if(threadIdx.x == 0)
+		*gl = total;
+		
+}
+
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
-//__launch_bounds__(BLOCK_DIM_X, 16)
+__launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
-kckernel_edge_block_warp_binary_pivot_count(
+kckernel_node_block_warp_pivot_count(
+	uint64* counter,
+	graph::COOCSRGraph_d<T> g,
+	const  graph::GraphQueue_d<T, bool>  current,
+	T* current_level,
+	uint64* cpn,
+	T* levelStats,
+	T* adj_enc,
+
+	T* possible,
+	T* level_index_g,
+	T* level_count_g,
+	T* level_prev_g,
+	T* level_r,
+	T* level_d,
+	T* level_tmp,
+	unsigned long long* nCR
+)
+{
+	//will be removed later
+	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
+	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
+	const size_t lx = threadIdx.x % CPARTSIZE;
+
+	//__shared__ T  level_offset[numPartitions], level_item_offset[numPartitions]; //for l and p
+	__shared__ T level_pivot[512];
+	__shared__ uint64 path_more_explore;
+	__shared__ T l;
+	__shared__ uint64 maxIntersection;
+	__shared__ uint32_t  sm_id, levelPtr;
+	__shared__ T src, srcStart, srcLen, srcLenBlocks;
+	__shared__ bool  partition_set[numPartitions];
+	__shared__ T encode_offset, *encode;
+	__shared__ T *pl, *cl;
+	__shared__ T *level_count, *level_index, *level_prev_index, *rsize, *drop;
+	__shared__ T lo, level_item_offset;
+	__shared__ T maxCount[numPartitions], maxIndex[numPartitions], partMask[numPartitions];
+	__shared__ unsigned short cl_counter[512];
+	__shared__ unsigned short subgraph_counters[512];
+
+	if (threadIdx.x == 0)
+	{
+		sm_id = __mysmid();
+		T temp = 0;
+		while (atomicCAS(&(levelStats[(sm_id * CBPSM) + temp]), 0, 1) != 0)
+		{
+			temp++;
+		}
+		levelPtr = temp;
+	}
+	__syncthreads();
+
+	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
+	{
+		__syncthreads();
+		//block things
+		if (threadIdx.x == 0)
+		{
+			src = current.queue[i];
+			srcStart = g.rowPtr[src];
+			srcLen = g.rowPtr[src + 1] - srcStart;
+			srcLenBlocks = (srcLen + BLOCK_DIM_X - 1) / BLOCK_DIM_X;
+
+			//printf("SRC = %u, SRCLEN = %u, %llu\n", src, srcLen, *counter);
+
+			//printf("src = %u, srcLen = %u\n", src, srcLen);
+			encode_offset = sm_id * CBPSM * (MAXDEG * MAXDEG) + levelPtr * (MAXDEG * MAXDEG);
+			encode = &adj_enc[encode_offset];
+
+			lo = sm_id * CBPSM * (MAXDEG* MAXDEG) + levelPtr * (MAXDEG* MAXDEG);
+			cl = &current_level[lo];
+			pl = &possible[lo];
+
+			level_item_offset = sm_id * CBPSM * (MAXDEG) + levelPtr * (MAXDEG);
+			level_count = &level_count_g[level_item_offset];
+			level_index = &level_index_g[level_item_offset];
+			level_prev_index = &level_prev_g[level_item_offset];
+			rsize = &level_r[level_item_offset ]; // will be removed
+			drop = &level_d[level_item_offset];  //will be removed
+
+			level_count[0] = 0;
+			level_prev_index[0] = 0;
+			level_index[0] = 0;
+			l = 2;
+			rsize[0] = 1;
+			drop[0] = 0;
+
+			level_pivot[0] = 0xFFFFFFFF;
+			maxIntersection = 0;
+			cl_counter[0] = 0;
+		}
+		__syncthreads();
+
+		//Encode Clear
+		for (T j = wx; j < srcLen; j += numPartitions)
+		{
+			for (T k = lx; k < srcLen; k += CPARTSIZE)
+			{
+				encode[j * srcLen + k] = 0xFFFFFFFF;
+			}
+		}
+		__syncthreads();
+		//Full Subgraph
+		for (T j = wx; j < srcLen; j += numPartitions)
+		{
+			graph::warp_sorted_count_and_subgraph_full<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&g.colInd[srcStart], srcLen,
+				&g.colInd[g.rowPtr[g.colInd[srcStart + j]]], g.rowPtr[g.colInd[srcStart + j] + 1] - g.rowPtr[g.colInd[srcStart + j]],
+				j, srcLen, encode);
+		}
+		__syncthreads(); //Done encoding
+
+		//compact: simpler than cub
+		for (T j = wx; j < srcLen; j += numPartitions)
+		{
+			if(lx == 0)
+			{
+				subgraph_counters[j] = 0;
+				for(T k = 0; k< srcLen; k++)
+				{
+					if(encode[j*srcLen + k] != 0xFFFFFFFF)
+					{
+						encode[j*srcLen + subgraph_counters[j]] = encode[j*srcLen + k];
+						subgraph_counters[j]++;
+					}
+				}
+			}
+		}
+
+		__syncthreads();
+
+		//Find the first pivot
+		if(lx == 0)
+		{
+			maxCount[wx] = 0;
+			maxIndex[wx] = 0xFFFFFFFF;
+			partMask[wx] = CPARTSIZE ==32? 0xFFFFFFFF : (1 << CPARTSIZE) - 1;
+			partMask[wx] = partMask[wx] << ((wx%(32/CPARTSIZE)) * CPARTSIZE);
+		}
+		__syncthreads();
+	
+		for (T j = wx; j < srcLen; j += numPartitions)
+		{
+			if(lx == 0 && maxCount[wx] < subgraph_counters[j])
+			{
+				maxCount[wx] = subgraph_counters[j];
+				maxIndex[wx] = j;
+			}	
+		}
+		__syncthreads();
+		if(lx == 0)
+		{
+			atomicMax(&(maxIntersection), maxCount[wx]);
+		}
+		__syncthreads();
+		if(lx == 0)
+		{
+			if(maxIntersection == maxCount[wx])
+			{
+				atomicMin(&(level_pivot[0]),maxIndex[wx]);
+			}
+		}
+		__syncthreads();
+
+		//Creat the first/top Possible (Pivot list)
+		uint64 warpCount = 0;
+		for (T j = threadIdx.x; j < srcLen && maxIntersection > 0; j += BLOCK_DIM_X)
+		{
+			bool found = false;
+			const T searchVal =  j;
+			const T lb = graph::binary_search<T>(&encode[level_pivot[0] * srcLen], 0, subgraph_counters[level_pivot[0]], searchVal, found);
+			if(!found)
+			{
+				pl[j] = j;
+				warpCount++;
+			}
+			else
+			{
+				pl[j] = 0xFFFFFFFF;
+			}
+		}
+		reduce_part<T>(partMask[wx], warpCount);
+		if(lx == 0 && threadIdx.x < srcLen)
+		{
+			atomicAdd(&(level_count[0]), (T)warpCount);
+		}
+		__syncthreads();
+
+		//Explore the tree
+		while((level_count[l - 2] > level_index[l - 2]))
+		{
+			T startIndex = level_prev_index[l- 2];
+			T newIndex = pl[(l-2)*srcLen + startIndex];
+			while(newIndex == 0xFFFFFFFF)
+			{
+				startIndex++;
+				newIndex = pl[(l-2)*srcLen + startIndex];
+			}
+			__syncthreads();
+			if (threadIdx.x == 0)
+			{
+				level_prev_index[l - 2] = newIndex + 1;
+				level_index[l - 2]++;
+				level_pivot[l - 1] = 0xFFFFFFFF;
+				path_more_explore = false;
+				maxIntersection = 0;
+				rsize[l-1] = rsize[l-2] + 1;
+				drop[l-1] = drop[l-2];
+				if(newIndex == level_pivot[l-2])
+					drop[l-1] = drop[l-2] + 1;
+			}
+			__syncthreads();
+			
+			//Stop condition based on k
+			if(rsize[l-1] - drop[l-1] > KCCOUNT)
+			{	
+				__syncthreads();
+				//printf("Stop Here, %u %u\n", rsize[l-1], drop[l-1]);
+				if(threadIdx.x == 0)
+				{
+					T c = rsize[l-1] - KCCOUNT;
+					unsigned long long ncr = nCR[ drop[l-1] * 401 + c  ];
+					atomicAdd(counter, ncr/*rsize[l-1]*/);
+					
+					//printf, go back
+					while (l > 2 && level_index[l - 2] >= level_count[l - 2])
+					{
+						(l)--;
+					}
+				}
+				__syncthreads();
+			}
+			else
+			{
+				__syncthreads();
+
+				//Clear CL and PL of the new level
+				for (T j = threadIdx.x; j < srcLen; j += BLOCK_DIM_X)
+				{
+					pl[(l-1)*srcLen + j] = 0xFFFFFFFF;
+					cl[(l-1)*srcLen + j] = 0xFFFFFFFF;
+				}
+				__syncthreads();
+				// Now prepare intersection list
+				T* to =  &(cl[srcLen * (l - 1)]);
+				T len = l == 2? subgraph_counters[newIndex] : cl_counter[l-2];
+				if(l == 2)
+				{
+					for (T j = threadIdx.x; j < len; j += BLOCK_DIM_X)
+					{
+						T dest = encode[newIndex* srcLen + j];
+						if(dest > newIndex || (dest < newIndex && pl[dest] == 0xFFFFFFFF))
+							to[j] = dest;
+					}
+					__syncthreads();
+				}
+				else
+				{
+					T* from = &(cl[srcLen * (l - 2)]);
+					for (T j = threadIdx.x; j < len; j += BLOCK_DIM_X)
+					{
+						bool found = false;
+						const T searchVal =  from[j];
+						const T lb = graph::binary_search<T>(&encode[newIndex * srcLen], 0, subgraph_counters[newIndex], searchVal, found);
+						if(found &&  (searchVal > newIndex || (searchVal < newIndex && pl[(l-2)*srcLen + searchVal] == 0xFFFFFFFF)))
+						{
+							to[j] = searchVal;
+						}
+						else
+							to[j] = 0xFFFFFFFF;
+					}
+					__syncthreads();
+				}
+
+				//Please use cub here 
+				// if(threadIdx.x == 0)
+				// {
+				// 	cl_counter[l-1] = 0;
+				// 	for(T k = 0; k< len; k++)
+				// 	{
+				// 		if(to[k] != 0xFFFFFFFF)
+				// 		{
+				// 			to[cl_counter[l-1]] = to[k];
+				// 			cl_counter[l-1]++;
+				// 		}
+				// 	}
+				// }
+
+				block_filter_pivot<T, BLOCK_DIM_X>(len, to, &(cl_counter[l-1]));
+				__syncthreads();
+
+
+				if(lx == 0)
+				{	
+					partition_set[wx] = false;
+					maxCount[wx] = srcLen + 1; //make it shared !!
+					maxIndex[wx] = 0;
+				}
+				__syncthreads();
+				//////////////////////////////////////////////////////////////////////
+				//Now new pivot generation, then check to extend to new level or not
+				for (T j = wx; j < cl_counter[l-1]; j += numPartitions)
+				{
+					uint64 warpCount = 0;
+					T searchIndex = to[j];
+					for (T k = lx; k < cl_counter[l-1]; k += CPARTSIZE)
+					{
+						bool found = false;
+						const T searchVal =  to[k];
+						const T lb = graph::binary_search<T>(&encode[searchIndex * srcLen], 0, subgraph_counters[searchIndex], searchVal, found);
+						if(found)
+						{
+							warpCount++;
+						}
+					}
+					reduce_part<T>(partMask[wx], warpCount);
+					if(lx == 0 && maxCount[wx] == srcLen + 1)
+					{
+						partition_set[wx] = true;
+						path_more_explore = true; //shared, unsafe, but okay
+						maxCount[wx] = warpCount;
+						maxIndex[wx] = to[j];
+					}
+					else if(lx == 0 && maxCount[wx] < warpCount)
+					{
+						maxCount[wx] = warpCount;
+						maxIndex[wx] = to[j];
+					}	
+					
+				}
+
+				__syncthreads(); //All wait here to check to go further
+				
+				if(!path_more_explore)
+				{
+					__syncthreads();
+					if(threadIdx.x == 0)
+					{	
+						if(rsize[l-1] >= KCCOUNT)
+						{
+							T c = rsize[l-1] - KCCOUNT;
+							unsigned long long ncr = nCR[ drop[l-1] * 401 + c  ];
+							atomicAdd(counter, ncr/*rsize[l-1]*/);
+						}
+						//printf, go back
+						while (l > 2 && level_index[l - 2] >= level_count[l - 2])
+						{
+							(l)--;
+						}
+					}
+					__syncthreads();
+				}
+				else
+				{
+					__syncthreads();
+					if(lx == 0 && partition_set[wx])
+					{
+						atomicMax(&(maxIntersection), maxCount[wx]);
+					}
+					__syncthreads();
+
+					if(lx == 0 && maxIntersection == maxCount[wx])
+					{	
+						atomicMin(&(level_pivot[l-1]), maxIndex[wx]);
+					}
+				
+					__syncthreads();
+					uint64 warpCount = 0;
+					for (T j = threadIdx.x; j < cl_counter[l-1]; j += BLOCK_DIM_X)
+					{
+
+						bool found = false;
+						const T searchVal =  to[j];
+						const T lb = graph::binary_search<T>(&encode[level_pivot[l - 1] * srcLen], 0, subgraph_counters[level_pivot[l - 1]], searchVal, found);
+						if(!found)
+						{
+							pl[(l-1)*srcLen + searchVal] = searchVal;
+							warpCount++;
+						}
+					}
+					reduce_part<T>(partMask[wx], warpCount);
+
+					__syncthreads();
+					if(threadIdx.x == 0)
+					{
+						l++;
+						level_count[l-2] = 0;
+						level_prev_index[l-2] = 0;
+						level_index[l-2] = 0;
+					}
+
+					__syncthreads();
+					if(lx == 0 && threadIdx.x < cl_counter[l-2])
+					{
+						atomicAdd(&(level_count[l-2]), warpCount);
+					}
+
+					
+					__syncthreads();
+
+
+				}
+				
+			}
+			__syncthreads();
+			/////////////////////////////////////////////////////////////////////////
+		}
+	}
+
+	__syncthreads();
+	if (threadIdx.x == 0)
+	{
+		atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
+	}
+}
+
+
+
+template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
+__launch_bounds__(BLOCK_DIM_X, 16)
+__global__ void
+kckernel_edge_block_warp_pivot_count(
 	uint64* counter,
 	graph::COOCSRGraph_d<T> g,
 	const  graph::GraphQueue_d<T, bool>  current,
@@ -404,20 +931,21 @@ kckernel_edge_block_warp_binary_pivot_count(
 	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
 	const size_t lx = threadIdx.x % CPARTSIZE;
 
+	//__shared__ T  level_offset[numPartitions], level_item_offset[numPartitions]; //for l and p
 	__shared__ T level_pivot[512];
-	__shared__ uint64 clique_count[numPartitions];
 	__shared__ uint64 path_more_explore;
 	__shared__ T l;
 	__shared__ uint64 maxIntersection;
 	__shared__ uint32_t  sm_id, levelPtr;
-	__shared__ T src, srcStart, srcLen, src2, src2Start, src2Len, scounter;
+	__shared__ T src, srcStart, srcLen, srcLenBlocks, src2, src2Start, src2Len, scounter;
 	__shared__ bool  partition_set[numPartitions];
-	__shared__ T num_divs_local, encode_offset, *encode, tri_offset, *tri;
+	__shared__ T encode_offset, *encode, tri_offset, *tri;
 	__shared__ T *pl, *cl;
 	__shared__ T *level_count, *level_index, *level_prev_index, *rsize, *drop;
 	__shared__ T lo, level_item_offset;
 	__shared__ T maxCount[numPartitions], maxIndex[numPartitions], partMask[numPartitions];
-	__shared__ 	T lastMask_i, lastMask_ii;
+	__shared__ unsigned short cl_counter[512];
+	__shared__ unsigned short subgraph_counters[512];
 
 	if (threadIdx.x == 0)
 	{
@@ -433,6 +961,7 @@ kckernel_edge_block_warp_binary_pivot_count(
 
 	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
 	{
+		__syncthreads();
 		//block things
 		if (threadIdx.x == 0)
 		{
@@ -445,20 +974,24 @@ kckernel_edge_block_warp_binary_pivot_count(
 			tri_offset = sm_id * CBPSM * (MAXDEG) + levelPtr * (MAXDEG);
 			tri = &adj_tri[tri_offset  /*srcStart[wx]*/];
 			scounter = 0;
+			//srcLenBlocks = (srcLen + BLOCK_DIM_X - 1) / BLOCK_DIM_X;
 
-			encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
-			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
+			//printf("SRC = %u, SRCLEN = %u, %llu\n", src, srcLen, *counter);
 
-			lo = sm_id * CBPSM * (/*numPartitions **/ NUMDIVS * MAXDEG) + levelPtr * (/*numPartitions **/ NUMDIVS * MAXDEG);
-			cl = &current_level[lo/*level_offset[wx]/* + wx * (NUMDIVS * MAXDEG)*/];
-			pl = &possible[lo/*level_offset[wx] /*+ wx * (NUMDIVS * MAXDEG)*/];
+			//printf("src = %u, srcLen = %u\n", src, srcLen);
+			encode_offset = sm_id * CBPSM * (MAXDEG * MAXDEG) + levelPtr * (MAXDEG * MAXDEG);
+			encode = &adj_enc[encode_offset];
 
-			level_item_offset = sm_id * CBPSM * (/*numPartitions **/ MAXDEG) + levelPtr * (/*numPartitions **/ MAXDEG);
-			level_count = &level_count_g[level_item_offset /*+ wx*MAXDEG*/];
-			level_index = &level_index_g[level_item_offset /*+ wx*MAXDEG*/];
-			level_prev_index = &level_prev_g[level_item_offset /*+ wx*MAXDEG*/];
-			rsize = &level_r[level_item_offset /*+ wx*MAXDEG*/]; // will be removed
-			drop = &level_d[level_item_offset /*+ wx*MAXDEG*/];  //will be removed
+			lo = sm_id * CBPSM * (MAXDEG* MAXDEG) + levelPtr * (MAXDEG* MAXDEG);
+			cl = &current_level[lo];
+			pl = &possible[lo];
+
+			level_item_offset = sm_id * CBPSM * (MAXDEG) + levelPtr * (MAXDEG);
+			level_count = &level_count_g[level_item_offset];
+			level_index = &level_index_g[level_item_offset];
+			level_prev_index = &level_prev_g[level_item_offset];
+			rsize = &level_r[level_item_offset ]; // will be removed
+			drop = &level_d[level_item_offset];  //will be removed
 
 			level_count[0] = 0;
 			level_prev_index[0] = 0;
@@ -468,50 +1001,52 @@ kckernel_edge_block_warp_binary_pivot_count(
 			drop[0] = 0;
 
 			level_pivot[0] = 0xFFFFFFFF;
-
 			maxIntersection = 0;
-
-		
+			cl_counter[0] = 0;
 		}
-
-		// //get tri list: by block :!!
 		__syncthreads();
 		graph::block_sorted_count_and_set_tri<BLOCK_DIM_X, T>(&g.colInd[srcStart], srcLen, &g.colInd[src2Start], src2Len,
 			tri, &scounter);
-		
 		__syncthreads();
 
-		if (threadIdx.x == 0)
-		{
-			num_divs_local = (scounter + 32 - 1) / 32;
-			lastMask_i = scounter / 32;
-			lastMask_ii = (1 << (scounter & 0x1F)) - 1;
-		}
-		
-		if(KCCOUNT == 3 && threadIdx.x == 0)
-			atomicAdd(counter, scounter);
-
-	
-		__syncthreads();
 		//Encode Clear
 		for (T j = wx; j < scounter; j += numPartitions)
 		{
-			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+			for (T k = lx; k < scounter; k += CPARTSIZE)
 			{
-				encode[j * num_divs_local + k] = 0x00;
+				encode[j * scounter + k] = 0xFFFFFFFF;
 			}
 		}
 		__syncthreads();
-
-		//Full Encode
+		//Full Subgraph
 		for (T j = wx; j < scounter; j += numPartitions)
 		{
-			graph::warp_sorted_count_and_encode_full<WARPS_PER_BLOCK, T, true, CPARTSIZE>(tri, scounter,
+			graph::warp_sorted_count_and_subgraph_full<WARPS_PER_BLOCK, T, true, CPARTSIZE>(tri, scounter,
 				&g.colInd[g.rowPtr[tri[j]]], g.rowPtr[tri[j] + 1] - g.rowPtr[tri[j]],
-				j, num_divs_local,  encode);
+				j, scounter, encode);
 		}
 		__syncthreads(); //Done encoding
 
+		//compact: simpler than cub
+		for (T j = wx; j < scounter; j += numPartitions)
+		{
+			if(lx == 0)
+			{
+				subgraph_counters[j] = 0;
+				for(T k = 0; k< scounter; k++)
+				{
+					if(encode[j*scounter + k] != 0xFFFFFFFF)
+					{
+						encode[j*scounter + subgraph_counters[j]] = encode[j*scounter + k];
+						subgraph_counters[j]++;
+					}
+				}
+			}
+		}
+
+		__syncthreads();
+
+		//Find the first pivot
 		if(lx == 0)
 		{
 			maxCount[wx] = 0;
@@ -520,23 +1055,16 @@ kckernel_edge_block_warp_binary_pivot_count(
 			partMask[wx] = partMask[wx] << ((wx%(32/CPARTSIZE)) * CPARTSIZE);
 		}
 		__syncthreads();
-
-		//Find the first pivot
+	
 		for (T j = wx; j < scounter; j += numPartitions)
 		{
-			uint64 warpCount = 0;
-			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+			if(lx == 0 && maxCount[wx] < subgraph_counters[j])
 			{
-				warpCount += __popc(encode[j * num_divs_local + k]);
-			}
-			reduce_part<T>(partMask[wx], warpCount);
-
-			if(lx == 0 && maxCount[wx] < warpCount)
-			{
-				maxCount[wx] = warpCount;
+				maxCount[wx] = subgraph_counters[j];
 				maxIndex[wx] = j;
 			}	
 		}
+		__syncthreads();
 		if(lx == 0)
 		{
 			atomicMax(&(maxIntersection), maxCount[wx]);
@@ -544,41 +1072,47 @@ kckernel_edge_block_warp_binary_pivot_count(
 		__syncthreads();
 		if(lx == 0)
 		{
-			if(maxIntersection == maxCount[wx]) // unsafe, but okay I need any one with this max count
+			if(maxIntersection == maxCount[wx])
 			{
 				atomicMin(&(level_pivot[0]),maxIndex[wx]);
 			}
 		}
 		__syncthreads();
 
-		//Prepare the Possible and Intersection Encode Lists
+		//Creat the first/top Possible (Pivot list)
 		uint64 warpCount = 0;
-		for (T j = threadIdx.x; j < num_divs_local && maxIntersection > 0; j += BLOCK_DIM_X)
+		for (T j = threadIdx.x; j < scounter && maxIntersection > 0; j += BLOCK_DIM_X)
 		{
-			T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
-			pl[j] = ~(encode[(level_pivot[0])*num_divs_local + j]) & m;
-			cl[j] = 0xFFFFFFFF;
-			warpCount += __popc(pl[j]);
+			bool found = false;
+			const T searchVal =  j;
+			const T lb = graph::binary_search<T>(&encode[level_pivot[0] * scounter], 0, subgraph_counters[level_pivot[0]], searchVal, found);
+			if(!found)
+			{
+				pl[j] = j;
+				warpCount++;
+			}
+			else
+			{
+				pl[j] = 0xFFFFFFFF;
+			}
 		}
 		reduce_part<T>(partMask[wx], warpCount);
-		if(lx == 0 && threadIdx.x < num_divs_local)
+		if(lx == 0 && threadIdx.x < scounter)
 		{
 			atomicAdd(&(level_count[0]), (T)warpCount);
 		}
 		__syncthreads();
+
+		//Explore the tree
 		while((level_count[l - 3] > level_index[l - 3]))
 		{
-			T maskBlock = level_prev_index[l- 3] / 32;
-			T maskIndex = ~((1 << (level_prev_index[l - 3] & 0x1F)) -1);
-			T newIndex = __ffs(pl[num_divs_local*(l-3) + maskBlock] & maskIndex);
-			while(newIndex == 0)
+			T startIndex = level_prev_index[l- 3];
+			T newIndex = pl[(l-3)*scounter + startIndex];
+			while(newIndex == 0xFFFFFFFF)
 			{
-				maskIndex = 0xFFFFFFFF;
-				maskBlock++;
-				newIndex = __ffs(pl[num_divs_local*(l-3) + maskBlock] & maskIndex);
+				startIndex++;
+				newIndex = pl[(l-3)*scounter + startIndex];
 			}
-			newIndex =  32*maskBlock + newIndex - 1;
-			T sameBlockMask = (~((1 << (newIndex & 0x1F)) - 1))   | ~pl[num_divs_local*(l-3) + maskBlock];
 			__syncthreads();
 			if (threadIdx.x == 0)
 			{
@@ -593,8 +1127,8 @@ kckernel_edge_block_warp_binary_pivot_count(
 					drop[l-2] = drop[l-3] + 1;
 			}
 			__syncthreads();
-			//assert(level_prev_index[l - 2] == newIndex + 1);
-
+			
+			//Stop condition based on k
 			if(rsize[l-2] - drop[l-2] > KCCOUNT)
 			{	
 				__syncthreads();
@@ -615,15 +1149,64 @@ kckernel_edge_block_warp_binary_pivot_count(
 			}
 			else
 			{
-				// Now prepare intersection list
-				T* from = &(cl[num_divs_local * (l - 3)]);
-				T* to =  &(cl[num_divs_local * (l - 2)]);
-				for (T k = threadIdx.x; k < num_divs_local; k += BLOCK_DIM_X)
+				__syncthreads();
+
+				//Clear CL and PL of the new level
+				for (T j = threadIdx.x; j < scounter; j += BLOCK_DIM_X)
 				{
-					to[k] = from[k] & encode[newIndex* num_divs_local + k];
-					//remove previous pivots from here
-					to[k] = to[k] & ( (maskBlock < k) ? ~pl[num_divs_local*(l-3) + k] : ( (maskBlock > k) ? 0xFFFFFFFF:  sameBlockMask) );
+					pl[(l-2)*scounter + j] = 0xFFFFFFFF;
+					cl[(l-2)*scounter + j] = 0xFFFFFFFF;
 				}
+				__syncthreads();
+				// Now prepare intersection list
+				T* to =  &(cl[scounter * (l - 2)]);
+				T len = l == 3? subgraph_counters[newIndex] : cl_counter[l-3];
+				if(l == 3)
+				{
+					for (T j = threadIdx.x; j < len; j += BLOCK_DIM_X)
+					{
+						T dest = encode[newIndex* scounter + j];
+						if(dest > newIndex || (dest < newIndex && pl[dest] == 0xFFFFFFFF))
+							to[j] = dest;
+					}
+					__syncthreads();
+				}
+				else
+				{
+					T* from = &(cl[scounter * (l - 3)]);
+					for (T j = threadIdx.x; j < len; j += BLOCK_DIM_X)
+					{
+						bool found = false;
+						const T searchVal =  from[j];
+						const T lb = graph::binary_search<T>(&encode[newIndex * scounter], 0, subgraph_counters[newIndex], searchVal, found);
+						if(found &&  (searchVal > newIndex || (searchVal < newIndex && pl[(l-3)*scounter + searchVal] == 0xFFFFFFFF)))
+						{
+							to[j] = searchVal;
+						}
+						else
+							to[j] = 0xFFFFFFFF;
+					}
+					__syncthreads();
+				}
+
+				//Please use cub here 
+				// if(threadIdx.x == 0)
+				// {
+				// 	cl_counter[l-2] = 0;
+				// 	for(T k = 0; k< len; k++)
+				// 	{
+				// 		if(to[k] != 0xFFFFFFFF)
+				// 		{
+				// 			to[cl_counter[l-2]] = to[k];
+				// 			cl_counter[l-2]++;
+				// 		}
+				// 	}
+				// }
+
+				block_filter_pivot<T, BLOCK_DIM_X>(len, to, &(cl_counter[l-2]));
+				__syncthreads();
+
+
 				if(lx == 0)
 				{	
 					partition_set[wx] = false;
@@ -633,36 +1216,38 @@ kckernel_edge_block_warp_binary_pivot_count(
 				__syncthreads();
 				//////////////////////////////////////////////////////////////////////
 				//Now new pivot generation, then check to extend to new level or not
-
-				//T limit = (srcLen + numPartitions -1)/numPartitions;
-				for (T j = wx; j < /*numPartitions*limit*/scounter; j += numPartitions)
+				for (T j = wx; j < cl_counter[l-2]; j += numPartitions)
 				{
 					uint64 warpCount = 0;
-					T bi = j / 32;
-					T ii = j & 0x1F;
-					if( (to[bi] & (1<<ii)) != 0)
+					T searchIndex = to[j];
+					for (T k = lx; k < cl_counter[l-2]; k += CPARTSIZE)
 					{
-						for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+						bool found = false;
+						const T searchVal =  to[k];
+						const T lb = graph::binary_search<T>(&encode[searchIndex * scounter], 0, subgraph_counters[searchIndex], searchVal, found);
+						if(found)
 						{
-							warpCount += __popc(to[k] & encode[j * num_divs_local + k]);
+							warpCount++;
 						}
-						reduce_part<T>(partMask[wx], warpCount);
-						if(lx == 0 && maxCount[wx] == scounter + 1)
-						{
-							partition_set[wx] = true;
-							path_more_explore = true; //shared, unsafe, but okay
-							maxCount[wx] = warpCount;
-							maxIndex[wx] = j;
-						}
-						else if(lx == 0 && maxCount[wx] < warpCount)
-						{
-							maxCount[wx] = warpCount;
-							maxIndex[wx] = j;
-						}	
 					}
+					reduce_part<T>(partMask[wx], warpCount);
+					if(lx == 0 && maxCount[wx] == scounter + 1)
+					{
+						partition_set[wx] = true;
+						path_more_explore = true; //shared, unsafe, but okay
+						maxCount[wx] = warpCount;
+						maxIndex[wx] = to[j];
+					}
+					else if(lx == 0 && maxCount[wx] < warpCount)
+					{
+						maxCount[wx] = warpCount;
+						maxIndex[wx] = to[j];
+					}	
+					
 				}
-		
-				__syncthreads();
+
+				__syncthreads(); //All wait here to check to go further
+				
 				if(!path_more_explore)
 				{
 					__syncthreads();
@@ -684,6 +1269,7 @@ kckernel_edge_block_warp_binary_pivot_count(
 				}
 				else
 				{
+					__syncthreads();
 					if(lx == 0 && partition_set[wx])
 					{
 						atomicMax(&(maxIntersection), maxCount[wx]);
@@ -692,19 +1278,26 @@ kckernel_edge_block_warp_binary_pivot_count(
 
 					if(lx == 0 && maxIntersection == maxCount[wx])
 					{	
-							atomicMin(&(level_pivot[l-2]), maxIndex[wx]);
+						atomicMin(&(level_pivot[l-2]), maxIndex[wx]);
 					}
+				
 					__syncthreads();
-
 					uint64 warpCount = 0;
-					for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+					for (T j = threadIdx.x; j < cl_counter[l-2]; j += BLOCK_DIM_X)
 					{
-						T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
-						pl[(l-2)*num_divs_local + j] = ~(encode[level_pivot[l - 2] * num_divs_local + j]) & to[j] & m;
-						warpCount += __popc(pl[(l-2)*num_divs_local + j]);
+
+						bool found = false;
+						const T searchVal =  to[j];
+						const T lb = graph::binary_search<T>(&encode[level_pivot[l - 2] * scounter], 0, subgraph_counters[level_pivot[l - 2]], searchVal, found);
+						if(!found)
+						{
+							pl[(l-2)*scounter + searchVal] = searchVal;
+							warpCount++;
+						}
 					}
 					reduce_part<T>(partMask[wx], warpCount);
 
+					__syncthreads();
 					if(threadIdx.x == 0)
 					{
 						l++;
@@ -714,16 +1307,21 @@ kckernel_edge_block_warp_binary_pivot_count(
 					}
 
 					__syncthreads();
-					if(lx == 0 && threadIdx.x < num_divs_local)
+					if(lx == 0 && threadIdx.x < cl_counter[l-3])
 					{
 						atomicAdd(&(level_count[l-3]), warpCount);
 					}
+
+					
+					__syncthreads();
+
+
 				}
 				
 			}
 			__syncthreads();
+			/////////////////////////////////////////////////////////////////////////
 		}
-
 	}
 
 	__syncthreads();
@@ -732,6 +1330,9 @@ kckernel_edge_block_warp_binary_pivot_count(
 		atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
 	}
 }
+
+
+
 
 namespace graph
 {
@@ -1149,8 +1750,8 @@ namespace graph
 						// simt::atomic<KCTask<T>, simt::thread_scope_device> *queue_data;
 						// CUDA_RUNTIME(cudaMalloc((void **)&queue_data, (num_SMs * conc_blocks_per_SM * QUEUE_SIZE) * sizeof(simt::atomic<KCTask<T>, simt::thread_scope_device>)));
 
-						GPUArray<KCTask<T>> queue_data("test", unified, num_SMs * conc_blocks_per_SM * QUEUE_SIZE, dev_);
-						GPUArray<T> queue_encode("test", unified, num_SMs * conc_blocks_per_SM * QUEUE_SIZE * num_divs, dev_);
+						// GPUArray<KCTask<T>> queue_data("test", unified, num_SMs * conc_blocks_per_SM * QUEUE_SIZE, dev_);
+						// GPUArray<T> queue_encode("test", unified, num_SMs * conc_blocks_per_SM * QUEUE_SIZE * num_divs, dev_);
 						
 
 
@@ -1193,8 +1794,8 @@ namespace graph
 
 
 						current_level2.freeGPU();
-						// node_be.freeGPU();
-						// tri_list.freeGPU();
+						node_be.freeGPU();
+						tri_list.freeGPU();
 					}
 
 				}
@@ -1215,10 +1816,6 @@ namespace graph
 			printf("Max Edge Min Degree = %d\n", k - 1);
 
 		}
-
-
-
-
 
 
 		void findKclqueIncremental_node_pivot_async(int kcount, COOCSRGraph_d<T>& g,
@@ -1290,20 +1887,20 @@ namespace graph
 			uint num_divs = (maxDegree.gdata()[0] + dv - 1) / dv;
 			
 			const uint64 encode_size = num_SMs * conc_blocks_per_SM * maxDegree.gdata()[0] * num_divs; //per block
-			GPUArray<T> node_be("Temp level Counter", unified, encode_size, dev_);
+			GPUArray<T> node_be("Temp level Counter", gpu, encode_size, dev_);
 
-			const uint64 level_size = num_SMs * conc_blocks_per_SM * factor * max_level * num_divs; //per partition
-			const uint64 level_item_size = num_SMs * conc_blocks_per_SM * factor * max_level; //per partition
-			const uint64 level_partition_size = num_SMs * conc_blocks_per_SM * factor * num_divs; //per partition
+			const uint64 level_size = num_SMs * conc_blocks_per_SM * /*factor **/ max_level * num_divs; //per partition
+			const uint64 level_item_size = num_SMs * conc_blocks_per_SM * /*factor **/ max_level; //per partition
+			const uint64 level_partition_size = num_SMs * conc_blocks_per_SM * /*factor **/ num_divs; //per partition
 
-			GPUArray<T> current_level2("Temp level Counter", unified, level_size, dev_);
-			GPUArray<T> possible("Temp level Counter", unified, level_size, dev_);
+			GPUArray<T> current_level2("Temp level Counter", gpu, level_size, dev_);
+			GPUArray<T> possible("Temp level Counter", gpu, level_size, dev_);
 			
-			GPUArray<T> level_index("Temp level Counter", unified, level_item_size, dev_);
-			GPUArray<T> level_count("Temp level Counter", unified, level_item_size, dev_);
-			GPUArray<T> level_prev("Temp level Counter", unified, level_item_size, dev_);
-			GPUArray<T> level_r("Temp level Counter", unified, level_item_size, dev_);
-			GPUArray<T> level_d("Temp level Counter", unified, level_item_size, dev_);
+			GPUArray<T> level_index("Temp level Counter", gpu, level_item_size, dev_);
+			GPUArray<T> level_count("Temp level Counter", gpu, level_item_size, dev_);
+			GPUArray<T> level_prev("Temp level Counter", gpu, level_item_size, dev_);
+			GPUArray<T> level_r("Temp level Counter", gpu, level_item_size, dev_);
+			GPUArray<T> level_d("Temp level Counter", gpu, level_item_size, dev_);
 			GPUArray<T> level_temp("Temp level Counter", unified, level_partition_size, dev_);
 
 			printf("Level Size = %llu, Encode Size = %llu\n", 2 *level_size + 5*level_item_size + 1*level_partition_size, encode_size);
@@ -1334,6 +1931,161 @@ namespace graph
 				{
 					auto grid_block_size =  current_q.count.gdata()[0];
 					execKernel((kckernel_node_block_warp_binary_pivot_count<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
+						counter.gdata(),
+						g,
+						current_q.device_queue->gdata()[0],
+						current_level2.gdata(), cpn.gdata(),
+						d_bitmap_states.gdata(), node_be.gdata(),
+					
+						possible.gdata(),
+						level_index.gdata(),
+						level_count.gdata(),
+						level_prev.gdata(),
+						level_r.gdata(),
+						level_d.gdata(),
+						level_temp.gdata(),
+						nCr.gdata()
+					);
+
+					
+			
+					std::cout.imbue(std::locale(""));
+					std::cout << "------------- Level = " << level << " Nodes = " << current_q.count.gdata()[0] << " Counter = " << counter.gdata()[0] << "\n";
+				}
+				level += span;
+			}
+
+			counter.freeGPU();
+			cpn.freeGPU();
+			current_level2.freeGPU();
+			d_bitmap_states.freeGPU();
+			node_be.freeGPU();
+			possible.freeGPU();
+			level_index.freeGPU();
+			level_count.freeGPU();
+			level_prev.freeGPU();
+			level_r.freeGPU();
+			level_d.freeGPU();
+			nCr.freeGPU();
+
+
+			k = level;
+			printf("Max Degree (+span) = %d\n", k - 1);
+		}
+
+		void findKclqueIncremental_node_nobin_pivot_async(int kcount, COOCSRGraph_d<T>& g,
+			ProcessingElementEnum pe, const size_t nodeOffset = 0, const size_t edgeOffset = 0)
+		{
+
+			FILE *infile;
+			GPUArray<unsigned long long> nCr("bmp bitmap stats", AllocationTypeEnum::gpu, 1001*401, dev_);
+			infile = fopen("/home/almasri3/mewcp-gpu/kclique/nCr.txt","r"); //change it
+			double d=0;
+			if(infile==NULL)
+			{
+				printf("file could not be opened\n");
+				exit(1);
+			}
+			
+			for(int row = 0; row < 1001; ++row)
+			{
+				for (int col = 0; col < 401; ++col)
+				{
+					if (!fscanf(infile,"%lf,",&d)) 
+						fprintf(stderr, "Error\n");
+					// fprintf(stderr, "%lf\n", d);
+					nCr.cdata()[row*401 + col] = (unsigned long long)d;
+				}
+			}
+			fclose(infile);
+			printf("Test, 5c4 = %llu\n", nCr.cdata()[7*401 + 4]);
+
+			nCr.switch_to_gpu();
+
+
+			CUDA_RUNTIME(cudaSetDevice(dev_));
+			const auto block_size = 128;
+			CUDAContext context;
+			T num_SMs = context.num_SMs;
+			T level = 0;
+			T span = 1024;
+			T bucket_level_end_ = level;
+			T todo = g.numNodes;
+			GPUArray <uint64> counter("Temp level Counter", unified, 1, dev_);
+			GPUArray <uint64> cpn("Temp level Counter", unified, g.numNodes, dev_);
+			GPUArray <T> maxDegree("Temp Degree", unified, 1, dev_);
+
+			T conc_blocks_per_SM = context.GetConCBlocks(block_size);
+			GPUArray<T> d_bitmap_states("bmp bitmap stats", AllocationTypeEnum::gpu, num_SMs * conc_blocks_per_SM, dev_);
+			T factor = (pe == Block) ? 1 : (block_size / 32);
+
+			// cpn.setAll(0, true);
+			// GPUArray<T>
+			// 	filter_level("Temp filter Counter", unified, g.numEdges, dev_),
+			// 	filter_scan("Temp scan Counter", unified, g.numEdges, dev_);
+			counter.setSingle(0, 0, true);
+			maxDegree.setSingle(0, 0, true);
+			d_bitmap_states.setAll(0, true);
+			getNodeDegree(g, maxDegree.gdata());
+			bucket_scan(nodeDegree, g.numNodes, 0, kcount - 1, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
+			todo -= current_q.count.gdata()[0];
+			current_q.count.gdata()[0] = 0;
+			level = kcount - 1;
+			bucket_level_end_ = level;
+
+
+			const T partitionSize = PART_SIZE; //Defined
+			factor = (block_size / partitionSize);
+
+			const uint dv = 32;
+			const uint max_level = maxDegree.gdata()[0];
+			uint num_divs = (maxDegree.gdata()[0] + dv - 1) / dv;
+			
+			const uint64 encode_size = num_SMs * conc_blocks_per_SM * maxDegree.gdata()[0] * maxDegree.gdata()[0]; //per block
+			GPUArray<T> node_be("Temp level Counter", gpu, encode_size, dev_);
+
+			const uint64 level_size = num_SMs * conc_blocks_per_SM * maxDegree.gdata()[0] * maxDegree.gdata()[0]; //per partition
+			const uint64 level_item_size = num_SMs * conc_blocks_per_SM * /*factor **/ max_level; //per partition
+			const uint64 level_partition_size = num_SMs * conc_blocks_per_SM * /*factor **/ num_divs; //per partition
+
+			GPUArray<T> current_level2("Temp level Counter", gpu, level_size, dev_);
+			GPUArray<T> possible("Temp level Counter", gpu, level_size, dev_);
+			
+			GPUArray<T> level_index("Temp level Counter", gpu, level_item_size, dev_);
+			GPUArray<T> level_count("Temp level Counter", gpu, level_item_size, dev_);
+			GPUArray<T> level_prev("Temp level Counter", gpu, level_item_size, dev_);
+			GPUArray<T> level_r("Temp level Counter", gpu, level_item_size, dev_);
+			GPUArray<T> level_d("Temp level Counter", gpu, level_item_size, dev_);
+			GPUArray<T> level_temp("Temp level Counter", unified, level_partition_size, dev_);
+
+			printf("Level Size = %llu, Encode Size = %llu\n", 2 *level_size + 5*level_item_size + 1*level_partition_size, encode_size);
+
+			// current_level2.setAll(0, true);
+			// node_be.setAll(0, true);
+			const T numPartitions = block_size/partitionSize;
+			cudaMemcpyToSymbol(KCCOUNT, &kcount, sizeof(KCCOUNT));
+			cudaMemcpyToSymbol(PARTSIZE, &partitionSize, sizeof(PARTSIZE));
+			cudaMemcpyToSymbol(NUMPART, &numPartitions, sizeof(NUMPART));
+			cudaMemcpyToSymbol(MAXLEVEL, &max_level, sizeof(MAXLEVEL));
+			cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
+			cudaMemcpyToSymbol(MAXDEG, &(maxDegree.gdata()[0]), sizeof(MAXDEG));
+			cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM), sizeof(CBPSM));
+
+			while (todo > 0)
+			{
+				CUDA_RUNTIME(cudaGetLastError());
+				cudaDeviceSynchronize();
+
+				//1 bucket fill
+				bucket_scan(nodeDegree, g.numNodes, level, span, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
+				CUDA_RUNTIME(cudaGetLastError());
+				cudaDeviceSynchronize();
+
+				todo -= current_q.count.gdata()[0];
+				if (current_q.count.gdata()[0] > 0)
+				{
+					auto grid_block_size =  current_q.count.gdata()[0];
+					execKernel((kckernel_node_block_warp_pivot_count<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
 						counter.gdata(),
 						g,
 						current_q.device_queue->gdata()[0],
@@ -1452,8 +2204,8 @@ namespace graph
 			GPUArray<T> tri_list("Temp level Counter", unified, tri_size, dev_);
 
 			const uint64 level_size = num_SMs * conc_blocks_per_SM * /*factor **/ max_level * num_divs; //per partition
-			const uint64 level_item_size = num_SMs * conc_blocks_per_SM /** factor **/ max_level; //per partition
-			const uint64 level_partition_size = num_SMs * conc_blocks_per_SM /** factor **/ num_divs; //per partition
+			const uint64 level_item_size = num_SMs * conc_blocks_per_SM * /** factor **/ max_level; //per partition
+			const uint64 level_partition_size = num_SMs * conc_blocks_per_SM *  /** factor **/ num_divs; //per partition
 
 			GPUArray<T> current_level2("Temp level Counter", unified, level_size, dev_);
 			GPUArray<T> possible("Temp level Counter", unified, level_size, dev_);
@@ -1497,6 +2249,162 @@ namespace graph
 						auto grid_block_size = current_q.count.gdata()[0];
 
 						execKernel((kckernel_edge_block_warp_binary_pivot_count<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
+							counter.gdata(),
+							g,
+							current_q.device_queue->gdata()[0],
+							current_level2.gdata(), NULL,
+							d_bitmap_states.gdata(), node_be.gdata(), tri_list.gdata(),
+
+							possible.gdata(),
+							level_index.gdata(),
+							level_count.gdata(),
+							level_prev.gdata(),
+							level_r.gdata(),
+							level_d.gdata(),
+							level_temp.gdata(),
+							nCr.gdata()
+						);
+
+
+						current_level2.freeGPU();
+				}
+				level += span;
+
+				std::cout.imbue(std::locale(""));
+				std::cout << "Level = " << level << " Nodes = " << current_q.count.gdata()[0] << " Counter = " << counter.gdata()[0] << "\n";
+			}
+
+			counter.freeGPU();
+			//cpn.freeGPU();
+			current_level.freeGPU();
+
+			d_bitmap_states.freeGPU();
+			maxDegree.freeGPU();
+			k = level;
+
+			printf("Max Edge Min Degree = %d\n", k - 1);
+
+		}
+
+		void findKclqueIncremental_edge_nobin_pivot_async(int kcount, COOCSRGraph_d<T>& g,
+			ProcessingElementEnum pe, const size_t nodeOffset = 0, const size_t edgeOffset = 0)
+		{
+
+
+			//Please be carful
+			kcount = kcount - 1;
+
+			FILE *infile;
+			GPUArray<unsigned long long> nCr("bmp bitmap stats", AllocationTypeEnum::gpu, 1001*401, dev_);
+			infile = fopen("/home/almasri3/mewcp-gpu/kclique/nCr.txt","r"); //change it
+			double d=0;
+			if(infile==NULL)
+			{
+				printf("file could not be opened\n");
+				exit(1);
+			}
+			for(int row = 0; row < 1001; ++row)
+			{
+				for (int col = 0; col < 401; ++col)
+				{
+					if (!fscanf(infile,"%lf,",&d)) 
+						fprintf(stderr, "Error\n");
+					// fprintf(stderr, "%lf\n", d);
+					nCr.cdata()[row*401 + col] = (unsigned long long)d;
+				}
+			}
+			fclose(infile);
+			printf("Test, 5c4 = %llu\n", nCr.cdata()[7*401 + 4]);
+			nCr.switch_to_gpu();
+
+			CUDA_RUNTIME(cudaSetDevice(dev_));
+
+			const auto block_size = 64;
+			CUDAContext context;
+			T num_SMs = context.num_SMs;
+
+			T level = 0;
+			T span = 1024;
+			T bucket_level_end_ = level;
+			T todo = g.numEdges;
+
+			GPUArray <uint64> counter("Temp level Counter", unified, 1, dev_);
+			GPUArray <T> maxDegree("Temp Degree", unified, 1, dev_);
+
+			T conc_blocks_per_SM = context.GetConCBlocks(block_size);
+			GPUArray<T> d_bitmap_states("bmp bitmap stats", AllocationTypeEnum::gpu, num_SMs * conc_blocks_per_SM, dev_);
+			T factor = (pe == Block) ? 1 : (block_size / 32);
+			counter.setSingle(0, 0, true);
+			maxDegree.setSingle(0, 0, true);
+			execKernel((get_max_degree<T, 128>), (g.numEdges + 128 - 1) / 128, 128, dev_, false, g, edgePtr.gdata(), maxDegree.gdata());
+			GPUArray<char> current_level("Temp level Counter", unified, num_SMs * conc_blocks_per_SM * factor * maxDegree.gdata()[0], dev_);
+
+
+			printf("Max Dgree = %u vs %u\n", maxDegree.gdata()[0], g.numEdges);
+			bucket_edge_scan(edgePtr, g.numEdges, 0, kcount - 2, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
+			todo -= current_q.count.gdata()[0];
+			current_q.count.gdata()[0] = 0;
+			level = kcount - 2;
+			bucket_level_end_ = level;
+
+			const T partitionSize = PART_SIZE;
+			factor = (block_size / partitionSize);
+
+			const uint dv = 32;
+			const uint max_level = maxDegree.gdata()[0];
+			uint num_divs = (maxDegree.gdata()[0] + dv - 1) / dv;
+			
+			const uint64 encode_size = num_SMs * conc_blocks_per_SM * maxDegree.gdata()[0] * maxDegree.gdata()[0]; //per block
+			const uint64 tri_size = num_SMs * conc_blocks_per_SM *  maxDegree.gdata()[0]; //per block
+			GPUArray<T> node_be("Temp level Counter", unified, encode_size, dev_);
+			GPUArray<T> tri_list("Temp level Counter", unified, tri_size, dev_);
+
+			const uint64 level_size = num_SMs * conc_blocks_per_SM * /*factor **/ max_level * maxDegree.gdata()[0]; //per partition
+			const uint64 level_item_size = num_SMs * conc_blocks_per_SM * /** factor **/ max_level; //per partition
+			const uint64 level_partition_size = num_SMs * conc_blocks_per_SM *  /** factor **/ num_divs; //per partition
+
+			GPUArray<T> current_level2("Temp level Counter", unified, level_size, dev_);
+			GPUArray<T> possible("Temp level Counter", unified, level_size, dev_);
+			
+			GPUArray<T> level_index("Temp level Counter", unified, level_item_size, dev_);
+			GPUArray<T> level_count("Temp level Counter", unified, level_item_size, dev_);
+			GPUArray<T> level_prev("Temp level Counter", unified, level_item_size, dev_);
+			GPUArray<T> level_r("Temp level Counter", unified, level_item_size, dev_);
+			GPUArray<T> level_d("Temp level Counter", unified, level_item_size, dev_);
+			GPUArray<T> level_temp("Temp level Counter", unified, level_partition_size, dev_);
+
+			printf("Level Size = %llu, Encode Size = %llu, Tri size = %llu\n", 2 *level_size + 5*level_item_size + 1*level_partition_size, encode_size, tri_size);
+	
+			// current_level2.setAll(0, true);
+			// node_be.setAll(0, true);
+			// tri_list.setAll(0, true);
+
+			const T numPartitions = block_size/partitionSize;
+			cudaMemcpyToSymbol(KCCOUNT, &kcount, sizeof(KCCOUNT));
+			cudaMemcpyToSymbol(PARTSIZE, &partitionSize, sizeof(PARTSIZE));
+			cudaMemcpyToSymbol(NUMPART, &numPartitions, sizeof(NUMPART));
+			cudaMemcpyToSymbol(MAXLEVEL, &max_level, sizeof(MAXLEVEL));
+			cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
+			cudaMemcpyToSymbol(MAXDEG, &(maxDegree.gdata()[0]), sizeof(MAXDEG));
+			cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM), sizeof(CBPSM));
+
+			/*	GPUArray <uint64> cpn("Temp Degree", unified, g.numEdges, dev_);
+				cpn.setAll(0, true);*/
+
+			while (todo > 0)
+			{
+				//1 bucket fill
+				bucket_edge_scan(edgePtr, g.numEdges, level, span, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
+				todo -= current_q.count.gdata()[0];
+				if (current_q.count.gdata()[0] > 0)
+				{
+					//std::sort(current_q.queue.gdata(), current_q.queue.gdata() + current_q.count.gdata()[0]);
+					//current_q.count.gdata()[0] = current_q.count.gdata()[0]< 5000? current_q.count.gdata()[0]: 5000;
+					//current_q.count.gdata()[0] = 1;
+
+						auto grid_block_size = current_q.count.gdata()[0];
+
+						execKernel((kckernel_edge_block_warp_pivot_count<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
 							counter.gdata(),
 							g,
 							current_q.device_queue->gdata()[0],
