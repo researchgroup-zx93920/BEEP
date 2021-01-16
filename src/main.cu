@@ -146,33 +146,44 @@ int main(int argc, char** argv)
 	g.numEdges = m;
 	g.numNodes = n;
 
-	g.rowPtr = new graph::GPUArray<uint>("Row pointer", AllocationTypeEnum::cpuonly);
-	g.rowInd = new graph::GPUArray<uint>("Src Index", AllocationTypeEnum::cpuonly);
-	g.colInd = new graph::GPUArray<uint>("Dst Index", AllocationTypeEnum::cpuonly);
+	//Redundunt, will be removed
+	g.rowPtr = new graph::GPUArray<uint>("Row pointer", gpu, n+1, config.deviceId, true, true);
+	g.rowInd = new graph::GPUArray<uint>("Src Index", gpu, m, config.deviceId, true, true);
+	g.colInd = new graph::GPUArray<uint>("Dst Index", gpu, m, config.deviceId, true, true);
+	uint *rp, *ri, *ci;
+	cudaMallocHost((void**)&rp, (n+1)*sizeof(uint));
+	cudaMallocHost((void**)&ri, (m)*sizeof(uint));
+	cudaMallocHost((void**)&ci, (m)*sizeof(uint));
+	CUDA_RUNTIME(cudaMemcpy(rp, csrcoo.row_ptr(), (n+1)*sizeof(uint), cudaMemcpyKind::cudaMemcpyHostToHost));
+	CUDA_RUNTIME(cudaMemcpy(ri, csrcoo.row_ind(), (m)*sizeof(uint) , cudaMemcpyKind::cudaMemcpyHostToHost));
+	CUDA_RUNTIME(cudaMemcpy(ci, csrcoo.col_ind(), (m)*sizeof(uint), cudaMemcpyKind::cudaMemcpyHostToHost));
 
+	g.rowPtr->cdata() = rp;
+	g.rowInd->cdata() = ri;
+	g.colInd->cdata() = ci;
 
-
-	g.rowPtr->cdata() = csrcoo.row_ptr();
-	g.rowInd->cdata() = csrcoo.row_ind();
-	g.colInd->cdata() = csrcoo.col_ind();
 
 
 
 	///Now we need to orient the graph
+	Timer total_timer;
+
 	graph::COOCSRGraph_d<uint>* gd;
 	to_csrcoo_device(g, gd, config.deviceId, config.allocation); //got to device !!
+
+	double total = total_timer.elapsed();
+	Log(info, "Transfer Time: %f s", total);
+
+
+	Timer t;
 	graph::SingleGPU_Kcore<uint, PeelType> mohacore(config.deviceId);
 	if (config.orient == Degree || config.orient == Degeneracy)
 	{
-		Timer t;
 		if (config.orient == Degeneracy)
 			mohacore.findKcoreIncremental_async(3, 1000, *gd, 0, 0);
 		else if (config.orient == Degree)
 			mohacore.getNodeDegree(*gd);
-		double tt = t.elapsed();
-		Log(info, "Node ordering: %f s", tt);
 
-		Timer t_init;
 		graph::GPUArray<uint> rowInd_half("Half Row Index", AllocationTypeEnum::unified, m / 2, config.deviceId),
 			colInd_half("Half Col Index", AllocationTypeEnum::unified, m / 2, config.deviceId),
 			new_rowPtr("New", AllocationTypeEnum::unified, n + 1, config.deviceId),
@@ -181,11 +192,11 @@ int main(int argc, char** argv)
 
 		if (config.orient == Degree)
 		{
-			execKernel((init<uint, PeelType>), (m + 512 - 1) / 512, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata());
+			execKernel((init<uint, PeelType>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata());
 		}
 		else if (config.orient == Degeneracy)
 		{
-			execKernel((init<uint, PeelType>), (m + 512 - 1) / 512, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata(), mohacore.nodePriority.gdata());
+			execKernel((init<uint, PeelType>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata(), mohacore.nodePriority.gdata());
 		}
 
 		graph::CubLarge<uint> s(config.deviceId);
@@ -199,8 +210,10 @@ int main(int argc, char** argv)
 		else
 		{
 			//s.Select(asc.gdata(), asc.gdata(), keep.gdata(), m);
-			s.Select(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m);
-			newNumEdges = s.Select(gd->colInd, colInd_half.gdata(), keep.gdata(), m);
+			// s.Select(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m);
+			// newNumEdges = s.Select(gd->colInd, colInd_half.gdata(), keep.gdata(), m);
+
+			newNumEdges = s.Select2(gd->rowInd,  gd->colInd,  rowInd_half.gdata(), colInd_half.gdata(), keep.gdata(), m);
 		}
 
 
@@ -224,9 +237,11 @@ int main(int argc, char** argv)
 		g.colInd = &colInd_half;
 		to_csrcoo_device(g, gd, config.deviceId, config.allocation); //got to device !!
 
-		double time_init = t_init.elapsed();
-		Log(info, "Orientation time: %f s", time_init);
+
 	}
+
+	double time_init = t.elapsed();
+	Log(info, "Preprocess time: %f s", time_init);
 
 	//Just need to verify some new storage format
 	//graph::GPUArray<uint> countCont("Half Row Index", AllocationTypeEnum::unified, m, 0);
@@ -624,17 +639,24 @@ int main(int argc, char** argv)
 
 			graph::SingleGPU_Kclique<uint> mohaclique(config.deviceId, *gd);
 
-			for (int i = 0; i < 5; i++)
+			// int k = 4;
+			// while ( k < 11)
 			{
-				Timer t;
-				if (config.processBy == ByNode)
-					mohaclique.findKclqueIncremental_node_pivot_async(config.k, *gd, config.processElement);
-				else if (config.processBy == ByEdge)
-					mohaclique.findKclqueIncremental_edge_pivot_async(config.k, *gd, config.processElement);
-				mohaclique.sync();
-				double time = t.elapsed();
-				Log(info, "count time %f s", time);
-				Log(info, "MOHA %d k-clique (%f teps)", mohaclique.count(), m / time);
+				//printf("------------------ K=%d ----------------------\n", k);
+				for (int i = 0; i < 1; i++)
+				{
+					Timer t;
+					if (config.processBy == ByNode)
+						mohaclique.findKclqueIncremental_node_async(config.k, *gd, config.processElement);
+					else if (config.processBy == ByEdge)
+						mohaclique.findKclqueIncremental_edge_async(config.k, *gd, config.processElement);
+					mohaclique.sync();
+					double time = t.elapsed();
+					Log(info, "count time %f s", time);
+					Log(info, "MOHA %d k-clique (%f teps)", mohaclique.count(), m / time);
+				}
+
+				//k++;
 			}
 
 

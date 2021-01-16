@@ -27,6 +27,19 @@
 #include "../cub/cub.cuh"
 
 
+// #include <simt/cstdint>
+// #include <simt/cstddef>
+// #include <simt/climits>
+// #include <simt/ratio>
+// #include <simt/chrono>
+// #include <simt/limits>
+// #include <simt/type_traits>
+// #include <simt/atomic>
+// #include <simt/barrier>
+// #include <simt/latch>
+// #include <simt/semaphore>
+
+
 
 #define CUDA_RUNTIME(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=false) {

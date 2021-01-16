@@ -46,8 +46,6 @@ namespace graph
             g.colInd->switch_to_gpu(dev, g.numEdges);
         }
 
-        cudaDeviceSynchronize();
-
         graph->rowPtr = g.rowPtr->gdata();
         graph->rowInd = g.rowInd->gdata();
         graph->colInd = g.colInd->gdata();

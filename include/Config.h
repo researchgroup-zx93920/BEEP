@@ -4,7 +4,7 @@
 #include "defs.cuh"
 
 #ifndef __VS__
-#include <unistd.h>
+    #include <unistd.h>
 #endif
 #include <stdio.h>
 
@@ -231,7 +231,7 @@ static Config parseArgs(int argc, char** argv) {
     config.printStats = false;
     config.orient = Degree;
     config.allocation = gpu;
-    config.k = 7;
+    config.k = 5;
     config.sortEdges = false;;
     config.processBy = ByNode;
     config.processElement = BlockWarp;

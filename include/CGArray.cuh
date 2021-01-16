@@ -27,19 +27,32 @@ namespace graph
 			name = "Unknown";
 		}
 
-		void initialize(std::string s, AllocationTypeEnum at, uint size, int devId)
+		void initialize(std::string s, AllocationTypeEnum at, uint size, int devId, bool cpu_data=true, bool pinned=false)
 		{
 			N = size;
 			name = s;
 			_at = at;
 			_deviceId = devId;
+			_cpu_data = cpu_data;
+			_pinned = pinned;
 			CUDA_RUNTIME(cudaSetDevice(_deviceId));
 			CUDA_RUNTIME(cudaStreamCreate(&_stream));
 
 			switch (at)
 			{
 			case gpu:
-				cpu_data = (T*)malloc(size * sizeof(T));
+
+				if(_cpu_data)
+				{
+					if(_pinned)
+					{
+						cudaMallocHost((void**)&cpu_data, size * sizeof(T));
+					}
+					else
+					{
+						cpu_data = (T*)malloc(size * sizeof(T));
+					}
+				}
 				CUDA_RUNTIME(cudaMalloc(&gpu_data, size * sizeof(T)));
 				break;
 			case unified:
@@ -58,9 +71,9 @@ namespace graph
 			_at = at;
 		}
 
-		GPUArray(std::string s, AllocationTypeEnum at, uint size, int devId)
+		GPUArray(std::string s, AllocationTypeEnum at, uint size, int devId, bool cpu_data=true, bool pinned=false)
 		{
-			initialize(s, at, size, devId);
+			initialize(s, at, size, devId, cpu_data, pinned);
 		}
 
 		GPUArray(std::string s, AllocationTypeEnum at) {
@@ -80,15 +93,35 @@ namespace graph
 		}
 		void freeCPU()
 		{
-			delete cpu_data;
+			if(_cpu_data)
+			{
+				if(_pinned)
+				{
+					cudaFreeHost(cpu_data);
+				}
+				else
+				{
+					delete cpu_data;
+				}
+			}
 		}
 
-		void allocate_cpu(uint size)
+		void allocate_cpu(uint size, bool pinned=false)
 		{
+
+			_pinned = pinned;
+
 			if (_at == AllocationTypeEnum::cpuonly)
 			{
 				N = size;
-				cpu_data = (T*)malloc(size * sizeof(T));
+				if(_pinned)
+				{
+					cudaMallocHost((void**)&cpu_data, size * sizeof(T));
+				}
+				else
+				{
+					cpu_data = (T*)malloc(size * sizeof(T));
+				}
 			}
 			else if (_at == AllocationTypeEnum::unified)
 			{
@@ -287,6 +320,9 @@ namespace graph
 		cudaStream_t _stream;
 		int _deviceId;
 		bool freed = false;
+
+		bool _cpu_data;
+		bool _pinned;
 
 	};
 }
