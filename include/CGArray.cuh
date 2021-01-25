@@ -58,6 +58,32 @@ namespace graph
 			_at = at;
 		}
 
+		GPUArray(std::string s, AllocationTypeEnum at, uint size, int devId, bool pinned)
+		{
+			N = size;
+			name = s;
+			_at = at;
+			_deviceId = devId;
+			CUDA_RUNTIME(cudaSetDevice(_deviceId));
+			CUDA_RUNTIME(cudaStreamCreate(&_stream));
+
+			// if(pinned)
+			// {
+			// 	cudaMallocHost((void**)&cpu_data, size * sizeof(T));
+			// }
+			// else
+			// {
+			// 	cpu_data = (T*)malloc(size * sizeof(T));
+			// }
+			
+
+			cpu_data = (T*)malloc(size * sizeof(T));
+			CUDA_RUNTIME(cudaMalloc(&gpu_data, size * sizeof(T)));
+			
+		}
+
+
+
 		GPUArray(std::string s, AllocationTypeEnum at, uint size, int devId)
 		{
 			initialize(s, at, size, devId);

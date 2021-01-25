@@ -38,10 +38,10 @@ void process_degree(
 	{
 		add_to_queue_1(next, nodeId);
 	}
-	if (cur <= level)
-	{
-		atomicAdd(&nodeDegree[nodeId], 1);
-	}
+	// if (cur <= level)
+	// {
+	// 	atomicAdd(&nodeDegree[nodeId], 1);
+	// }
 
 	// Update the Bucket.
 	auto latest = cur - 1;
@@ -170,7 +170,9 @@ kernel_partition_level_next(
 	graph::GraphQueue_d<T, bool> current,
 	graph::GraphQueue_d<T, bool>& next,
 	graph::GraphQueue_d<T, bool>& bucket,
-	int bucket_level_end_
+	int bucket_level_end_,
+	T priority,
+	T* nodePriority
 )
 {
 	const size_t partitionsPerBlock = BD / P;
@@ -192,39 +194,43 @@ kernel_partition_level_next(
 		T srcStart = g.rowPtr[nodeId];
 		T srcStop = g.rowPtr[nodeId + 1];
 
+		nodePriority[nodeId] = priority;
+
 		for (auto j = srcStart + lx; j < (srcStop + P - 1) / P * P; j += P)
 		{
 			__syncwarp();
-			if (*size >= P)
-			{
-				for (auto e = lx; e < *size; e += P)
-				{
-					T e1 = e1_arr[e];
-					process_degree<T>(e1, level, nodeDegree, next, bucket, bucket_level_end_);
-				}
-				__syncwarp();
-				if (lx == 0)
-					*size = 0;
-				__syncwarp();
-			}
+			// if (*size >= P)
+			// {
+			// 	for (auto e = lx; e < *size; e += P)
+			// 	{
+			// 		T e1 = e1_arr[e];
+			// 		process_degree<T>(e1, level, nodeDegree, next, bucket, bucket_level_end_);
+			// 	}
+			// 	__syncwarp();
+			// 	if (lx == 0)
+			// 		*size = 0;
+			// 	__syncwarp();
+			// }
 
 			if (j < srcStop)
 			{
 				T affectedNode = g.colInd[j];
 				if (!current.mark[affectedNode])
 				{
-					auto pos = atomicAdd(size, 1);
-					e1_arr[pos] = affectedNode;
+					// auto pos = atomicAdd(size, 1);
+					// e1_arr[pos] = affectedNode;
+
+					process_degree<T>(affectedNode, level, nodeDegree, next, bucket, bucket_level_end_);
 				}
 			}
 		}
 
-		__syncwarp();
-		for (auto e = lx; e < *size; e += P)
-		{
-			T e1 = e1_arr[e];
-			process_degree<T>(e1, level, nodeDegree, next, bucket, bucket_level_end_);
-		}
+		// __syncwarp();
+		// for (auto e = lx; e < *size; e += P)
+		// {
+		// 	T e1 = e1_arr[e];
+		// 	process_degree<T>(e1, level, nodeDegree, next, bucket, bucket_level_end_);
+		// }
 	}
 }
 
@@ -538,7 +544,7 @@ namespace graph
 								current_q.device_queue->gdata()[0],
 								next_q.device_queue->gdata()[0],
 								bucket_q.device_queue->gdata()[0],
-								bucket_level_end_);
+								bucket_level_end_, priority, nodePriority.gdata());
 						}
 						// else
 						// {
@@ -551,7 +557,7 @@ namespace graph
 						// 		bucket_level_end_);
 						// }
 
-						execKernel((update_priority<T, PeelT>), grid_size, block_size, dev_, false, current_q.device_queue->gdata()[0], priority, nodePriority.gdata());
+						//execKernel((update_priority<T, PeelT>), grid_size, block_size, dev_, false, current_q.device_queue->gdata()[0], priority, nodePriority.gdata());
 					}
 
 					numDeleted_l = g.numNodes - todo;

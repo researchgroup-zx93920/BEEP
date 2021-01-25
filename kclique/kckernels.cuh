@@ -7,16 +7,7 @@ __constant__ uint MAXLEVEL;
 __constant__ uint NUMDIVS;
 __constant__ uint CBPSM;
 
-#define PART_SIZE 16
-template<typename T>
-__inline__ __device__ void reduce_part(T mask, uint64 &count)
-{
-	// count += __shfl_down_sync(mask, count, 16);
-	count += __shfl_down_sync(mask, count, 8);
-	count += __shfl_down_sync(mask, count, 4);
-	count += __shfl_down_sync(mask, count, 2);
-	count += __shfl_down_sync(mask, count, 1);
-}
+
 
 
 
@@ -82,7 +73,7 @@ __global__ void get_max_degree(graph::COOCSRGraph_d<T> g, T* edgePtr, T* maxDegr
 		T srcDeg = g.rowPtr[src + 1] - g.rowPtr[src];
 		T dstDeg = g.rowPtr[dst + 1] - g.rowPtr[dst];
 
-		degree = srcDeg < dstDeg ? srcDeg : dstDeg;
+		degree = srcDeg > dstDeg ? srcDeg : dstDeg;
 		edgePtr[gtid] = degree;
 	}
 
@@ -690,9 +681,9 @@ kckernel_node_block_count(
 )
 {
 	//will be removed later
-	__shared__ T level_index[5];
-	__shared__ T level_count[5];
-	__shared__ T level_prev_index[5];
+	__shared__ T level_index[10];
+	__shared__ T level_count[10];
+	__shared__ T level_prev_index[10];
 
 
 	__shared__ T current_node_index;
@@ -703,16 +694,28 @@ kckernel_node_block_count(
 	__shared__ uint32_t nodeId, sm_id, levelPtr;
 	__shared__ T srcStart, srcLen, srcLenBlocks;
 
+
+	if (threadIdx.x == 0)
+	{
+		sm_id = __mysmid();
+		T temp = 0;
+		while (atomicCAS(&levelStats[sm_id * conc_blocks_per_SM + temp], 0, 1) != 0)
+		{
+			temp++;
+		}
+		levelPtr = temp;
+	}
+
 	__syncthreads();
 
 	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
 	{
-		if (threadIdx.x < 5)
+		if (threadIdx.x < 10)
 		{
 			level_index[threadIdx.x] = 0;
 			level_prev_index[threadIdx.x] = 0;
 		}
-		else if (threadIdx.x == 6)
+		else if (threadIdx.x ==11)
 		{
 			l = 2;
 			current_node_index = UINT_MAX;
@@ -724,39 +727,40 @@ kckernel_node_block_count(
 			level_count[l - 2] = srcLen;
 
 		}
-		else if (threadIdx.x == 32)
-		{
-			sm_id = __mysmid();
-			T temp = 0;
-			while (atomicCAS(&levelStats[sm_id * conc_blocks_per_SM + temp], 0, 1) != 0)
-			{
-				temp++;
-			}
-			levelPtr = temp;
-		}
-
+		
 		__syncthreads();
 
 		char* cl = &current_level[(sm_id * conc_blocks_per_SM + levelPtr) * maxDeg]; //300 is just an arbitrary number
 		while (level_count[l - 2] > level_index[l - 2])
 		{
-			for (T k = 0; k < srcLenBlocks; k++)
+			// for (T k = 0; k < srcLenBlocks; k++)
+			// {
+			// 	T index = level_prev_index[l - 2] + k * BLOCK_DIM_X + threadIdx.x;
+			// 	if (index < srcLen && cl[index] == l)
+			// 	{
+			// 		atomicMin(&current_node_index, index);
+			// 	}
+
+			// 	__syncthreads();
+			// 	if (current_node_index != UINT_MAX)
+			// 		break;
+
+			// 	__syncthreads();
+			// }
+
+
+			T startIndex = level_prev_index[l- 2];
+			T newIndex = cl[startIndex];
+			while(newIndex != l)
 			{
-				T index = level_prev_index[l - 2] + k * BLOCK_DIM_X + threadIdx.x;
-				if (index < srcLen && cl[index] == l)
-				{
-					atomicMin(&current_node_index, index);
-				}
-
-				__syncthreads();
-				if (current_node_index != UINT_MAX)
-					break;
-
-				__syncthreads();
+				startIndex++;
+				newIndex = cl[startIndex];
 			}
 
+			__syncthreads();
 			if (threadIdx.x == 0)
 			{
+				current_node_index = startIndex;
 				level_prev_index[l - 2] = current_node_index + 1;
 				level_index[l - 2]++;
 				new_level = l;
@@ -826,13 +830,17 @@ kckernel_node_block_count(
 			__syncthreads();
 		}
 
-		//release and count
-		if (threadIdx.x == 0)
-		{
-			atomicCAS(&levelStats[sm_id * conc_blocks_per_SM + levelPtr], 1, 0);
+		if(threadIdx.x == 0)
 			atomicAdd(counter, clique_count);
-			//cpn[nodeId] = clique_count;
-		}
+	
+	}
+
+	__syncthreads();
+	if (threadIdx.x == 0)
+	{
+		atomicCAS(&levelStats[sm_id * conc_blocks_per_SM + levelPtr], 1, 0);
+		
+		//cpn[nodeId] = clique_count;
 	}
 }
 
@@ -1085,7 +1093,7 @@ kckernel_edge_warp_count(
 	__shared__ char new_level[warpsPerBlock];
 	__shared__ uint32_t  sm_id, levelPtr;
 	__shared__ T srcStart[warpsPerBlock], srcLen[warpsPerBlock], srcLenBlocks[warpsPerBlock];
-	__shared__ T src2Start[warpsPerBlock], src2Len[warpsPerBlock], src2LenBlocks[warpsPerBlock];
+	__shared__ T src2Start[warpsPerBlock], src2Len[warpsPerBlock];
 	__shared__ T refIndex[warpsPerBlock], refLen[warpsPerBlock];
 	__syncthreads();
 
@@ -1389,11 +1397,11 @@ kckernel_edge_warp_count2(
 		{
 			if (srcLen[wx] < src2Len[wx])
 			{
-				warpCount += graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(0, &g.colInd[srcStart[wx]], srcLen[wx],
+				warpCount += graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>( &g.colInd[srcStart[wx]], srcLen[wx],
 					&g.colInd[src2Start[wx]], src2Len[wx], true, srcStart[wx], cl, l[wx] + 1, kclique);
 			}
 			else {
-				warpCount += graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(0, &g.colInd[src2Start[wx]], src2Len[wx],
+				warpCount += graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(&g.colInd[src2Start[wx]], src2Len[wx],
 					&g.colInd[srcStart[wx]], srcLen[wx], true, srcStart[wx], cl, l[wx] + 1, kclique);
 			}
 
@@ -1455,11 +1463,11 @@ kckernel_edge_warp_count2(
 			{
 				if (dstLen > refLen[wx])
 				{
-					warpCountIn = graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(0, &g.colInd[refIndex[wx]], refLen[wx],
+					warpCountIn = graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(&g.colInd[refIndex[wx]], refLen[wx],
 						&g.colInd[dstStart], dstLen, true, srcStart[wx], cl, l[wx] + 1, kclique);
 				}
 				else {
-					warpCountIn = graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(0, &g.colInd[dstStart], dstLen,
+					warpCountIn = graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(&g.colInd[dstStart], dstLen,
 						&g.colInd[refIndex[wx]], refLen[wx], false, srcStart[wx], cl, l[wx] + 1, kclique);
 
 				}
@@ -1635,11 +1643,11 @@ kckernel_edge_warp_count2_shared(
 		{
 			if (srcLen[wx] < src2Len[wx])
 			{
-				warpCount += graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(0, &g.colInd[srcStart[wx]], srcLen[wx],
+				warpCount += graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(&g.colInd[srcStart[wx]], srcLen[wx],
 					&g.colInd[src2Start[wx]], src2Len[wx], true, srcStart[wx], cl, l[wx] + 1, kclique);
 			}
 			else {
-				warpCount += graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(0, &g.colInd[src2Start[wx]], src2Len[wx],
+				warpCount += graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(&g.colInd[src2Start[wx]], src2Len[wx],
 					&g.colInd[srcStart[wx]], srcLen[wx], true, srcStart[wx], cl, l[wx] + 1, kclique);
 			}
 
@@ -1701,7 +1709,7 @@ kckernel_edge_warp_count2_shared(
 			{
 				if (dstLen > refLen[wx])
 				{
-					warpCountIn = graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(0, &g.colInd[refIndex[wx]], refLen[wx],
+					warpCountIn = graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(&g.colInd[refIndex[wx]], refLen[wx],
 						&g.colInd[dstStart], dstLen, true, srcStart[wx], cl, l[wx] + 1, kclique);
 				}
 				else {
@@ -1781,37 +1789,34 @@ kckernel_edge_warp_count2_shared(
 }
 
 
-template <typename T, uint BLOCK_DIM_X>
+template <typename T, uint BLOCK_DIM_X,  uint CPARTSIZE=32>
 __launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
 kckernel_node_block_warp_count(
 	uint64* counter,
 	graph::COOCSRGraph_d<T> g,
-	T kclique,
-	T maxDeg,
 	const  graph::GraphQueue_d<T, bool>  current,
-	char* current_level,
-	uint64* cpn,
-	T conc_blocks_per_SM,
+	unsigned short* current_level,
 	T* levelStats
 )
 {
 	//will be removed later
+	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
 	constexpr T warpsPerBlock = BLOCK_DIM_X / 32;
-	const int wx = threadIdx.x / 32; // which warp in thread block
-	const size_t lx = threadIdx.x % 32;
-	__shared__ T level_index[warpsPerBlock][5];
-	__shared__ T level_count[warpsPerBlock][5];
-	__shared__ T level_prev_index[warpsPerBlock][5];
+	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
+	const size_t lx = threadIdx.x % CPARTSIZE;
+	__shared__ T level_index[numPartitions][10];
+	__shared__ T level_count[numPartitions][10];
+	__shared__ T level_prev_index[numPartitions][10];
 
-	__shared__ T current_node_index[warpsPerBlock];
-	__shared__ uint64 clique_count[warpsPerBlock];
-	__shared__ char l[warpsPerBlock];
-	__shared__ char new_level[warpsPerBlock];
+	__shared__ T current_node_index[numPartitions];
+	__shared__ uint64 clique_count[numPartitions];
+	__shared__ char l[numPartitions];
+	__shared__ char new_level[numPartitions];
 	__shared__ uint32_t  sm_id, levelPtr;
 	__shared__ T src, srcStart, srcLen;
-	__shared__ T src2Start[warpsPerBlock], src2Len[warpsPerBlock], src2LenBlocks[warpsPerBlock];
-	__shared__ T refIndex[warpsPerBlock], refLen[warpsPerBlock], srcLenBlocks[warpsPerBlock];
+	__shared__ T src2Start[numPartitions], src2Len[numPartitions], src2LenBlocks[numPartitions];
+	__shared__ T refIndex[numPartitions], refLen[numPartitions], srcLenBlocks[numPartitions];
 
 	__syncthreads();
 
@@ -1819,7 +1824,7 @@ kckernel_node_block_warp_count(
 	{
 		sm_id = __mysmid();
 		T temp = 0;
-		while (atomicCAS(&(levelStats[(sm_id * conc_blocks_per_SM) + temp]), 0, 1) != 0)
+		while (atomicCAS(&(levelStats[(sm_id * CBPSM) + temp]), 0, 1) != 0)
 		{
 			temp++;
 		}
@@ -1836,17 +1841,23 @@ kckernel_node_block_warp_count(
 			srcStart = g.rowPtr[src];
 			srcLen = g.rowPtr[src + 1] - srcStart;
 		}
+	
+		T partMask = CPARTSIZE ==32? 0xFFFFFFFF : (1 << CPARTSIZE) - 1;
+		partMask = partMask << ((wx%(32/CPARTSIZE)) * CPARTSIZE);
 		__syncthreads();
 		//warp loop
-		for (unsigned long long j = wx; j < srcLen; j += warpsPerBlock)
+		for (unsigned long long j = wx; j < srcLen; j += numPartitions)
 		{
-			if (lx < 5)
+
+			for(T k = lx; k < 10; k+= CPARTSIZE)
 			{
-				level_count[wx][lx] = 0;
-				level_index[wx][lx] = 0;
-				level_prev_index[wx][lx] = 0;
+				level_count[wx][k] = 0;
+				level_index[wx][k] = 0;
+				level_prev_index[wx][k] = 0;
 			}
-			else if (lx == 6)
+			
+			
+			if (lx == 0)
 			{
 				T src2 = g.colInd[srcStart + j];
 				src2Start[wx] = g.rowPtr[src2];
@@ -1854,45 +1865,43 @@ kckernel_node_block_warp_count(
 
 				refIndex[wx] = srcLen < src2Len[wx] ? srcStart : src2Start[wx];
 				refLen[wx] = srcLen < src2Len[wx] ? srcLen : src2Len[wx];
-				srcLenBlocks[wx] = (refLen[wx] + 32 - 1) / 32;
-			}
-			else if (lx == 7)
-			{
+				srcLenBlocks[wx] = (refLen[wx] + CPARTSIZE - 1) / CPARTSIZE;
 				l[wx] = 2;
 				new_level[wx] = 2;
 				current_node_index[wx] = UINT_MAX;
 				clique_count[wx] = 0;
+
 			}
 
-			__syncwarp();
-			T blockOffset = sm_id * conc_blocks_per_SM * (warpsPerBlock * maxDeg)
-				+ levelPtr * (warpsPerBlock * maxDeg);
-			char* cl = &current_level[blockOffset + wx * maxDeg /*srcStart[wx]*/];
-			for (unsigned long long k = lx; k < refLen[wx]; k += 32)
+			__syncwarp(partMask);
+			T blockOffset = sm_id * CBPSM * (numPartitions * MAXDEG)
+				+ levelPtr * (numPartitions * MAXDEG);
+			unsigned short* cl = &current_level[blockOffset + wx * MAXDEG /*srcStart[wx]*/];
+			for (unsigned long long k = lx; k < refLen[wx]; k += CPARTSIZE)
 			{
 				cl[k] = 0x01;
 			}
-			__syncwarp();
+			__syncwarp(partMask);
 
 			uint64 warpCount = 0;
-			if (src2Len[wx] >= kclique - l[wx])
+			if (src2Len[wx] >= KCCOUNT - l[wx])
 			{
 				if (srcLen < src2Len[wx])
 				{
-					warpCount += graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(0, &g.colInd[srcStart], srcLen,
-						&g.colInd[src2Start[wx]], src2Len[wx], true, srcStart, cl, l[wx] + 1, kclique);
+					warpCount += graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true, CPARTSIZE, unsigned short>(&g.colInd[srcStart], srcLen,
+						&g.colInd[src2Start[wx]], src2Len[wx], true, srcStart, cl, l[wx] + 1, KCCOUNT, partMask, 3);
 				}
 				else {
-					warpCount += graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(0, &g.colInd[src2Start[wx]], src2Len[wx],
-						&g.colInd[srcStart], srcLen, true, srcStart, cl, l[wx] + 1, kclique);
+					warpCount += graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true, CPARTSIZE, unsigned short>(&g.colInd[src2Start[wx]], src2Len[wx],
+						&g.colInd[srcStart], srcLen, true, srcStart, cl, l[wx] + 1, KCCOUNT, partMask, 3);
 				}
 
-				__syncwarp();
+				__syncwarp(partMask);
 				if (warpCount > 0)
 				{
-					if (l[wx] + 1 == kclique && lx == 0)
+					if (l[wx] + 1 == KCCOUNT && lx == 0)
 						clique_count[wx] += warpCount;
-					else if (l[wx] + 1 < kclique)
+					else if (l[wx] + 1 < KCCOUNT)
 					{
 						if (lx == 0)
 						{
@@ -1906,59 +1915,69 @@ kckernel_node_block_warp_count(
 
 				}
 			}
-			__syncwarp();
+			__syncwarp(partMask);
 			while (level_count[wx][l[wx] - 2] > level_index[wx][l[wx] - 2])
 			{
-				for (T k = 0; k < srcLenBlocks[wx]; k++)
+				// for (T k = 0; k < srcLenBlocks[wx]; k++)
+				// {
+				// 	T index = level_prev_index[wx][l[wx] - 2] + k * 32 + lx;
+				// 	int condition = index < refLen[wx] && (cl[index] & (0x01 << (l[wx] - 2)));
+				// 	unsigned int newmask = __ballot_sync(0xFFFFFFFF, condition);
+				// 	if (newmask != 0)
+				// 	{
+				// 		uint elected_lane_deq = __ffs(newmask) - 1;
+				// 		current_node_index[wx] = __shfl_sync(0xFFFFFFFF, index, elected_lane_deq, 32);
+				// 		break;
+				// 	}
+				// }
+
+
+				T startIndex = level_prev_index[wx][l[wx]- 2];
+				T newIndex = cl[startIndex] & (0x01 << (l[wx] - 2));
+				while(newIndex == 0)
 				{
-					T index = level_prev_index[wx][l[wx] - 2] + k * 32 + lx;
-					int condition = index < refLen[wx] && (cl[index] & (0x01 << (l[wx] - 2)));
-					unsigned int newmask = __ballot_sync(0xFFFFFFFF, condition);
-					if (newmask != 0)
-					{
-						uint elected_lane_deq = __ffs(newmask) - 1;
-						current_node_index[wx] = __shfl_sync(0xFFFFFFFF, index, elected_lane_deq, 32);
-						break;
-					}
+					startIndex++;
+					newIndex = cl[startIndex] & (0x01 << (l[wx] - 2));
 				}
 
 				if (lx == 0)
 				{
 					//current_node_index[0] = finalIndex;
+					current_node_index[wx] = startIndex;
 					level_prev_index[wx][l[wx] - 2] = current_node_index[wx] + 1;
 					level_index[wx][l[wx] - 2]++;
 					new_level[wx] = l[wx];
 				}
 
-				__syncwarp();
+				__syncwarp(partMask);
 
 				uint64 warpCountIn = 0;
 				const T dst = g.colInd[current_node_index[wx] + refIndex[wx]];
 				const T dstStart = g.rowPtr[dst];
 				const T dstLen = g.rowPtr[dst + 1] - dstStart;
 
-				bool limit = ((l[wx] - 1 + level_count[wx][l[wx] - 2]) >= kclique) && (dstLen >= kclique - l[wx]);
+				bool limit = ((l[wx] - 1 + level_count[wx][l[wx] - 2]) >= KCCOUNT) && (dstLen >= KCCOUNT - l[wx]);
 
-				if (limit /*dstLen >= kclique - l[wx]*/)
+				if (limit /*dstLen >= KCCOUNT - l[wx]*/)
 				{
 					if (dstLen > refLen[wx])
 					{
-						warpCountIn = graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(0, &g.colInd[refIndex[wx]], refLen[wx],
-							&g.colInd[dstStart], dstLen, true, srcStart, cl, l[wx] + 1, kclique);
+						warpCountIn = graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true, CPARTSIZE, unsigned short>(&g.colInd[refIndex[wx]], refLen[wx],
+							&g.colInd[dstStart], dstLen, true, srcStart, cl, l[wx] + 1, KCCOUNT, partMask, 3);
 					}
 					else {
-						warpCountIn = graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true>(0, &g.colInd[dstStart], dstLen,
-							&g.colInd[refIndex[wx]], refLen[wx], false, srcStart, cl, l[wx] + 1, kclique);
+						warpCountIn = graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true, CPARTSIZE, unsigned short>(&g.colInd[dstStart], dstLen,
+							&g.colInd[refIndex[wx]], refLen[wx], false, srcStart, cl, l[wx] + 1, KCCOUNT, partMask, 3);
 
 					}
-					__syncwarp();
+					__syncwarp(partMask);
 					if (lx == 0 && warpCountIn > 0)
 					{
-						if (l[wx] + 1 == kclique)
+						if (l[wx] + 1 == KCCOUNT)
 							clique_count[wx] += warpCountIn;
-						else if ((l[wx] + 1 < kclique) /*&& ((l[wx] + warpCountIn) >= kclique)*/)
+						else if ((l[wx] + 1 < KCCOUNT) /*&& ((l[wx] + warpCountIn) >= KCCOUNT)*/)
 						{
-							//if(warpCountIn >= kclique - l[wx])
+							//if(warpCountIn >= KCCOUNT - l[wx])
 							{
 								(l[wx])++;
 								(new_level[wx])++;
@@ -1971,7 +1990,7 @@ kckernel_node_block_warp_count(
 				}
 
 
-				__syncwarp();
+				__syncwarp(partMask);
 				if (lx == 0)
 				{
 					while (new_level[wx] > 3 && level_index[wx][new_level[wx] - 2] >= level_count[wx][new_level[wx] - 2])
@@ -1980,18 +1999,18 @@ kckernel_node_block_warp_count(
 					}
 				}
 
-				__syncwarp();
+				__syncwarp(partMask);
 				if (new_level[wx] < l[wx])
 				{
 					char clearMask = ~((1 << (l[wx] - 1)) - (1 << (new_level[wx] - 1)));
 					for (auto k = 0; k < srcLenBlocks[wx]; k++)
 					{
-						T index = k * 32 + lx;
+						T index = k * CPARTSIZE + lx;
 						if (index < refLen[wx])
 							cl[index] = cl[index] & clearMask;
 					}
 
-					__syncwarp();
+					__syncwarp(partMask);
 				}
 
 				if (lx == 0)
@@ -1999,7 +2018,7 @@ kckernel_node_block_warp_count(
 					l[wx] = new_level[wx];
 					current_node_index[wx] = UINT_MAX;
 				}
-				__syncwarp();
+				__syncwarp(partMask);
 			}
 
 			if (lx == 0)
@@ -2013,13 +2032,1103 @@ kckernel_node_block_warp_count(
 	__syncthreads();
 	if (threadIdx.x == 0)
 	{
-		atomicCAS(&levelStats[sm_id * conc_blocks_per_SM + levelPtr], 1, 0);
+		atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
+	}
+}
+
+
+
+template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE=32>
+__launch_bounds__(BLOCK_DIM_X, 16)
+__global__ void
+kckernel_node_block_warp_subgraph_count(
+	uint64* counter,
+	graph::COOCSRGraph_d<T> g,
+	const  graph::GraphQueue_d<T, bool>  current,
+	unsigned short* current_level,
+	T* levelStats,
+	T* adj_enc
+)
+{
+	//will be removed later
+	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
+	constexpr T warpsPerBlock = BLOCK_DIM_X / 32;
+	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
+	const size_t lx = threadIdx.x % CPARTSIZE;
+	__shared__ T level_index[numPartitions][10];
+	__shared__ T level_count[numPartitions][10];
+	__shared__ T level_prev_index[numPartitions][10];
+
+	__shared__ T current_node_index[numPartitions];
+	__shared__ uint64 clique_count[numPartitions];
+	__shared__ char l[numPartitions];
+	__shared__ char new_level[numPartitions];
+	__shared__ uint32_t  sm_id, levelPtr;
+	__shared__ T src, srcStart, srcLen;
+	__shared__ T encode_offset, *encode;
+	__shared__ unsigned short subgraph_counters[1024];
+	__shared__ T  srcLenBlocks[numPartitions];
+
+	__syncthreads();
+
+	if (threadIdx.x == 0)
+	{
+		sm_id = __mysmid();
+		T temp = 0;
+		while (atomicCAS(&(levelStats[(sm_id * CBPSM) + temp]), 0, 1) != 0)
+		{
+			temp++;
+		}
+		levelPtr = temp;
+	}
+	__syncthreads();
+
+	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
+	{
+		//block things
+		if (threadIdx.x == 0)
+		{
+			src = current.queue[i];
+			srcStart = g.rowPtr[src];
+			srcLen = g.rowPtr[src + 1] - srcStart;
+			encode_offset = sm_id * CBPSM * (MAXDEG * MAXDEG) + levelPtr * (MAXDEG * MAXDEG);
+			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
+		}
+
+		T partMask = CPARTSIZE ==32? 0xFFFFFFFF : (1 << CPARTSIZE) - 1;
+		partMask = partMask << ((wx%(32/CPARTSIZE)) * CPARTSIZE);
+		__syncthreads();
+
+		for (T j = wx; j < srcLen; j += numPartitions)
+		{
+			for (T k = lx; k < srcLen; k += CPARTSIZE)
+			{
+				encode[j * srcLen + k] = 0xFFFFFFFF;
+			}
+			__syncwarp(partMask);
+			graph::warp_sorted_count_and_subgraph<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&g.colInd[srcStart], srcLen,
+				&g.colInd[g.rowPtr[g.colInd[srcStart + j]]], g.rowPtr[g.colInd[srcStart + j] + 1] - g.rowPtr[g.colInd[srcStart + j]],
+				j, srcLen, encode);
+		}
+
+
+
+
+		__syncthreads();
+		//compact: simpler than cub
+		for (T j = wx; j < srcLen; j += numPartitions)
+		{
+			if(lx == 0)
+			{
+				subgraph_counters[j] = 0;
+				for(T k = 0; k< srcLen; k++)
+				{
+					if(encode[j*srcLen + k] != 0xFFFFFFFF)
+					{
+						encode[j*srcLen + subgraph_counters[j]] = encode[j*srcLen + k];
+						subgraph_counters[j]++;
+					}
+				}
+			}
+		}
+
+		__syncthreads(); //Done encoding
+
+		//warp loop
+		for (T j = wx; j < srcLen; j += numPartitions)
+		{
+
+
+			for(T k = lx; k < 10; k+= CPARTSIZE)
+			{
+				level_count[wx][k] = 0;
+				level_index[wx][k] = 0;
+				level_prev_index[wx][k] = 0;
+			}
+			
+			if (lx == 0)
+			{
+				srcLenBlocks[wx] = ( subgraph_counters[j] + CPARTSIZE - 1) / CPARTSIZE;
+			
+				l[wx] = 2;
+				new_level[wx] = 2;
+				current_node_index[wx] = UINT_MAX;
+				clique_count[wx] = 0;
+			}
+
+			__syncwarp(partMask);
+			T blockOffset = sm_id * CBPSM * (numPartitions * MAXDEG)
+				+ levelPtr * (numPartitions * MAXDEG);
+			unsigned short* cl = &current_level[blockOffset + wx * MAXDEG /*srcStart[wx]*/];
+
+
+			
+			for (T k = lx; k < srcLen; k += CPARTSIZE)
+			{
+				cl[k] = 0x03;
+			}
+			__syncwarp(partMask);
+
+			uint64 warpCount = 0;
+			if ( subgraph_counters[j] >= KCCOUNT - l[wx])
+			{
+				
+				if (l[wx] + 1 == KCCOUNT && lx == 0)
+					clique_count[wx] +=  subgraph_counters[j];
+				else if (l[wx] + 1 < KCCOUNT)
+				{
+					if (lx == 0)
+					{
+						(l[wx])++;
+						(new_level[wx])++;
+						level_count[wx][l[wx] - 2] =  subgraph_counters[j];
+						level_index[wx][l[wx] - 2] = 0;
+						level_prev_index[wx][l[wx] - 2] = 0;
+					}
+				}
+			}
+			__syncwarp(partMask);
+			while (level_count[wx][l[wx] - 2] > level_index[wx][l[wx] - 2])
+			{
+				// for (T k = 0; k < srcLenBlocks[wx]; k++)
+				// {
+				// 	T index = level_prev_index[wx][l[wx] - 2] + k * 32 + lx;
+				// 	int condition = index < refLen[wx] && (cl[index] & (0x01 << (l[wx] - 2)));
+				// 	unsigned int newmask = __ballot_sync(0xFFFFFFFF, condition);
+				// 	if (newmask != 0)
+				// 	{
+				// 		uint elected_lane_deq = __ffs(newmask) - 1;
+				// 		current_node_index[wx] = __shfl_sync(0xFFFFFFFF, index, elected_lane_deq, 32);
+				// 		break;
+				// 	}
+				// }
+
+
+				T startIndex = level_prev_index[wx][l[wx]- 2];
+				T newIndex = cl[startIndex] & (0x01 << (l[wx] - 2));
+				while(newIndex == 0)
+				{
+					startIndex++;
+					newIndex = cl[startIndex] & (0x01 << (l[wx] - 2));
+				}
+
+				if (lx == 0)
+				{
+					//current_node_index[0] = finalIndex;
+					current_node_index[wx] = startIndex;
+					level_prev_index[wx][l[wx] - 2] = current_node_index[wx] + 1;
+					level_index[wx][l[wx] - 2]++;
+					new_level[wx] = l[wx];
+				}
+
+				__syncwarp(partMask);
+
+				//assert(current_node_index[wx] < subgraph_counters[j]);
+				uint64 warpCountIn = 0;
+				const T dst = encode[srcLen*j + current_node_index[wx]];
+				const T dstStart = 0;
+				const T dstLen = subgraph_counters[dst];
+
+				bool limit = ((l[wx] - 1 + level_count[wx][l[wx] - 2]) >= KCCOUNT) && (dstLen >= KCCOUNT - l[wx]);
+
+				if (limit /*dstLen >= KCCOUNT - l[wx]*/)
+				{
+					if (dstLen >  subgraph_counters[j])
+					{
+						warpCountIn = graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&encode[j * srcLen],  subgraph_counters[j],
+							&encode[dst * srcLen], dstLen, true, srcStart, cl, l[wx] + 1, KCCOUNT, partMask, 3);
+					}
+					else {
+						warpCountIn = graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&encode[dst * srcLen], dstLen,
+							&encode[j * srcLen],  subgraph_counters[j], false, srcStart, cl, l[wx] + 1, KCCOUNT, partMask, 3);
+
+					}
+					__syncwarp(partMask);
+					if (lx == 0 && warpCountIn > 0)
+					{
+						if (l[wx] + 1 == KCCOUNT)
+							clique_count[wx] += warpCountIn;
+						else if ((l[wx] + 1 < KCCOUNT) /*&& ((l[wx] + warpCountIn) >= KCCOUNT)*/)
+						{
+							//if(warpCountIn >= KCCOUNT - l[wx])
+							{
+								(l[wx])++;
+								(new_level[wx])++;
+								level_count[wx][l[wx] - 2] = warpCountIn;
+								level_index[wx][l[wx] - 2] = 0;
+								level_prev_index[wx][l[wx] - 2] = 0;
+							}
+						}
+					}
+				}
+				__syncwarp(partMask);
+				if (lx == 0)
+				{
+					while (new_level[wx] > 3 && level_index[wx][new_level[wx] - 2] >= level_count[wx][new_level[wx] - 2])
+					{
+						(new_level[wx])--;
+					}
+				}
+
+				__syncwarp(partMask);
+				if (new_level[wx] < l[wx])
+				{
+					char clearMask = ~((1 << (l[wx] - 1)) - (1 << (new_level[wx] - 1)));
+					for (auto k = 0; k < srcLenBlocks[wx]; k++)
+					{
+						T index = k * CPARTSIZE + lx;
+						if (index <  subgraph_counters[j])
+							cl[index] = cl[index] & clearMask;
+					}
+
+					__syncwarp(partMask);
+				}
+
+				if (lx == 0)
+				{
+					l[wx] = new_level[wx];
+					current_node_index[wx] = UINT_MAX;
+				}
+				__syncwarp(partMask);
+			}
+
+			if (lx == 0)
+			{
+				atomicAdd(counter, clique_count[wx]);
+				//cpn[current.queue[i]] = clique_count[wx];
+			}
+		}
+	}
+
+	__syncthreads();
+	if (threadIdx.x == 0)
+	{
+		atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
+	}
+}
+
+
+
+
+template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE=32>
+__launch_bounds__(BLOCK_DIM_X, 16)
+__global__ void
+kckernel_node_block_warp_subgraph_im_count(
+	uint64* counter,
+	graph::COOCSRGraph_d<T> g,
+	const  graph::GraphQueue_d<T, bool>  current,
+	unsigned short* current_level,
+	T* levelStats,
+	T* adj_enc,
+	T* im_level
+)
+{
+	//will be removed later
+	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
+	constexpr T warpsPerBlock = BLOCK_DIM_X / 32;
+	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
+	const size_t lx = threadIdx.x % CPARTSIZE;
+	__shared__ T level_index[numPartitions][10];
+	__shared__ T level_count[numPartitions][10];
+	__shared__ T level_prev_index[numPartitions][10];
+
+	__shared__ T current_node_index[numPartitions];
+	__shared__ uint64 clique_count[numPartitions];
+	__shared__ char l[numPartitions];
+	__shared__ char new_level[numPartitions];
+	__shared__ uint32_t  sm_id, levelPtr;
+	__shared__ T src, srcStart, srcLen;
+	__shared__ T encode_offset, *encode, im_size, *im;
+	__shared__ unsigned short subgraph_counters[1024];
+	__shared__ unsigned short intermediate_counters[numPartitions][10];
+	__shared__ T  srcLenBlocks[numPartitions];
+
+	__syncthreads();
+
+	if (threadIdx.x == 0)
+	{
+		sm_id = __mysmid();
+		T temp = 0;
+		while (atomicCAS(&(levelStats[(sm_id * CBPSM) + temp]), 0, 1) != 0)
+		{
+			temp++;
+		}
+		levelPtr = temp;
+	}
+	__syncthreads();
+
+	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
+	{
+		//block things
+		if (threadIdx.x == 0)
+		{
+			src = current.queue[i];
+			srcStart = g.rowPtr[src];
+			srcLen = g.rowPtr[src + 1] - srcStart;
+			encode_offset = sm_id * CBPSM * (MAXDEG * MAXDEG) + levelPtr * (MAXDEG * MAXDEG);
+			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
+		}
+
+		T partMask = CPARTSIZE ==32? 0xFFFFFFFF : (1 << CPARTSIZE) - 1;
+		partMask = partMask << ((wx%(32/CPARTSIZE)) * CPARTSIZE);
+		__syncthreads();
+
+		for (T j = wx; j < srcLen; j += numPartitions)
+		{
+			for (T k = lx; k < srcLen; k += CPARTSIZE)
+			{
+				encode[j * srcLen + k] = 0xFFFFFFFF;
+			}
+			__syncwarp(partMask);
+			graph::warp_sorted_count_and_subgraph<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&g.colInd[srcStart], srcLen,
+				&g.colInd[g.rowPtr[g.colInd[srcStart + j]]], g.rowPtr[g.colInd[srcStart + j] + 1] - g.rowPtr[g.colInd[srcStart + j]],
+				j, srcLen, encode);
+		}
+
+
+
+
+		__syncthreads();
+		//compact: simpler than cub
+		for (T j = wx; j < srcLen; j += numPartitions)
+		{
+			if(lx == 0)
+			{
+				subgraph_counters[j] = 0;
+				for(T k = 0; k< srcLen; k++)
+				{
+					if(encode[j*srcLen + k] != 0xFFFFFFFF)
+					{
+						encode[j*srcLen + subgraph_counters[j]] = encode[j*srcLen + k];
+						subgraph_counters[j]++;
+					}
+				}
+			}
+		}
+
+		__syncthreads(); //Done encoding
+
+		//warp loop
+		for (T j = wx; j < srcLen; j += numPartitions)
+		{
+
+
+			for(T k = lx; k < 10; k+= CPARTSIZE)
+			{
+				level_count[wx][k] = 0;
+				level_index[wx][k] = 0;
+				level_prev_index[wx][k] = 0;
+			}
+			
+			if (lx == 0)
+			{
+				srcLenBlocks[wx] = ( subgraph_counters[j] + CPARTSIZE - 1) / CPARTSIZE;
+			
+				l[wx] = 2;
+				new_level[wx] = 2;
+				current_node_index[wx] = UINT_MAX;
+				clique_count[wx] = 0;
+			}
+
+			__syncwarp(partMask);
+			T blockOffset = sm_id * CBPSM * (numPartitions * MAXDEG)
+				+ levelPtr * (numPartitions * MAXDEG);
+			unsigned short* cl = &current_level[blockOffset + wx * MAXDEG /*srcStart[wx]*/];
+
+			T blockImOffset = sm_id * CBPSM * (numPartitions * MAXLEVEL* MAXDEG)
+				+ levelPtr * (numPartitions * MAXLEVEL*MAXDEG);
+			T* im = &im_level[blockImOffset + wx * MAXLEVEL*  MAXDEG];
+
+
+			__syncwarp(partMask);
+
+			uint64 warpCount = 0;
+			if ( subgraph_counters[j] >= KCCOUNT - l[wx])
+			{
+				
+				if (l[wx] + 1 == KCCOUNT && lx == 0)
+					clique_count[wx] +=  subgraph_counters[j];
+				else if (l[wx] + 1 < KCCOUNT)
+				{
+					if (lx == 0)
+					{
+						(l[wx])++;
+						(new_level[wx])++;
+						level_count[wx][l[wx] - 2] =  subgraph_counters[j];
+						level_index[wx][l[wx] - 2] = 0;
+						level_prev_index[wx][l[wx] - 2] = 0;
+					}
+				}
+			}
+
+			__syncwarp(partMask);
+
+			for (T k = lx; k < subgraph_counters[j]; k += CPARTSIZE)
+			{
+				im[(l[wx] - 2)*srcLen +  k] = encode[j*srcLen + k];
+			}
+
+			__syncwarp(partMask);
+			while (level_count[wx][l[wx] - 2] > level_index[wx][l[wx] - 2])
+			{
+
+				T startIndex = level_prev_index[wx][l[wx]- 2];
+				if (lx == 0)
+				{
+					//current_node_index[0] = finalIndex;
+					current_node_index[wx] = startIndex;
+					level_prev_index[wx][l[wx] - 2] = current_node_index[wx] + 1;
+					level_index[wx][l[wx] - 2]++;
+					new_level[wx] = l[wx];
+					level_count[wx][l[wx]-1] = 0;
+				}
+
+				__syncwarp(partMask);
+
+				//assert(current_node_index[wx] < subgraph_counters[j]);
+				uint64 warpCountIn = 0;
+				const T dst = im[(l[wx] - 2)*srcLen + current_node_index[wx]];  //encode[srcLen*j +  current_node_index[wx]];
+				const T dstStart = 0;
+				const T dstLen = subgraph_counters[dst];
+
+				bool limit = ((l[wx] - 1 + level_count[wx][l[wx] - 2]) >= KCCOUNT) && (dstLen >= KCCOUNT - l[wx]);
+
+				if (limit /*dstLen >= KCCOUNT - l[wx]*/)
+				{
+					warpCountIn = graph::warp_sorted_count_and_subgraph_binary2<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&im[(l[wx] - 2) * srcLen ],  level_count[wx][l[wx]-2],
+						&encode[dst * srcLen], dstLen, &im[(l[wx] - 1) * srcLen ], &(level_count[wx][l[wx]-1]), l[wx] + 1, KCCOUNT, partMask );
+					
+					__syncwarp(partMask);
+
+					if (lx == 0 && level_count[wx][l[wx]-1] > 0)
+					{
+						if (l[wx] + 1 == KCCOUNT)
+							clique_count[wx] += level_count[wx][l[wx]-1];
+						else if ((l[wx] + 1 < KCCOUNT) /*&& ((l[wx] + warpCountIn) >= KCCOUNT)*/)
+						{
+							//if(warpCountIn >= KCCOUNT - l[wx])
+							{
+								(l[wx])++;
+								(new_level[wx])++;
+								level_index[wx][l[wx] - 2] = 0;
+								level_prev_index[wx][l[wx] - 2] = 0;
+							}
+						}
+					}
+				}
+				__syncwarp(partMask);
+				if (lx == 0)
+				{
+					while (new_level[wx] > 3 && level_index[wx][new_level[wx] - 2] >= level_count[wx][new_level[wx] - 2])
+					{
+						(new_level[wx])--;
+					}
+				}
+
+				if (lx == 0)
+				{
+					l[wx] = new_level[wx];
+					current_node_index[wx] = UINT_MAX;
+				}
+				__syncwarp(partMask);
+			}
+
+			if (lx == 0)
+			{
+				atomicAdd(counter, clique_count[wx]);
+				//cpn[current.queue[i]] = clique_count[wx];
+			}
+		}
+	}
+
+	__syncthreads();
+	if (threadIdx.x == 0)
+	{
+		atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
+	}
+}
+
+
+
+
+//come back
+template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE=32>
+__launch_bounds__(BLOCK_DIM_X, 16)
+__global__ void
+kckernel_edge_block_warp_count(
+	uint64* counter,
+	graph::COOCSRGraph_d<T> g,
+	const  graph::GraphQueue_d<T, bool>  current,
+	unsigned short* current_level,
+	T* levelStats,
+	T* adj_tri
+)
+{
+	//will be removed later
+	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
+	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
+	const size_t lx = threadIdx.x % CPARTSIZE;
+	__shared__ T level_index[numPartitions][10];
+	__shared__ T level_count[numPartitions][10];
+	__shared__ T level_prev_index[numPartitions][10];
+
+	__shared__ T current_node_index[numPartitions];
+	__shared__ uint64 clique_count[numPartitions];
+	__shared__ char l[numPartitions];
+	__shared__ char new_level[numPartitions];
+	__shared__ uint32_t  sm_id, levelPtr;
+	__shared__ T src, srcStart, srcLen, secNodeStart, secNodeLen, tri_offset, *tri, scounter;
+	__shared__ T src2Start[numPartitions], src2Len[numPartitions];
+	__shared__ T *refIndex[numPartitions], refLen[numPartitions], srcLenBlocks[numPartitions];
+
+	__syncthreads();
+
+	if (threadIdx.x == 0)
+	{
+		sm_id = __mysmid();
+		T temp = 0;
+		while (atomicCAS(&(levelStats[(sm_id * CBPSM) + temp]), 0, 1) != 0)
+		{
+			temp++;
+		}
+		levelPtr = temp;
+	}
+	__syncthreads();
+
+	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
+	{
+		//block things
+		if (threadIdx.x == 0)
+		{
+			src = g.rowInd[current.queue[i]];
+			srcStart = g.rowPtr[src];
+			srcLen = g.rowPtr[src + 1] - srcStart;
+
+			T secNode = g.colInd[current.queue[i]];
+			secNodeStart = g.rowPtr[secNode];
+			secNodeLen = g.rowPtr[secNode + 1] - secNodeStart;
+
+			tri_offset = sm_id * CBPSM * (MAXDEG) + levelPtr * (MAXDEG);
+			tri = &adj_tri[tri_offset  /*srcStart[wx]*/];
+			scounter = 0;
+
+		}
+
+		T partMask = CPARTSIZE ==32? 0xFFFFFFFF : (1 << CPARTSIZE) - 1;
+		partMask = partMask << ((wx%(32/CPARTSIZE)) * CPARTSIZE);
+
+		__syncthreads();
+		for(T j = threadIdx.x; j< srcLen; j+=BLOCK_DIM_X)
+			tri[j] = 0xFFFFFFFF;
+
+		__syncthreads();
+
+		// //get tri list: by block :!!
+		graph::block_sorted_count_and_set_tri<BLOCK_DIM_X, T>(&g.colInd[srcStart], srcLen, &g.colInd[secNodeStart], secNodeLen,
+			tri);
+
+		__syncthreads();
+
+		block_filter_pivot<T, BLOCK_DIM_X, T>(srcLen, tri, &scounter);
+		__syncthreads();
+
+
+		if(KCCOUNT == 3 && threadIdx.x == 0)
+			atomicAdd(counter, scounter);
+
+		//warp loop
+		for (T j = wx; j < scounter; j += numPartitions)
+		{
+			for(T k = lx; k < 10; k+= CPARTSIZE)
+			{
+				level_count[wx][k] = 0;
+				level_index[wx][k] = 0;
+				level_prev_index[wx][k] = 0;
+			}
+			
+			
+			if (lx == 0)
+			{
+				T src2 = tri[j];
+
+				//reinitialize with respect to the triangle now
+				src2Start[wx] = g.rowPtr[src2];
+				src2Len[wx] = g.rowPtr[src2 + 1] - src2Start[wx];
+
+				if(scounter < src2Len[wx])
+				{
+					refIndex[wx] = tri;
+					refLen[wx] = scounter;
+				}
+				else
+				{
+					refIndex[wx] = &(g.colInd[src2Start[wx]]);
+					refLen[wx] =  src2Len[wx];
+				}
+
+				srcLenBlocks[wx] = (refLen[wx] + CPARTSIZE - 1) / CPARTSIZE;
+		
+				l[wx] = 3;
+				new_level[wx] = 3;
+				current_node_index[wx] = UINT_MAX;
+				clique_count[wx] = 0;
+			}
+
+			__syncwarp(partMask);
+
+			T blockOffset = sm_id * CBPSM * (numPartitions * MAXDEG)
+				+ levelPtr * (numPartitions * MAXDEG);
+			unsigned short* cl = &current_level[blockOffset + wx * MAXDEG /*srcStart[wx]*/];
+			for (T k = lx; k < refLen[wx]; k += CPARTSIZE)
+			{
+				cl[k] = 0x01;
+			}
+			__syncwarp(partMask);
+
+			uint64 warpCount = 0;
+			if (src2Len[wx] >= KCCOUNT - l[wx])
+			{
+				if (scounter < src2Len[wx])
+				{
+					warpCount += graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true, CPARTSIZE, unsigned short>(tri, scounter,
+						&g.colInd[src2Start[wx]], src2Len[wx], true, srcStart, cl, l[wx] + 1, KCCOUNT, partMask, 4);
+				}
+				else {
+					warpCount += graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true, CPARTSIZE, unsigned short>(&g.colInd[src2Start[wx]], src2Len[wx],
+						tri, scounter, true, srcStart, cl, l[wx] + 1, KCCOUNT, partMask, 4);
+				}
+
+				__syncwarp(partMask);
+				if (warpCount > 0)
+				{
+					if (l[wx] + 1 == KCCOUNT && lx == 0)
+						clique_count[wx] += warpCount;
+					else if (l[wx] + 1 < KCCOUNT)
+					{
+						if (lx == 0)
+						{
+							(l[wx])++;
+							(new_level[wx])++;
+							level_count[wx][l[wx] - 3] = warpCount;
+							level_index[wx][l[wx] - 3] = 0;
+							level_prev_index[wx][l[wx] - 3] = 0;
+						}
+					}
+
+				}
+			}
+
+			__syncwarp(partMask);
+			while (level_count[wx][l[wx] - 3] > level_index[wx][l[wx] - 3])
+			{
+				// for (T k = 0; k < srcLenBlocks[wx]; k++)
+				// {
+				// 	T index = level_prev_index[wx][l[wx] - 3] + k * 32 + lx;
+				// 	int condition = index < refLen[wx] && (cl[index] & (0x01 << (l[wx] - 2)));
+				// 	unsigned int newmask = __ballot_sync(0xFFFFFFFF, condition);
+				// 	if (newmask != 0)
+				// 	{
+				// 		uint elected_lane_deq = __ffs(newmask) - 1;
+				// 		current_node_index[wx] = __shfl_sync(0xFFFFFFFF, index, elected_lane_deq, 32);
+				// 		break;
+				// 	}
+				// }
+
+
+				T startIndex = level_prev_index[wx][l[wx]- 3];
+				T newIndex = cl[startIndex] & (0x01 << (l[wx] - 3));
+				while(newIndex == 0)
+				{
+					startIndex++;
+					newIndex = cl[startIndex] & (0x01 << (l[wx] - 3));
+				}
+
+				if (lx == 0)
+				{
+					//current_node_index[0] = finalIndex;
+					current_node_index[wx] = startIndex;
+					level_prev_index[wx][l[wx] - 3] = current_node_index[wx] + 1;
+					level_index[wx][l[wx] - 3]++;
+					new_level[wx] = l[wx];
+				}
+
+				__syncwarp(partMask);
+
+				uint64 warpCountIn = 0;
+				const T dst = (refIndex[wx])[current_node_index[wx]]; //g.colInd[current_node_index[wx] + refIndex[wx]];
+				const T dstStart = g.rowPtr[dst];
+				const T dstLen = g.rowPtr[dst + 1] - dstStart;
+
+				//bool limit = ((l[wx] - 3 + level_count[wx][l[wx] - 4]) >= KCCOUNT) && (dstLen >= KCCOUNT - l[wx]);
+
+				if (dstLen >= KCCOUNT - l[wx])
+				{
+					if (dstLen > refLen[wx])
+					{
+						warpCountIn = graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true, CPARTSIZE>(refIndex[wx], refLen[wx],
+							&g.colInd[dstStart], dstLen, true, srcStart, cl, l[wx] + 1, KCCOUNT, partMask, 4);
+					}
+					else {
+						warpCountIn = graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&g.colInd[dstStart], dstLen,
+							refIndex[wx], refLen[wx], false, srcStart, cl, l[wx] + 1, KCCOUNT, partMask, 4);
+
+					}
+					__syncwarp(partMask);
+					if (lx == 0 && warpCountIn > 0)
+					{
+						if (l[wx] + 1 == KCCOUNT)
+							clique_count[wx] += warpCountIn;
+						else if ((l[wx] + 1 < KCCOUNT) /*&& ((l[wx] + warpCountIn) >= KCCOUNT)*/)
+						{
+							//if(warpCountIn >= KCCOUNT - l[wx])
+							{
+								(l[wx])++;
+								(new_level[wx])++;
+								level_count[wx][l[wx] - 3] = warpCountIn;
+								level_index[wx][l[wx] - 3] = 0;
+								level_prev_index[wx][l[wx] - 3] = 0;
+							}
+						}
+					}
+				}
+
+
+				__syncwarp(partMask);
+				if (lx == 0)
+				{
+					while (new_level[wx] > 4 && level_index[wx][new_level[wx] - 3] >= level_count[wx][new_level[wx] - 3])
+					{
+						(new_level[wx])--;
+					}
+				}
+
+				__syncwarp(partMask);
+				if (new_level[wx] < l[wx])
+				{
+					char clearMask = ~((1 << (l[wx] - 2)) - (1 << (new_level[wx] - 2)));
+					for (auto k = 0; k < srcLenBlocks[wx]; k++)
+					{
+						T index = k * CPARTSIZE + lx;
+						if (index < refLen[wx])
+							cl[index] = cl[index] & clearMask;
+					}
+
+					__syncwarp(partMask);
+				}
+
+				if (lx == 0)
+				{
+					l[wx] = new_level[wx];
+					current_node_index[wx] = UINT_MAX;
+				}
+				__syncwarp(partMask);
+			}
+
+			if (lx == 0)
+			{
+				atomicAdd(counter, clique_count[wx]);
+				//cpn[current.queue[i]] = clique_count[wx];
+			}
+		}
+
+		__syncthreads();
+	}
+
+	__syncthreads();
+	if (threadIdx.x == 0)
+	{
+		atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
+	}
+}
+
+
+template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE=32>
+__launch_bounds__(BLOCK_DIM_X, 16)
+__global__ void
+kckernel_edge_block_warp_subgraph_count(
+	uint64* counter,
+	graph::COOCSRGraph_d<T> g,
+	const  graph::GraphQueue_d<T, bool>  current,
+	unsigned short* current_level,
+	T* levelStats,
+	T* adj_enc,
+	T* adj_tri
+)
+{
+
+	//will be removed later
+	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
+	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
+	const size_t lx = threadIdx.x % CPARTSIZE;
+	__shared__ T level_index[numPartitions][10];
+	__shared__ T level_count[numPartitions][10];
+	__shared__ T level_prev_index[numPartitions][10];
+
+	__shared__ T current_node_index[numPartitions];
+	__shared__ uint64 clique_count[numPartitions];
+	__shared__ char l[numPartitions];
+	__shared__ char new_level[numPartitions];
+	__shared__ uint32_t  sm_id, levelPtr;
+	__shared__ T src, srcStart, srcLen, src2Start, secNode, src2Len, tri_offset, *tri, scounter;
+
+	__shared__ T encode_offset, *encode;
+	__shared__ T subgraph_counters[1024];
+	__shared__ T blockOffset;
+	
+
+	__syncthreads();
+
+	if (threadIdx.x == 0)
+	{
+		sm_id = __mysmid();
+		T temp = 0;
+		while (atomicCAS(&(levelStats[(sm_id * CBPSM) + temp]), 0, 1) != 0)
+		{
+			temp++;
+		}
+		levelPtr = temp;
+	}
+	__syncthreads();
+
+	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
+	{
+		//block things
+		if (threadIdx.x == 0)
+		{
+			src = g.rowInd[current.queue[i]];
+			srcStart = g.rowPtr[src];
+			srcLen = g.rowPtr[src + 1] - srcStart;
+
+			secNode = g.colInd[current.queue[i]];
+			src2Start = g.rowPtr[secNode];
+			src2Len = g.rowPtr[secNode + 1] - src2Start;
+
+			tri_offset = sm_id * CBPSM * (MAXDEG) + levelPtr * (MAXDEG);
+			tri = &adj_tri[tri_offset  /*srcStart[wx]*/];
+			scounter = 0;
+
+			encode_offset = sm_id * CBPSM * (MAXDEG * MAXDEG) + levelPtr * (MAXDEG * MAXDEG);
+			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
+
+		}
+
+		T partMask = CPARTSIZE ==32? 0xFFFFFFFF : (1 << CPARTSIZE) - 1;
+		partMask = partMask << ((wx%(32/CPARTSIZE)) * CPARTSIZE);
+
+		__syncthreads();
+
+		// //get tri list: by block :!!
+		graph::block_count_and_set_tri<BLOCK_DIM_X, T>(&g.colInd[srcStart], srcLen, &g.colInd[src2Start], src2Len,
+			tri, &scounter);
+		__syncthreads();
+
+
+		for (T j = wx; j < scounter; j += numPartitions)
+		{
+			for (T k = lx; k < scounter; k += CPARTSIZE)
+			{
+				encode[j * scounter + k] = 0xFFFFFFFF;
+			}
+			__syncwarp(partMask);
+			graph::warp_sorted_count_and_subgraph<WARPS_PER_BLOCK, T, true, CPARTSIZE>(tri, scounter,
+				&g.colInd[g.rowPtr[tri[j]]], g.rowPtr[tri[j] + 1] - g.rowPtr[tri[j]],
+				j, scounter, encode);
+		}
+
+		__syncthreads();
+		//compact: simpler than cub
+		for (T j = wx; j < scounter; j += numPartitions)
+		{
+			if(lx == 0)
+			{
+				subgraph_counters[j] = 0;
+				for(T k = 0; k< scounter; k++)
+				{
+					if(encode[j*scounter + k] != 0xFFFFFFFF)
+					{
+						encode[j*scounter + subgraph_counters[j]] = encode[j*scounter + k];
+						subgraph_counters[j]++;
+					}
+				}
+			}
+		}
+
+		__syncthreads(); //Done encoding
+
+
+		if(KCCOUNT == 3 && threadIdx.x == 0)
+			atomicAdd(counter, scounter);
+
+		//warp loop
+		for (T j = wx; j < scounter; j += numPartitions)
+		{
+			for(T k = lx; k < 10; k+= CPARTSIZE)
+			{
+				level_count[wx][k] = 0;
+				level_index[wx][k] = 0;
+				level_prev_index[wx][k] = 0;
+			}
+			
+			
+			if (lx == 0)
+			{
+				l[wx] = 3;
+				new_level[wx] = 3;
+				current_node_index[wx] = UINT_MAX;
+				clique_count[wx] = 0;
+			}
+
+			__syncwarp(partMask);
+
+			blockOffset = sm_id * CBPSM * (numPartitions * MAXDEG)
+				+ levelPtr * (numPartitions * MAXDEG);
+			unsigned short *cl = &current_level[blockOffset + wx * MAXDEG /*srcStart[wx]*/];
+			
+			for (T k = lx; k < scounter; k += CPARTSIZE)
+			{
+				cl[k] = 4;
+			}
+			__syncwarp(partMask);
+
+			if (subgraph_counters[j] >= KCCOUNT - l[wx])
+			{
+				if (l[wx] + 1 == KCCOUNT && lx == 0)
+					clique_count[wx] += subgraph_counters[j];
+				else if (l[wx] + 1 < KCCOUNT)
+				{
+					if (lx == 0)
+					{
+						(l[wx])++;
+						(new_level[wx])++;
+						level_count[wx][l[wx] - 3] = subgraph_counters[j];
+						level_index[wx][l[wx] - 3] = 0;
+						level_prev_index[wx][l[wx] - 3] = 0;
+					}
+				}
+			}
+
+			__syncwarp(partMask);
+			while (level_count[wx][l[wx] - 3] > level_index[wx][l[wx] - 3])
+			{
+				// for (T k = 0; k < srcLenBlocks[wx]; k++)
+				// {
+				// 	T index = level_prev_index[wx][l[wx] - 3] + k * 32 + lx;
+				// 	int condition = index < refLen[wx] && (cl[index] & (0x01 << (l[wx] - 2)));
+				// 	unsigned int newmask = __ballot_sync(0xFFFFFFFF, condition);
+				// 	if (newmask != 0)
+				// 	{
+				// 		uint elected_lane_deq = __ffs(newmask) - 1;
+				// 		current_node_index[wx] = __shfl_sync(0xFFFFFFFF, index, elected_lane_deq, 32);
+				// 		break;
+				// 	}
+				// }
+
+
+				T startIndex = level_prev_index[wx][l[wx]- 3];
+				T newIndex = cl[startIndex]  == l[wx];
+				while(newIndex == 0)
+				{
+					startIndex++;
+					newIndex = cl[startIndex] == l[wx];
+				}
+
+				if (lx == 0)
+				{
+					//current_node_index[0] = finalIndex;
+					current_node_index[wx] = startIndex;
+					level_prev_index[wx][l[wx] - 3] = current_node_index[wx] + 1;
+					level_index[wx][l[wx] - 3]++;
+					new_level[wx] = l[wx];
+				}
+
+				__syncwarp(partMask);
+
+				uint64 warpCountIn = 0;
+				const T dst = encode[scounter*j + current_node_index[wx]];
+		
+				//bool limit = ((l[wx] - 3 + level_count[wx][l[wx] - 4]) >= KCCOUNT) && (dstLen >= KCCOUNT - l[wx]);
+
+				if (subgraph_counters[dst] >= KCCOUNT - l[wx])
+				{
+					// if (subgraph_counters[dst] > subgraph_counters[j])
+					// {
+					// 	warpCountIn = graph::warp_sorted_count_and_set_binary2<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&encode[j * scounter],  subgraph_counters[j],
+					// 		&encode[dst * scounter], subgraph_counters[dst], true, srcStart, cl, l[wx] + 1, KCCOUNT, partMask, 4);
+					// }
+					// else {
+						warpCountIn = graph::warp_sorted_count_and_set_binary3<T,  CPARTSIZE>(&encode[dst * scounter], subgraph_counters[dst],
+							&encode[j * scounter],  subgraph_counters[j], cl, l[wx] + 1, KCCOUNT, partMask, 4);
+
+					//}
+					__syncwarp(partMask);
+					if (lx == 0 && warpCountIn > 0)
+					{
+						if (l[wx] + 1 == KCCOUNT)
+							clique_count[wx] += warpCountIn;
+						else if ((l[wx] + 1 < KCCOUNT) /*&& ((l[wx] + warpCountIn) >= KCCOUNT)*/)
+						{
+							//if(warpCountIn >= KCCOUNT - l[wx])
+							{
+								(l[wx])++;
+								(new_level[wx])++;
+								level_count[wx][l[wx] - 3] = warpCountIn;
+								level_index[wx][l[wx] - 3] = 0;
+								level_prev_index[wx][l[wx] - 3] = 0;
+							}
+						}
+					}
+				}
+
+
+				__syncwarp(partMask);
+				if (lx == 0)
+				{
+					while (new_level[wx] > 4 && level_index[wx][new_level[wx] - 3] >= level_count[wx][new_level[wx] - 3])
+					{
+						(new_level[wx])--;
+					}
+				}
+
+				__syncwarp(partMask);
+				if (new_level[wx] < l[wx])
+				{
+					for (auto k = lx; k < subgraph_counters[j]; k+= CPARTSIZE)
+					{
+						if(cl[k] > new_level[wx])
+							cl[k] = new_level[wx];
+					}	
+
+					__syncwarp(partMask);
+				}
+
+				if (lx == 0)
+				{
+					l[wx] = new_level[wx];
+					current_node_index[wx] = UINT_MAX;
+				}
+				__syncwarp(partMask);
+			}
+
+			if (lx == 0)
+			{
+				atomicAdd(counter, clique_count[wx]);
+				//cpn[current.queue[i]] = clique_count[wx];
+			}
+		}
+
+		__syncthreads();
+	}
+
+	__syncthreads();
+	if (threadIdx.x == 0)
+	{
+		atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
 	}
 }
 
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
-__launch_bounds__(BLOCK_DIM_X, 16)
+//__launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
 kckernel_node_block_warp_binary_count(
 	uint64* counter,
@@ -2034,9 +3143,9 @@ kckernel_node_block_warp_binary_count(
 	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
 	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
 	const size_t lx = threadIdx.x % CPARTSIZE;
-	__shared__ T level_index[numPartitions][7];
-	__shared__ T level_count[numPartitions][7];
-	__shared__ T level_prev_index[numPartitions][7];
+	__shared__ T level_index[numPartitions][9];
+	__shared__ T level_count[numPartitions][9];
+	__shared__ T level_prev_index[numPartitions][9];
 
 	__shared__ T  level_offset[numPartitions];
 	__shared__ uint64 clique_count[numPartitions];
@@ -2084,11 +3193,9 @@ kckernel_node_block_warp_binary_count(
 		//Encode
 		T partMask = (1 << CPARTSIZE) - 1;
 		partMask = partMask << ((wx%(32/CPARTSIZE)) * CPARTSIZE);
-		T mm = (1 << srcLen) - 1;
-		mm = mm << ((wx/numPartitions) * CPARTSIZE);
-		for (unsigned long long j = wx; j < srcLen; j += numPartitions)
+		for (T j = wx; j < srcLen; j += numPartitions)
 		{
-			for (unsigned long long k = lx; k < num_divs_local; k += CPARTSIZE)
+			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 			{
 				encode[j * num_divs_local + k] = 0x00;
 			}
@@ -2101,14 +3208,14 @@ kckernel_node_block_warp_binary_count(
 		__syncthreads(); //Done encoding
 
 
-		for (unsigned long long j = wx; j < srcLen; j += numPartitions)
+		for (T j = wx; j < srcLen; j += numPartitions)
 		{
 
-			level_offset[wx] = sm_id * CBPSM * (numPartitions * NUMDIVS * 7) + levelPtr * (numPartitions * NUMDIVS * 7);
-			T* cl = &current_level[level_offset[wx] + wx * (NUMDIVS * 7)];
+			level_offset[wx] = sm_id * CBPSM * (numPartitions * NUMDIVS * 9) + levelPtr * (numPartitions * NUMDIVS * 9);
+			T* cl = &current_level[level_offset[wx] + wx * (NUMDIVS * 9)];
 
 
-			if (lx < 7)
+			if (lx < 9)
 			{
 				level_count[wx][lx] = 0;
 				level_index[wx][lx] = 0;
@@ -2134,6 +3241,11 @@ kckernel_node_block_warp_binary_count(
 				warpCount += __popc(encode[j * num_divs_local + k]);
 			}
 			reduce_part<T>(partMask, warpCount);
+			// warpCount += __shfl_down_sync(partMask, warpCount, 16);
+			// warpCount += __shfl_down_sync(partMask, warpCount, 8);
+			// warpCount += __shfl_down_sync(partMask, warpCount, 4);
+			// warpCount += __shfl_down_sync(partMask, warpCount, 2);
+			// warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
 			if (lx == 0 && l[wx] == KCCOUNT)
 				clique_count[wx] += warpCount;
@@ -2175,6 +3287,11 @@ kckernel_node_block_warp_binary_count(
 					warpCount += __popc(to[k]);
 				}
 				reduce_part<T>(partMask, warpCount);
+				// warpCount += __shfl_down_sync(partMask, warpCount, 16);
+				// warpCount += __shfl_down_sync(partMask, warpCount, 8);
+				// warpCount += __shfl_down_sync(partMask, warpCount, 4);
+				// warpCount += __shfl_down_sync(partMask, warpCount, 2);
+				// warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
 				if (lx == 0)
 				{
@@ -2212,6 +3329,11 @@ kckernel_node_block_warp_binary_count(
 	}
 }
 
+
+
+
+
+//No partition
 template <typename T, uint BLOCK_DIM_X>
 __launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
@@ -2431,7 +3553,7 @@ kckernel_edge_warp_binary_count(
 }
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
-//__launch_bounds__(BLOCK_DIM_X, 16)
+__launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
 kckernel_edge_block_warp_binary_count_o(
 	uint64* counter,
@@ -2505,7 +3627,7 @@ kckernel_edge_block_warp_binary_count_o(
 
 		// //get tri list: by block :!!
 		__syncthreads();
-		graph::block_sorted_count_and_set_tri<BLOCK_DIM_X, T>(&g.colInd[srcStart], srcLen, &g.colInd[src2Start], src2Len,
+		graph::block_count_and_set_tri<BLOCK_DIM_X, T>(&g.colInd[srcStart], srcLen, &g.colInd[src2Start], src2Len,
 			tri, &scounter);
 		
 		__syncthreads();
@@ -2966,7 +4088,7 @@ kckernel_edge_block_warp_binary_count(
 
 		// //get tri list: by block :!!
 		__syncthreads();
-		graph::block_sorted_count_and_set_tri<BLOCK_DIM_X, T>(&g.colInd[srcStart], srcLen, &g.colInd[src2Start], src2Len,
+		graph::block_count_and_set_tri<BLOCK_DIM_X, T>(&g.colInd[srcStart], srcLen, &g.colInd[src2Start], src2Len,
 			tri, &scounter);
 		
 		__syncthreads();
@@ -3506,7 +4628,7 @@ kckernel_node_block_warp_binary_pivot_count(
 
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
-//__launch_bounds__(BLOCK_DIM_X, 16)
+__launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
 kckernel_edge_block_warp_binary_pivot_count(
 	uint64* counter,
@@ -3605,7 +4727,7 @@ kckernel_edge_block_warp_binary_pivot_count(
 
 		// //get tri list: by block :!!
 		__syncthreads();
-		graph::block_sorted_count_and_set_tri<BLOCK_DIM_X, T>(&g.colInd[srcStart], srcLen, &g.colInd[src2Start], src2Len,
+		graph::block_count_and_set_tri<BLOCK_DIM_X, T>(&g.colInd[srcStart], srcLen, &g.colInd[src2Start], src2Len,
 			tri, &scounter);
 		
 		__syncthreads();
