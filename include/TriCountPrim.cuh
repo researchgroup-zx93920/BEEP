@@ -2,15 +2,15 @@
 #include <cuda_runtime.h>
 #include "utils.cuh"
 
-#define PART_SIZE 32
+#define PART_SIZE 1
 template<typename T>
 __device__ __forceinline__ void reduce_part(T mask, uint64 &count)
 {
-	count += __shfl_down_sync(mask, count, 16);
-	count += __shfl_down_sync(mask, count, 8);
-	count += __shfl_down_sync(mask, count, 4);
-	count += __shfl_down_sync(mask, count, 2);
-	count += __shfl_down_sync(mask, count, 1);
+	// count += __shfl_down_sync(mask, count, 16);
+	// count += __shfl_down_sync(mask, count, 8);
+	//count += __shfl_down_sync(mask, count, 4);
+	// count += __shfl_down_sync(mask, count, 2);
+	// count += __shfl_down_sync(mask, count, 1);
 }
 
 
@@ -1325,6 +1325,8 @@ namespace graph
             // threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 1);
 
             reduce_part<T>(partMask, threadCount);
+<<<<<<< HEAD
+=======
 
             return threadCount;
         }
@@ -1336,6 +1338,89 @@ namespace graph
 
 
 
+    template <size_t WARPS_PER_BLOCK, typename T, bool reduce = true, uint CPARTSIZE = 32>
+    __device__ __forceinline__ uint64 warp_sorted_count_and_subgraph_binary2( T* A, //!< [in] array A
+        T aSz, //!< [in] the number of elements in A
+        T* B, //!< [in] array B
+        T bSz,  //!< [in] the number of elements in B
+
+        T* current_level,
+        T* counter,
+        T new_level,
+        T clique_number,
+        T partMask
+    )
+    {
+        const int warpIdx = threadIdx.x / CPARTSIZE; // which warp in thread block
+        const int laneIdx = threadIdx.x % CPARTSIZE; // which thread in warp
+
+        uint64 threadCount = 0;
+        //T lastIndex = 0;
+
+        // cover entirety of A with warp
+        for (T i = laneIdx; i < aSz; i += CPARTSIZE)
+        {
+            // one element of A per thread, just search for A into B
+            const T searchVal = A[i];
+            //const T leftValue = B[lastIndex];
+            bool found = false;
+            const T lb = graph::binary_search<T>(B, 0, bSz, searchVal, found);
+            if (found)
+            {
+                    //printf("At %u, SearchVal = %u\n", lb, searchVal);
+                    //threadCount++;
+                    //////////////////////////////Device function ///////////////////////
+                    //if (new_level < clique_number)
+                    {
+                        //current_level[i] = searchVal;
+
+                        T old = atomicAdd(counter, 1);
+                        current_level[old] = searchVal;
+                    }
+                    /////////////////////////////////////////////////////////////////////
+                
+
+
+            }
+
+               // lastIndex = lb;
+            
+
+            // unsigned int writemask_deq = __activemask();
+            // lastIndex = __shfl_sync(writemask_deq, lastIndex, 31);
+        }
+
+        if (reduce) {
+            // give lane 0 the total count discovered by the warp
+            // typedef cub::WarpReduce<uint64> WarpReduce;
+            // __shared__ typename WarpReduce::TempStorage tempStorage[WARPS_PER_BLOCK];
+            // uint64 aggregate = WarpReduce(tempStorage[warpIdx]).Sum(threadCount);
+            // return aggregate;
+
+            // threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 16);
+            // threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 8);
+            // threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 4);
+            // threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 2);
+            // threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 1);
+
+            //reduce_part<T>(partMask, threadCount);
+>>>>>>> master
+
+            return threadCount;
+        }
+        else
+        {
+            return threadCount;
+        }
+    }
+
+
+
+<<<<<<< HEAD
+=======
+
+
+>>>>>>> master
     template <typename T, uint CPARTSIZE = 32, typename K=char>
     __device__ __forceinline__ uint64 warp_sorted_count_and_set_binary3(const T* const A, //!< [in] array A
         const size_t aSz, //!< [in] the number of elements in A

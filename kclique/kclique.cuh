@@ -863,8 +863,6 @@ kckernel_node_block_warp_pivot_count(
 	}
 }
 
-
-
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
@@ -1460,13 +1458,13 @@ namespace graph
 			GPUArray <T> maxDegree("Temp Degree", unified, 1, dev_);
 
 			T conc_blocks_per_SM = context.GetConCBlocks(block_size);
-			GPUArray<T> d_bitmap_states("bmp bitmap stats", AllocationTypeEnum::gpu, num_SMs * conc_blocks_per_SM, dev_);
+			GPUArray<T> d_bitmap_states("bmp bitmap stats", AllocationTypeEnum::unified, num_SMs * conc_blocks_per_SM, dev_);
 			T factor = (pe == Block) ? 1 : (block_size / 32);
 
 
 		
 
-			// cpn.setAll(0, true);
+			cpn.setAll(0, true);
 			// GPUArray<T>
 			// 	filter_level("Temp filter Counter", unified, g.numEdges, dev_),
 			// 	filter_scan("Temp scan Counter", unified, g.numEdges, dev_);
@@ -1549,6 +1547,10 @@ namespace graph
 
 						const uint64 encode_size = num_SMs * conc_blocks_per_SM * maxDegree.gdata()[0] * maxDegree.gdata()[0];
 						GPUArray<T> node_be("Temp level Counter", gpu, encode_size, dev_);
+
+
+						const uint64 intermediate_size = num_SMs * conc_blocks_per_SM * factor * max_level * maxDegree.gdata()[0];
+						GPUArray<T> im("Intermediate level Counter", gpu, intermediate_size, dev_);
 			
 						printf("Level Size = %llu, Encode Size = %llu\n", level_size, encode_size);
 
@@ -1559,6 +1561,18 @@ namespace graph
 						cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM), sizeof(CBPSM));
 
 						auto grid_block_size = current_q.count.gdata()[0];
+
+					// 	execKernel((kckernel_node_block_warp_subgraph_im_count<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
+					// 	counter.gdata(),
+					// 	g,
+					// 	current_q.device_queue->gdata()[0],
+					// 	current_level2.gdata(),
+					// 	d_bitmap_states.gdata(),
+					// 	node_be.gdata(),
+					// 	im.gdata()
+					// );
+
+
 
 						execKernel((kckernel_node_block_warp_subgraph_count<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
 							counter.gdata(),
@@ -2364,7 +2378,7 @@ namespace graph
 
 			CUDA_RUNTIME(cudaSetDevice(dev_));
 
-			const auto block_size = 64;
+			const auto block_size = 128;
 			CUDAContext context;
 			T num_SMs = context.num_SMs;
 
@@ -2520,7 +2534,7 @@ namespace graph
 
 			CUDA_RUNTIME(cudaSetDevice(dev_));
 
-			const auto block_size = 64;
+			const auto block_size = 128;
 			CUDAContext context;
 			T num_SMs = context.num_SMs;
 

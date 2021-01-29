@@ -148,9 +148,26 @@ int main(int argc, char** argv)
 	g.numNodes = n;
 
 	//Redundunt, will be removed
-	g.rowPtr = new graph::GPUArray<uint>("Row pointer", gpu, n+1, config.deviceId, true, true);
-	g.rowInd = new graph::GPUArray<uint>("Src Index", gpu, m, config.deviceId, true, true);
-	g.colInd = new graph::GPUArray<uint>("Dst Index", gpu, m, config.deviceId, true, true);
+	// g.rowPtr = new graph::GPUArray<uint>("Row pointer", gpu, n+1, config.deviceId, true, true);
+	// g.rowInd = new graph::GPUArray<uint>("Src Index", gpu, m, config.deviceId, true, true);
+	// g.colInd = new graph::GPUArray<uint>("Dst Index", gpu, m, config.deviceId, true, true);
+	// uint *rp, *ri, *ci;
+	// cudaMallocHost((void**)&rp, (n+1)*sizeof(uint));
+	// cudaMallocHost((void**)&ri, (m)*sizeof(uint));
+	// cudaMallocHost((void**)&ci, (m)*sizeof(uint));
+	// CUDA_RUNTIME(cudaMemcpy(rp, csrcoo.row_ptr(), (n+1)*sizeof(uint), cudaMemcpyKind::cudaMemcpyHostToHost));
+	// CUDA_RUNTIME(cudaMemcpy(ri, csrcoo.row_ind(), (m)*sizeof(uint) , cudaMemcpyKind::cudaMemcpyHostToHost));
+	// CUDA_RUNTIME(cudaMemcpy(ci, csrcoo.col_ind(), (m)*sizeof(uint), cudaMemcpyKind::cudaMemcpyHostToHost));
+
+	// g.rowPtr->cdata() = rp;
+	// g.rowInd->cdata() = ri;
+	// g.colInd->cdata() = ci;
+
+
+
+	g.rowPtr = new graph::GPUArray<uint>("Row pointer", AllocationTypeEnum::gpu, n+1, config.deviceId, true );
+	g.rowInd = new graph::GPUArray<uint>("Src Index", AllocationTypeEnum::gpu,  m, config.deviceId, true );
+	g.colInd = new graph::GPUArray<uint>("Dst Index", AllocationTypeEnum::gpu,  m, config.deviceId, true);
 	uint *rp, *ri, *ci;
 	cudaMallocHost((void**)&rp, (n+1)*sizeof(uint));
 	cudaMallocHost((void**)&ri, (m)*sizeof(uint));
@@ -164,7 +181,9 @@ int main(int argc, char** argv)
 	g.colInd->cdata() = ci;
 
 
-
+	// g.rowPtr->cdata() = csrcoo.row_ptr();
+	// g.rowInd->cdata() = csrcoo.row_ind();
+	// g.colInd->cdata() = csrcoo.col_ind();
 
 	///Now we need to orient the graph
 	Timer total_timer;
@@ -240,6 +259,10 @@ int main(int argc, char** argv)
 
 
 	}
+
+	// cudaFreeHost(rp);
+	// cudaFreeHost(ri);
+	// cudaFreeHost(ci);
 
 	double time_init = t.elapsed();
 	Log(info, "Preprocess time: %f s", time_init);
@@ -632,11 +655,7 @@ int main(int argc, char** argv)
 		// else
 		{
 
-
-
 			//read the nCr values, to be saved in (Constant or global or )
-
-
 
 			graph::SingleGPU_Kclique<uint> mohaclique(config.deviceId, *gd);
 
@@ -648,9 +667,9 @@ int main(int argc, char** argv)
 				{
 					Timer t;
 					if (config.processBy == ByNode)
-						mohaclique.findKclqueIncremental_node_async(config.k, *gd, config.processElement);
+						mohaclique.findKclqueIncremental_node_binary_async(config.k, *gd, config.processElement);
 					else if (config.processBy == ByEdge)
-						mohaclique.findKclqueIncremental_edge_async(config.k, *gd, config.processElement);
+						mohaclique.findKclqueIncremental_edge_binary_async(config.k, *gd, config.processElement);
 					mohaclique.sync();
 					double time = t.elapsed();
 					Log(info, "count time %f s", time);
@@ -659,7 +678,6 @@ int main(int argc, char** argv)
 
 				//k++;
 			}
-
 
 
 		}
