@@ -27,32 +27,19 @@ namespace graph
 			name = "Unknown";
 		}
 
-		void initialize(std::string s, AllocationTypeEnum at, uint size, int devId, bool cpu_data=true, bool pinned=false)
+		void initialize(std::string s, AllocationTypeEnum at, uint size, int devId)
 		{
 			N = size;
 			name = s;
 			_at = at;
 			_deviceId = devId;
-			_cpu_data = cpu_data;
-			_pinned = pinned;
 			CUDA_RUNTIME(cudaSetDevice(_deviceId));
 			CUDA_RUNTIME(cudaStreamCreate(&_stream));
 
 			switch (at)
 			{
 			case gpu:
-
-				if(_cpu_data)
-				{
-					if(_pinned)
-					{
-						cudaMallocHost((void**)&cpu_data, size * sizeof(T));
-					}
-					else
-					{
-						cpu_data = (T*)malloc(size * sizeof(T));
-					}
-				}
+				cpu_data = (T*)malloc(size * sizeof(T));
 				CUDA_RUNTIME(cudaMalloc(&gpu_data, size * sizeof(T)));
 				break;
 			case unified:
@@ -99,7 +86,7 @@ namespace graph
 
 		GPUArray(std::string s, AllocationTypeEnum at, uint size, int devId)
 		{
-			initialize(s, at, size, devId, cpu_data, pinned);
+			initialize(s, at, size, devId);
 		}
 
 		GPUArray(std::string s, AllocationTypeEnum at) {
@@ -119,35 +106,15 @@ namespace graph
 		}
 		void freeCPU()
 		{
-			if(_cpu_data)
-			{
-				if(_pinned)
-				{
-					cudaFreeHost(cpu_data);
-				}
-				else
-				{
-					delete cpu_data;
-				}
-			}
+			delete cpu_data;
 		}
 
-		void allocate_cpu(uint size, bool pinned=false)
+		void allocate_cpu(uint size)
 		{
-
-			_pinned = pinned;
-
 			if (_at == AllocationTypeEnum::cpuonly)
 			{
 				N = size;
-				if(_pinned)
-				{
-					cudaMallocHost((void**)&cpu_data, size * sizeof(T));
-				}
-				else
-				{
-					cpu_data = (T*)malloc(size * sizeof(T));
-				}
+				cpu_data = (T*)malloc(size * sizeof(T));
 			}
 			else if (_at == AllocationTypeEnum::unified)
 			{
@@ -346,9 +313,6 @@ namespace graph
 		cudaStream_t _stream;
 		int _deviceId;
 		bool freed = false;
-
-		bool _cpu_data;
-		bool _pinned;
 
 	};
 }

@@ -1325,8 +1325,6 @@ namespace graph
             // threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 1);
 
             reduce_part<T>(partMask, threadCount);
-<<<<<<< HEAD
-=======
 
             return threadCount;
         }
@@ -1404,7 +1402,6 @@ namespace graph
             // threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 1);
 
             //reduce_part<T>(partMask, threadCount);
->>>>>>> master
 
             return threadCount;
         }
@@ -1416,11 +1413,8 @@ namespace graph
 
 
 
-<<<<<<< HEAD
-=======
 
 
->>>>>>> master
     template <typename T, uint CPARTSIZE = 32, typename K=char>
     __device__ __forceinline__ uint64 warp_sorted_count_and_set_binary3(const T* const A, //!< [in] array A
         const size_t aSz, //!< [in] the number of elements in A

@@ -538,7 +538,7 @@ namespace graph
 						// }
 						// else if (level <= 32)
 						{
-							execKernel((kernel_partition_level_next<T, PeelT, 128, 32>), grid_warp_size, block_size, dev_, false,
+							execKernel((kernel_partition_level_next<T, PeelT, 256, 32>), grid_warp_size, block_size, dev_, false,
 								g,
 								level, processed.gdata(), nodeDegree.gdata(),
 								current_q.device_queue->gdata()[0],
