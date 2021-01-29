@@ -10,6 +10,7 @@ __global__ void
 sgm_kernel_central_node_base_binary(
 	uint64* counter,
 	const graph::COOCSRGraph_d<T> g,
+	const graph::GraphQueue_d<T, bool>  current,
 	T* current_level,
 	T* levelStats,
 	T* adj_enc
@@ -46,12 +47,12 @@ sgm_kernel_central_node_base_binary(
 	}
 	__syncthreads();
 
-	for (unsigned long long i = blockIdx.x; i < g.numNodes; i += gridDim.x)
+	for (unsigned long long i = blockIdx.x; i < (unsigned long long) current.count[0]; i += gridDim.x)
 	{
 		//block things
 		if (threadIdx.x == 0)
 		{
-			T src = i;
+			T src = current.queue[i];
 			srcStart = g.rowPtr[src];
 			srcLen = g.rowPtr[src + 1] - srcStart;
 
