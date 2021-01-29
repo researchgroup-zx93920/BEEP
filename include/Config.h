@@ -12,6 +12,7 @@ struct Config {
 
     const char* srcGraph;
     const char* dstGraph; //for conversion
+    const char* patGraph; //for subgraph matching
     MAINTASK mt;
     bool printStats;
     int deviceId;
@@ -58,6 +59,9 @@ static MAINTASK parseMainTask(const char* s)
     if (strcmp(s, "cd") == 0)
         return CROSSDECOMP;
 
+    if (strcmp(s, "sgm") == 0)
+        return GRAPH_MATCH;
+
     fprintf(stderr, "Unrecognized -mt option (Main TASK): %s\n", s);
     exit(0);
 }
@@ -74,6 +78,7 @@ static const char* asString(MAINTASK mt) {
     case KTRUSS:            return "ktruss";
     case KCLIQUE:            return "kclique";
     case CROSSDECOMP:   return "cd";
+    case GRAPH_MATCH:   return "sgm";
 
     default:
         fprintf(stderr, "Unrecognized main task\n");
@@ -208,6 +213,7 @@ static void usage() {
         "\nOptions:"
         "\n    -g <Src graph FileName>       Name of file with input graph (default = )"
         "\n    -r <Dst graph FileName>       Name of file with dst graph only for conversion (default = )"
+        "\n    -t <Pattern graph filename>   Name of file with template/pattern graph only for subgraph matching"
         "\n    -d <Device Id>                      GPU Device Id (default = 0)"
         "\n    -m <MainTask>     Name of the task to perform (default = TC)"
         "\n    -x                   Print Graph Stats         "
@@ -226,6 +232,7 @@ static Config parseArgs(int argc, char** argv) {
     Config config;
     config.srcGraph = "D:\\graphs\\as-Skitter2.bel";
     config.dstGraph = "D:\\graphs\\as-Skitter2.bel";
+    config.patGraph = "D:\\graphs\\as-Skitter2.bel";
     config.deviceId = 0;
     config.mt = KCLIQUE;
     config.printStats = false;
@@ -241,10 +248,11 @@ static Config parseArgs(int argc, char** argv) {
 
     printf("parsing configuration .... \n");
 
-    while ((opt = getopt(argc, argv, "g:r:d:m:x:o:a:k:h:v:s:p:e:")) >= 0) {
+    while ((opt = getopt(argc, argv, "g:r:t:d:m:x:o:a:k:h:v:s:p:e:")) >= 0) {
         switch (opt) {
         case 'g': config.srcGraph = optarg;                                break;
         case 'r': config.dstGraph = optarg;                                break;
+        case 't': config.patGraph = optarg;
         case 'd': config.deviceId = atoi(optarg);                           break;
         case 'm': config.mt = parseMainTask(optarg);                       break;
         case 'x': config.printStats = true;                                 break;
@@ -268,6 +276,7 @@ static void printConfig(Config config)
 {
     printf("    Graph: %s\n", config.srcGraph);
     printf("    DST Graph: %s\n", config.dstGraph);
+    printf("    Pattern Graph: %s\n", config.patGraph);
     printf("    Device Id = %u\n", config.deviceId);
     printf("    Allocation = %s\n", asString(config.allocation));
     printf("    Main Task = %s\n", asString(config.mt));

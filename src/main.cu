@@ -38,6 +38,7 @@
 #include "../include/Config.h"
 #include "../include/ScanLarge.cuh"
 
+#include "../subgraph_matching/subgraph_matching.cuh"
 
 using namespace std;
 //#define TriListConstruct
@@ -752,6 +753,41 @@ int main(int argc, char** argv)
 #endif
 
 
+	}
+
+	if (config.mt == GRAPH_MATCH)
+	{
+		// Read Template graph from file
+		graph::EdgeListFile patFile(config.patGraph);
+		std::vector<EdgeTy<uint>> patEdges;
+		std::vector<EdgeTy<uint>> patFileEdges;
+
+		while (patFile.get_edges(patFileEdges, 100)) {
+			patEdges.insert(patEdges.end(), patFileEdges.begin(), patFileEdges.end());
+		}
+
+		graph::CSRCOO<uint> patCsrcoo = graph::CSRCOO<uint>::from_edgelist(patEdges);
+		graph::COOCSRGraph<uint> patG;
+		patG.capacity = patCsrcoo.nnz();
+		patG.numEdges = patCsrcoo.nnz();
+		patG.numNodes = patCsrcoo.num_rows();
+
+		patG.rowPtr = new graph::GPUArray<uint>("Row pointer", AllocationTypeEnum::cpuonly);
+		patG.rowInd = new graph::GPUArray<uint>("Src index", AllocationTypeEnum::cpuonly);
+		patG.colInd = new graph::GPUArray<uint>("Dst index", AllocationTypeEnum::cpuonly);
+
+		patG.rowPtr->cdata() = patCsrcoo.row_ptr();
+		patG.rowInd->cdata() = patCsrcoo.row_ind();
+		patG.colInd->cdata() = patCsrcoo.col_ind();
+
+		// Initialise subgraph matcher class
+		graph::SG_Match<uint>* sgm = new graph::SG_Match<uint>(config.deviceId);
+		
+		// Process template and count subgraphs
+		sgm->run(*gd, patG);
+
+		// Clean up
+		//delete sgm;
 	}
 
 #pragma region MyRegion
