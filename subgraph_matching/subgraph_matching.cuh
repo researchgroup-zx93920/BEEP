@@ -5,6 +5,15 @@
 
 namespace graph
 {
+    
+    // MAXN definition needed by NAUTY to allow static allocation
+    // Set to maximum number of nodes in the template graph
+    // DEPTH declared in sgm_kernels.cuh
+    #define MAXN DEPTH 
+
+    // Needs to be included in namespace graph to avoid name conflict
+    #include "../nauty/nauty.h"
+
     /*******************
     * CLASS DEFINITION *
     *******************/
@@ -20,7 +29,11 @@ namespace graph
         // Processed query graphs
         GPUArray<T>* query_sequence;
         GPUArray<uint>* query_edges;
-        GPUArray<uint>* query_edge_ptr;        
+        GPUArray<uint>* query_edge_ptr;
+        GPUArray<uint>* sym_nodes;
+        GPUArray<uint>* sym_nodes_ptr;
+        
+        uint min_degree, max_degree;
 
         // Queues
         graph::GraphQueue<T, bool> bucket_q, current_q;
@@ -51,12 +64,12 @@ namespace graph
 
 				long grid_size = (node_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
 				execKernel((filter_window<T, T>), grid_size, BLOCK_SIZE, dev_, false,
-					nodeDegree.gdata(), node_num, bucket.mark.gdata(), level, bucket_level_end_ + KCL_NODE_LEVEL_SKIP_SIZE);
+					nodeDegree.gdata(), node_num, bucket.mark.gdata(), level, bucket_level_end_ + span);
 
 				multi++;
 
 				bucket.count.gdata()[0] = CUBSelect(asc.gdata(), bucket.queue.gdata(), bucket.mark.gdata(), node_num, dev_);
-				bucket_level_end_ += KCL_NODE_LEVEL_SKIP_SIZE;
+				bucket_level_end_ += span;
 			}
 			// SCAN the window.
 			if (bucket.count.gdata()[0] != 0)
@@ -83,6 +96,11 @@ namespace graph
             query_sequence = new GPUArray<T>("Query Sequence", alloc_);
             query_edges = new GPUArray<uint>("Query edges", alloc_);
             query_edge_ptr = new GPUArray<uint>("Query edge ptr", alloc_); 
+            sym_nodes = new GPUArray<uint>("Symmetrical nodes", alloc_);
+            sym_nodes_ptr = new GPUArray<uint>("Symmetrical node pointer", alloc_);
+
+            max_degree = 0;
+            min_degree = INT_MAX;
         }
 
         SG_Match(): SG_Match(0) {}
@@ -97,6 +115,12 @@ namespace graph
 
             query_edge_ptr->freeCPU();
             delete query_edge_ptr;
+
+            sym_nodes->freeCPU();
+            delete sym_nodes;
+
+            sym_nodes_ptr->freeCPU();
+            delete sym_nodes_ptr;
         }
 
         void run(graph::COOCSRGraph_d<T>& dataGraph, graph::COOCSRGraph<T>& patGraph)
@@ -126,6 +150,7 @@ namespace graph
     protected:
         // Function declarations. Definitions outside class.
         void preprocess_query(graph::COOCSRGraph<T>& patGraph);
+        void detect_symmetry(graph::COOCSRGraph<T>& graph, int orbits[MAXN]);
         void initialize_queues(graph::COOCSRGraph_d<T>& dataGraph);
         void count_subgraphs(graph::COOCSRGraph_d<T>& dataGraph);
     };
@@ -138,32 +163,49 @@ namespace graph
     template<typename T>
     void SG_Match<T>::preprocess_query(graph::COOCSRGraph<T>& query)
     {
-        // Allocate and initialize sequence array, tree and non-tree edge arrays
+        // Allocate and initialize arrays
         query_sequence->allocate_cpu(query.numNodes);
         query_edges->allocate_cpu(query.numEdges);
         query_edge_ptr->allocate_cpu(query.numNodes + 1);
+        
+        sym_nodes->allocate_cpu(query.numNodes * (query.numNodes - 1) / 2);
+        sym_nodes_ptr->allocate_cpu(query.numNodes + 1);
 
         query_sequence->setAll(0, false);
         query_edges->setAll(0, false);
         query_edge_ptr->setAll(0, false);
+        
+        sym_nodes->setAll(0, false);
+        sym_nodes_ptr->setAll(0, false);
 
         // Initialise "Neighborhood Encoding" for query graph
         // For unlabeled graph = degree (Current implementation)
         uint* degree = new uint[query.numNodes];
+        for (int i = 0; i < query.numNodes; i++) {
+            degree[i] = query.rowPtr->cdata()[i+1] - query.rowPtr->cdata()[i];
+            if ( degree[i] > max_degree ) max_degree = degree[i];
+            if ( degree[i] < min_degree ) min_degree = degree[i]; 
+        }
            
+        // Detect symmetrical nodes in query graph
+        int orbits[MAXN];
+        detect_symmetry(query, orbits);
+        
         // Generate Query node sequence based on "Maxmimum Likelihood Estimation" (MLE)
         // First look for node with highest node-mapping-degree d_M 
         //      (i.e., degree with nodes already in query_sequence)
-        // Nodes with same d_M are sorted with their likelihood P_f
-        //      (This computation is ignored here, check VF3 for details)
+        // Nodes with same d_M are sorted with the highest symmetrical degree s_M
+        //      (i.e., most number of symmetrical nodes already in the sequence)
         // Nodes with same d_M and p_f are sorted with their degree
         //
         // These conditions can be combined into one as follows:
-        //      d_M * max_degree + node_degree
+        //      d_M * num_nodes^2 + s_M * num_nodes + node_degree
 
-        // Initialise d_M with 0 for all nodes
+        // Initialise d_M and s_M with 0 for all nodes
         int* d_M = new int[query.numNodes];
+        int* s_M = new int[query.numNodes];
         memset(d_M, 0, query.numNodes * sizeof(int));
+        memset(s_M, 0, query.numNodes * sizeof(int));
 
         // For ith node in the query sequence
         for ( int i = 0; i < query.numNodes; i++ ) {
@@ -173,7 +215,7 @@ namespace graph
             // Traverse all nodes to find ml and idx
             for ( int j = 0; j < query.numNodes; j++ ) {
                 if (d_M[j] >= 0) {  // d_M = -1 denotes node already in sequence
-                    int likelihood = d_M[j] * query.numNodes + degree[j];
+                    uint likelihood = d_M[j] * query.numNodes * query.numNodes + s_M[j] * query.numNodes + degree[j];
                     if ( likelihood > ml) {
                         ml = likelihood;
                         idx = j;
@@ -184,11 +226,19 @@ namespace graph
             // Append node to sequence
             query_sequence->cdata()[i] = idx;
             
-            // Mark idx as done in d_M
+            // Mark idx as done in d_M and s_M
             d_M[idx] = -1;
+            s_M[idx] = -1;
+
+            // Update d_M of other nodes
             for ( int j = query.rowPtr->cdata()[idx]; j < query.rowPtr->cdata()[idx+1]; j++ ) {
                 uint neighbor = query.colInd->cdata()[j];
                 if ( d_M[neighbor] != -1 ) d_M[neighbor]++;
+            }
+
+            // Update s_M of other nodes
+            for (int j = 0; j < query.numNodes; j++) {
+                if (orbits[j] == orbits[idx] && s_M[j] != -1) s_M[j]++;
             }
 
             // Populate query edges
@@ -204,13 +254,22 @@ namespace graph
                     }
                 }
             }
+
+            // Populate symmetrical nodes
+            sym_nodes_ptr->cdata()[i+1] = sym_nodes_ptr->cdata()[i];
+            
+            for ( int j = 0; j < i; j++ ) {
+                if ( orbits[query_sequence->cdata()[j]] == orbits[idx] ) {
+                    sym_nodes->cdata()[sym_nodes_ptr->cdata()[i + 1]++] = j;
+                }
+            }
         }
         
         // Clean Up
         delete[] d_M;
+        delete[] s_M;
         delete[] degree;
 
-        /*
         // Print statements to check results.
         printf("Node Sequence:\n");
         for (int i = 0; i < query.numNodes; i++) {
@@ -225,7 +284,44 @@ namespace graph
             }
             printf("\n");
         }
-        */
+
+        printf("Orbits (as reported by NAUTY): ");
+        for (int i = 0; i < query.numNodes; i++) {
+            printf("%d, ", orbits[i]);
+        }
+        printf("\n");
+
+        printf("Symmetrical nodes:\n");
+        for (int i = 0; i < query.numNodes; i++) {
+            printf("i: %d\t", i);
+            for (int j = sym_nodes_ptr->cdata()[i]; j < sym_nodes_ptr->cdata()[i+1]; j++ ) {
+                printf("%d,", sym_nodes->cdata()[j]);
+            }
+            printf("\n");
+        }
+    }
+
+    template<typename T>
+    void SG_Match<T>::detect_symmetry(graph::COOCSRGraph<T>& patGraph, int orbits[MAXN])
+    {
+        // Define required variables for NAUTY
+        graph g[MAXN];
+        int lab[MAXN], ptn[MAXN];
+        static DEFAULTOPTIONS_GRAPH(opt);
+        statsblk stats;
+        int m = 1;
+        int n = patGraph.numNodes;
+
+        // Populate graph
+        EMPTYGRAPH(g, m, n);
+        for (int i = 0; i < patGraph.numNodes; i++) {
+            for (int j = patGraph.rowPtr->cdata()[i]; j < patGraph.rowPtr->cdata()[i+1]; j++) {
+                ADDONEEDGE(g, i, patGraph.colInd->cdata()[j], m);
+            }
+        }
+
+        // Call NAUTY to get orbit
+        densenauty(g, lab, ptn, orbits, &opt, &stats, m, n, NULL);
     }
 
     template<typename T>
@@ -248,7 +344,7 @@ namespace graph
     {
         // Initialise Kernel Dims
         const auto block_size = 128;
-        const T partitionSize = 4;
+        const T partitionSize = 8;
         const T numPartitions = block_size / partitionSize;
         const uint dv = 32;
 
@@ -281,10 +377,12 @@ namespace graph
         cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM), sizeof(CBPSM));        
         cudaMemcpyToSymbol(QEDGE, &(query_edges->cdata()[0]), query_edges->N * sizeof(QEDGE[0]));
         cudaMemcpyToSymbol(QEDGE_PTR, &(query_edge_ptr->cdata()[0]), query_edge_ptr->N * sizeof(QEDGE_PTR[0]));
+        cudaMemcpyToSymbol(SYMNODE, &(sym_nodes->cdata()[0]), sym_nodes->N * sizeof(SYMNODE[0]));
+        cudaMemcpyToSymbol(SYMNODE_PTR, &(sym_nodes_ptr->cdata()[0]), sym_nodes_ptr->N * sizeof(SYMNODE_PTR[0]));
 
         // Initialise Queueing
         T todo = dataGraph.numNodes;
-        T span = 4096;
+        T span = 8192;
         T bucket_level_end_ = 0;
         T level = 0;
 
@@ -300,9 +398,17 @@ namespace graph
         
                 // Array Sizes
                 uint maxDeg = level + span < maxDegree.gdata()[0] ? level + span : maxDegree.gdata()[0];
+                uint64 numBlock = num_SMs * conc_blocks_per_SM;
+                bool persistant = true;
+                if ( current_q.count.gdata()[0] < num_SMs * conc_blocks_per_SM ) 
+                {
+                    numBlock = current_q.count.gdata()[0];
+                    persistant = false;
+                }
+
                 uint num_divs = (maxDeg + dv - 1) / dv;
-                const uint64 level_size = num_SMs * conc_blocks_per_SM * numPartitions * DEPTH * num_divs;
-                const uint64 encode_size = num_SMs * conc_blocks_per_SM * maxDeg * num_divs;
+                uint64 level_size = numBlock * numPartitions * DEPTH * num_divs;
+                uint64 encode_size = numBlock * maxDeg * num_divs;
                 //printf("Level Size = %llu, Encode Size = %llu\n", level_size, encode_size);
                 GPUArray<T> current_level("Temp level Counter", unified, level_size, dev_);
                 GPUArray<T> node_be("Temp level Counter", unified, encode_size, dev_);
@@ -315,20 +421,29 @@ namespace graph
 
                 // Kernel Launch
                 auto grid_block_size = dataGraph.numNodes;
-                execKernel((sgm_kernel_central_node_base_binary<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
-                    counter.gdata(),
-                    dataGraph,
-                    current_q.device_queue->gdata()[0],
-                    current_level.gdata(),
-                    d_bitmap_states.gdata(), node_be.gdata());
-
+                if (persistant) {
+                    execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
+                        counter.gdata(),
+                        dataGraph,
+                        current_q.device_queue->gdata()[0],
+                        current_level.gdata(),
+                        d_bitmap_states.gdata(), node_be.gdata());
+                }
+                else {
+                    execKernel((sgm_kernel_central_node_base_binary<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
+                        counter.gdata(),
+                        dataGraph,
+                        current_q.device_queue->gdata()[0],
+                        current_level.gdata(),
+                        node_be.gdata());
+                }
                 
                 // Cleanup
                 current_level.freeGPU();
                 node_be.freeGPU();
 
                 // Print bucket stats:
-                printf("Bucket levels: %d to %d, nodes: %d, Counter: %d\n", level, maxDeg, current_q.count.gdata()[0], counter.gdata()[0]);
+                printf("Bucket levels: %u to %u, nodes: %u, Counter: %u\n", level, maxDeg, current_q.count.gdata()[0], counter.gdata()[0]);
             }
             level += span;
         }
