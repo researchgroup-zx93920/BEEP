@@ -443,14 +443,15 @@ namespace graph
                 node_be.freeGPU();
 
                 // Print bucket stats:
-                printf("Bucket levels: %u to %u, nodes: %u, Counter: %u\n", level, maxDeg, current_q.count.gdata()[0], counter.gdata()[0]);
+                std::cout << "Bucket levels: " << level << " to " << maxDeg
+                            << ", nodes: " << current_q.count.gdata()[0]
+                            << ", Counter: " << counter.gdata()[0] << std::endl;
             }
             level += span;
         }
+        std::cout << "------------- Counter = " << counter.gdata()[0] << "\n";
 
         counter.freeGPU();
-        d_bitmap_states.freeGPU();
-			
-        std::cout << "------------- Counter = " << counter.gdata()[0] << "\n";
+        d_bitmap_states.freeGPU();			
     }
 }

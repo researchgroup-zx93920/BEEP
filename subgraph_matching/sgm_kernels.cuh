@@ -193,13 +193,15 @@ sgm_kernel_central_node_base_binary(
 						level_index[wx][l[wx] - 3] = 0;
 						level_prev_index[wx][l[wx] - 1] = 0;
 
+						for (T k = lx; k < num_divs_local; k += CPARTSIZE) 
+							cl[k] &= unset_mask(level_prev_index[wx][l[wx]-2]-1, k);
 					}
 
 					while (l[wx] > 3 && level_index[wx][l[wx] - 3] >= level_count[wx][l[wx] - 3])
 					{
 						(l[wx])--;
 						for (T k = lx; k < num_divs_local; k += CPARTSIZE) 
-							cl[k] &= set_mask(level_prev_index[wx][l[wx]-1]-1, k);
+							cl[k] |= set_mask(level_prev_index[wx][l[wx]-1]-1, k);
 					}
 				}
 				__syncwarp(partMask);
@@ -406,7 +408,7 @@ sgm_kernel_central_node_base_binary_persistant(
 					{
 						(l[wx])--;
 						for (T k = lx; k < num_divs_local; k += CPARTSIZE)
-							cl[k] &= set_mask(level_prev_index[wx][l[wx]-1]-1, k);
+							cl[k] |= set_mask(level_prev_index[wx][l[wx]-1]-1, k);
 					}
 				}
 				__syncwarp(partMask);
