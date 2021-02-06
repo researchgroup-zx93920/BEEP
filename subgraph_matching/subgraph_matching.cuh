@@ -409,11 +409,14 @@ namespace graph
                 uint num_divs = (maxDeg + dv - 1) / dv;
                 uint64 level_size = numBlock * numPartitions * DEPTH * num_divs;
                 uint64 encode_size = numBlock * maxDeg * num_divs;
+                uint64 mask_size = numBlock * num_divs;
                 //printf("Level Size = %llu, Encode Size = %llu\n", level_size, encode_size);
                 GPUArray<T> current_level("Temp level Counter", unified, level_size, dev_);
                 GPUArray<T> node_be("Temp level Counter", unified, encode_size, dev_);
+                GPUArray<T> orient_mask("Orientation mask", unified, mask_size, dev_);
                 current_level.setAll(0, true);
                 node_be.setAll(0, true);
+                orient_mask.setAll(0, true);
 
                 // Constant memory
                 cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
@@ -427,7 +430,8 @@ namespace graph
                         dataGraph,
                         current_q.device_queue->gdata()[0],
                         current_level.gdata(),
-                        d_bitmap_states.gdata(), node_be.gdata());
+                        d_bitmap_states.gdata(), node_be.gdata(),
+                        orient_mask.gdata());
                 }
                 else {
                     execKernel((sgm_kernel_central_node_base_binary<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
@@ -435,12 +439,13 @@ namespace graph
                         dataGraph,
                         current_q.device_queue->gdata()[0],
                         current_level.gdata(),
-                        node_be.gdata());
+                        node_be.gdata(), orient_mask.gdata());
                 }
                 
                 // Cleanup
                 current_level.freeGPU();
                 node_be.freeGPU();
+                orient_mask.freeGPU();
 
                 // Print bucket stats:
                 std::cout << "Bucket levels: " << level << " to " << maxDeg
@@ -448,6 +453,7 @@ namespace graph
                             << ", Counter: " << counter.gdata()[0] << std::endl;
             }
             level += span;
+            if (current_q.count.gdata()[0] < num_SMs * conc_blocks_per_SM) span *= 2;
         }
         std::cout << "------------- Counter = " << counter.gdata()[0] << "\n";
 

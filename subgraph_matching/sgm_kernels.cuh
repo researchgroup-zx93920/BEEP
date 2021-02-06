@@ -10,17 +10,23 @@ __constant__ uint SYMNODE_PTR[DEPTH + 1];
 
 template<typename T>
 __device__ __forceinline__ T get_mask(T idx, T partition) {
-	return 0xFFFFFFFF >> (32 - (idx - partition * 32));
+	if (idx / 32 > partition) return 0xFFFFFFFF;
+	if (idx / 32 < partition) return 0;
+	return (0xFFFFFFFF >> (32 - (idx - partition * 32)));
 }
 
 template<typename T>
 __device__ __forceinline__ T unset_mask(T idx, T partition) {
-	return ~(1 << (idx - partition * 32));
+	// Use with BITWISE AND. All bits 1 except at idx.
+	if (idx / 32 == partition) return (~(1 << (idx - partition * 32)));
+	else return 0xFFFFFFFF;
 }
 
 template<typename T>
 __device__ __forceinline__ T set_mask(T idx, T partition) {
-	return 1 << (idx - partition * 32);
+	// Use with BITWISE OR. All bits 0 except at idx
+	if (idx / 32 == partition) return (1 << (idx - partition * 32));
+	else return 0;
 }
 
 
@@ -31,7 +37,8 @@ sgm_kernel_central_node_base_binary(
 	const graph::COOCSRGraph_d<T> g,
 	const graph::GraphQueue_d<T, bool>  current,
 	T* current_level,
-	T* adj_enc
+	T* adj_enc,
+	T* orient
 )
 {
 	//will be removed later
@@ -47,7 +54,7 @@ sgm_kernel_central_node_base_binary(
 	__shared__ T l[numPartitions];
 	__shared__ T src, srcStart, srcLen;
 
-	__shared__ T num_divs_local, encode_offset, *encode;
+	__shared__ T num_divs_local, encode_offset, *encode, *orient_mask;
 
 	//__shared__ T scl[896];
 	__syncthreads();
@@ -57,7 +64,7 @@ sgm_kernel_central_node_base_binary(
 		//block things
 		if (threadIdx.x == 0)
 		{
-			T src = current.queue[i];
+			src = current.queue[i];
 			srcStart = g.rowPtr[src];
 			srcLen = g.rowPtr[src + 1] - srcStart;
 
@@ -65,6 +72,9 @@ sgm_kernel_central_node_base_binary(
 
 			encode_offset = blockIdx.x * (MAXDEG * NUMDIVS);
 			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
+
+			T orient_offset = blockIdx.x * NUMDIVS;
+			orient_mask = &orient[orient_offset];
 		}
 		__syncthreads();
 
@@ -85,11 +95,22 @@ sgm_kernel_central_node_base_binary(
 		}
 		__syncthreads(); //Done encoding
 
+		// Compute orientation mask (If any level is symmetric to node 0)
+		for (T tid = threadIdx.x; tid < srcLen; tid += blockDim.x)
+		{
+			T dst = g.colInd[srcStart + tid];
+			T dstLen = g.rowPtr[dst + 1] - g.rowPtr[dst];
+			T mask = get_mask(srcLen, tid/32);
+			bool keep = (dstLen < srcLen || ((dstLen == srcLen) && src < dst));
+			orient_mask[tid / 32] = __ballot_sync(mask, keep);
+		}
+		__syncthreads();
+
 		for (T j = wx; j < srcLen; j += numPartitions)
 		{
+			if (SYMNODE_PTR[2] == 1 && (orient_mask[j/32] >> (j %32)) % 2 == 0) continue;
 			level_offset[wx] = blockIdx.x * (numPartitions * NUMDIVS * DEPTH);
 			T* cl = &current_level[level_offset[wx] + wx * (NUMDIVS * DEPTH)];
-
 
 			if (lx < DEPTH)
 			{
@@ -114,15 +135,16 @@ sgm_kernel_central_node_base_binary(
 				// Remove Redundancies
 				for (T sym_idx = SYMNODE_PTR[l[wx] - 1]; sym_idx < SYMNODE_PTR[l[wx]]; sym_idx++) {
 					if (SYMNODE[sym_idx] > 0) cl[num_divs_local + k] &= ~(cl[k] & get_mask(j, k));
+					else cl[num_divs_local + k] &= orient_mask[k];
 				}
-				warpCount += __popc(cl[num_divs_local + k]); 
+				warpCount += __popc(cl[num_divs_local + k]);
 			}
-			reduce_part<T>(partMask, warpCount);
+			// reduce_part<T>(partMask, warpCount);
 			// warpCount += __shfl_down_sync(partMask, warpCount, 16);
 			// warpCount += __shfl_down_sync(partMask, warpCount, 8);
-			// warpCount += __shfl_down_sync(partMask, warpCount, 4);
-			// warpCount += __shfl_down_sync(partMask, warpCount, 2);
-			// warpCount += __shfl_down_sync(partMask, warpCount, 1);
+			warpCount += __shfl_down_sync(partMask, warpCount, 4);
+			warpCount += __shfl_down_sync(partMask, warpCount, 2);
+			warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
 			if (lx == 0 && l[wx] == KCCOUNT)
 				sg_count[wx] += warpCount;
@@ -171,15 +193,16 @@ sgm_kernel_central_node_base_binary(
 					// Remove Redundancies
 					for (T sym_idx = SYMNODE_PTR[l[wx]]; sym_idx < SYMNODE_PTR[l[wx]+1]; sym_idx++) {
 						if (SYMNODE[sym_idx] > 0) to[k] &= ~(cl[(SYMNODE[sym_idx] - 1) * num_divs_local + k] & get_mask(level_prev_index[wx][SYMNODE[sym_idx]] - 1, k));
+						else to[k] &= orient_mask[k];
 					}
 					warpCount += __popc(to[k]);
 				}
-				reduce_part<T>(partMask, warpCount);
+				// reduce_part<T>(partMask, warpCount);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 16);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 8);
-				// warpCount += __shfl_down_sync(partMask, warpCount, 4);
-				// warpCount += __shfl_down_sync(partMask, warpCount, 2);
-				// warpCount += __shfl_down_sync(partMask, warpCount, 1);
+				warpCount += __shfl_down_sync(partMask, warpCount, 4);
+				warpCount += __shfl_down_sync(partMask, warpCount, 2);
+				warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
 				if (lx == 0)
 				{
@@ -225,7 +248,8 @@ sgm_kernel_central_node_base_binary_persistant(
 	const graph::GraphQueue_d<T, bool>  current,
 	T* current_level,
 	T* levelStats,
-	T* adj_enc
+	T* adj_enc,
+	T* orient
 )
 {
 	//will be removed later
@@ -242,7 +266,7 @@ sgm_kernel_central_node_base_binary_persistant(
 	__shared__ uint32_t  sm_id, levelPtr;
 	__shared__ T src, srcStart, srcLen;
 
-	__shared__ T num_divs_local, encode_offset, *encode;
+	__shared__ T num_divs_local, encode_offset, *encode, *orient_mask;
 
 	//__shared__ T scl[896];
 	__syncthreads();
@@ -264,7 +288,7 @@ sgm_kernel_central_node_base_binary_persistant(
 		//block things
 		if (threadIdx.x == 0)
 		{
-			T src = current.queue[i];
+			src = current.queue[i];
 			srcStart = g.rowPtr[src];
 			srcLen = g.rowPtr[src + 1] - srcStart;
 
@@ -272,6 +296,9 @@ sgm_kernel_central_node_base_binary_persistant(
 
 			encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
 			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
+
+			T orient_offset = (sm_id * CBPSM + levelPtr) * NUMDIVS;
+			orient_mask = &orient[orient_offset];
 		}
 		__syncthreads();
 
@@ -292,11 +319,22 @@ sgm_kernel_central_node_base_binary_persistant(
 		}
 		__syncthreads(); //Done encoding
 
+		// Compute orientation mask (If any level is symmetric to node 0)
+		for (T tid = threadIdx.x; tid < srcLen; tid += blockDim.x)
+		{
+			T dst = g.colInd[srcStart + tid];
+			T dstLen = g.rowPtr[dst + 1] - g.rowPtr[dst];
+			uint mask = get_mask(srcLen, tid/32);
+			bool keep = (dstLen < srcLen || ((dstLen == srcLen) && src < dst));
+			orient_mask[tid / 32] = __ballot_sync(mask, keep);
+		}
+		__syncthreads();
+
 		for (T j = wx; j < srcLen; j += numPartitions)
 		{
+			if (SYMNODE_PTR[2] == 1 && (orient_mask[j/32] >> (j %32)) % 2 == 0) continue;
 			level_offset[wx] = sm_id * CBPSM * (numPartitions * NUMDIVS * DEPTH) + levelPtr * (numPartitions * NUMDIVS * DEPTH);
 			T* cl = &current_level[level_offset[wx] + wx * (NUMDIVS * DEPTH)];
-
 
 			if (lx < DEPTH)
 			{
@@ -321,15 +359,16 @@ sgm_kernel_central_node_base_binary_persistant(
 				// Remove Redundancies
 				for (T sym_idx = SYMNODE_PTR[l[wx] - 1]; sym_idx < SYMNODE_PTR[l[wx]]; sym_idx++) {
 					if (SYMNODE[sym_idx] > 0) cl[num_divs_local + k] &= ~(cl[k] & get_mask(j, k));
+					else cl[num_divs_local + k] &= orient_mask[k];
 				}
 				warpCount += __popc(cl[num_divs_local + k]); 
 			}
-			reduce_part<T>(partMask, warpCount);
+			// reduce_part<T>(partMask, warpCount);
 			// warpCount += __shfl_down_sync(partMask, warpCount, 16);
 			// warpCount += __shfl_down_sync(partMask, warpCount, 8);
-			// warpCount += __shfl_down_sync(partMask, warpCount, 4);
-			// warpCount += __shfl_down_sync(partMask, warpCount, 2);
-			// warpCount += __shfl_down_sync(partMask, warpCount, 1);
+			warpCount += __shfl_down_sync(partMask, warpCount, 4);
+			warpCount += __shfl_down_sync(partMask, warpCount, 2);
+			warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
 			if (lx == 0 && l[wx] == KCCOUNT)
 				sg_count[wx] += warpCount;
@@ -378,15 +417,16 @@ sgm_kernel_central_node_base_binary_persistant(
 					// Remove Redundancies
 					for (T sym_idx = SYMNODE_PTR[l[wx]]; sym_idx < SYMNODE_PTR[l[wx]+1]; sym_idx++) {
 						if (SYMNODE[sym_idx] > 0) to[k] &= ~(cl[(SYMNODE[sym_idx] - 1) * num_divs_local + k] & get_mask(level_prev_index[wx][SYMNODE[sym_idx]] - 1, k));
+						else to[k] &= orient_mask[k];
 					}
 					warpCount += __popc(to[k]);
 				}
-				reduce_part<T>(partMask, warpCount);
+				// reduce_part<T>(partMask, warpCount);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 16);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 8);
-				// warpCount += __shfl_down_sync(partMask, warpCount, 4);
-				// warpCount += __shfl_down_sync(partMask, warpCount, 2);
-				// warpCount += __shfl_down_sync(partMask, warpCount, 1);
+				warpCount += __shfl_down_sync(partMask, warpCount, 4);
+				warpCount += __shfl_down_sync(partMask, warpCount, 2);
+				warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
 				if (lx == 0)
 				{
