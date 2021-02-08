@@ -30,6 +30,40 @@ __device__ __forceinline__ T set_mask(T idx, T partition) {
 }
 
 
+template <typename T>
+__global__ void
+remove_edges_connected_to_node(
+	const graph::COOCSRGraph_d<T> g,
+	const graph::GraphQueue_d<T, bool> node_queue,
+	bool* keep
+)
+{
+	const int partition = 1;
+	auto lx = threadIdx.x % partition;
+	auto wx = threadIdx.x / partition;
+	auto numPart = blockDim.x / partition;
+	for ( auto i = wx + blockIdx.x * numPart; i < node_queue.count[0]; i += numPart * gridDim.x )
+	{
+		T src = node_queue.queue[i];
+		T srcStart = g.rowPtr[src];
+		T srcEnd = g.rowPtr[src + 1];
+		for (T j = srcStart + lx; j < srcEnd; j+= partition)
+		{
+			keep[j] = false;
+			T dst = g.colInd[j];
+			for (T k = g.rowPtr[dst]; k < g.rowPtr[dst+1]; k++)
+			{
+				if (g.colInd[k] == src) 
+				{
+					keep[k] = false;
+					break;
+				}
+			}
+		}
+	}
+}
+
+
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __global__ void
 sgm_kernel_central_node_base_binary(

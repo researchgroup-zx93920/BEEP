@@ -33,7 +33,11 @@ namespace graph
         GPUArray<uint>* sym_nodes;
         GPUArray<uint>* sym_nodes_ptr;
         
-        uint min_degree, max_degree;
+        uint min_qDegree, max_qDegree;
+
+        // Processed data graph info
+        GPUArray<uint64> counter;
+        GPUArray<T> nodeDegree, max_dDegree;
 
         // Queues
         graph::GraphQueue<T, bool> bucket_q, current_q;
@@ -99,8 +103,14 @@ namespace graph
             sym_nodes = new GPUArray<uint>("Symmetrical nodes", alloc_);
             sym_nodes_ptr = new GPUArray<uint>("Symmetrical node pointer", alloc_);
 
-            max_degree = 0;
-            min_degree = INT_MAX;
+            counter.initialize("Temp level Counter", unified, 1, dev_);
+            max_dDegree.initialize("Temp Degree", unified, 1, dev_);
+
+            counter.setSingle(0, 0, false);
+            max_dDegree.setSingle(0, 0, false);
+            
+            max_qDegree = 0;
+            min_qDegree = INT_MAX;
         }
 
         SG_Match(): SG_Match(0) {}
@@ -131,15 +141,16 @@ namespace graph
             
             double time;
 
-            //Timer qp;
+            Timer qp;
             preprocess_query(patGraph);
-            //time = qp.elapsed();
-            //Log(info, "Template preprocessing Time: %f ms", time*1000);
+            time = qp.elapsed();
+            Log(info, "Template preprocessing Time: %f ms", time*1000);
 
-            //Timer dp;
-            initialize_queues(dataGraph);
-            //time = dp.elapsed();
-            //Log(info, "Data graph preprocessing time: %f ms", time*1000);
+            Timer dp;
+            initialize(dataGraph);
+            peel_data(dataGraph);
+            time = dp.elapsed();
+            Log(info, "Data graph preprocessing time: %f ms", time*1000);
             
             Timer t;
             count_subgraphs(dataGraph);
@@ -151,7 +162,8 @@ namespace graph
         // Function declarations. Definitions outside class.
         void preprocess_query(graph::COOCSRGraph<T>& patGraph);
         void detect_symmetry(graph::COOCSRGraph<T>& graph, int orbits[MAXN]);
-        void initialize_queues(graph::COOCSRGraph_d<T>& dataGraph);
+        void initialize(graph::COOCSRGraph_d<T>& dataGraph);
+        void peel_data(graph::COOCSRGraph_d<T>& dataGraph);
         void count_subgraphs(graph::COOCSRGraph_d<T>& dataGraph);
     };
 
@@ -183,8 +195,8 @@ namespace graph
         uint* degree = new uint[query.numNodes];
         for (int i = 0; i < query.numNodes; i++) {
             degree[i] = query.rowPtr->cdata()[i+1] - query.rowPtr->cdata()[i];
-            if ( degree[i] > max_degree ) max_degree = degree[i];
-            if ( degree[i] < min_degree ) min_degree = degree[i]; 
+            if ( degree[i] > max_qDegree ) max_qDegree = degree[i];
+            if ( degree[i] < min_qDegree ) min_qDegree = degree[i]; 
         }
            
         // Detect symmetrical nodes in query graph
@@ -325,7 +337,7 @@ namespace graph
     }
 
     template<typename T>
-    void SG_Match<T>::initialize_queues(graph::COOCSRGraph_d<T>& dataGraph)
+    void SG_Match<T>::initialize(graph::COOCSRGraph_d<T>& dataGraph)
     {
         const auto block_size = 256;
         bucket_q.Create(unified, dataGraph.numEdges, dev_);
@@ -337,6 +349,85 @@ namespace graph
 
         CUDA_RUNTIME(cudaGetLastError());
         cudaDeviceSynchronize();
+
+        // Compute Max Degree
+		nodeDegree.initialize("Edge Support", unified, dataGraph.numNodes, dev_);
+		uint dimGridNodes = (dataGraph.numNodes + block_size - 1) / block_size;
+        execKernel((getNodeDegree_kernel<T, block_size>), dimGridNodes, block_size, dev_, false, 
+                    nodeDegree.gdata(), dataGraph, max_dDegree.gdata());
+    }
+
+    template<typename T>
+    void SG_Match<T>::peel_data(graph::COOCSRGraph_d<T>& dataGraph)
+    {
+        // CubLarge
+        graph::CubLarge<uint> cl(dev_);
+        const uint block_size = 512;
+
+        // Initialise Arrays
+        GPUArray<bool> keep;
+        GPUArray<T> new_ptr;
+        GPUArray<T> new_adj; 
+
+        // Keep peeling till you can.
+        do
+        {
+            // Find nodes with degree < min_qDegree
+            T bucket_level_end_ = 1;
+            bucket_scan(nodeDegree, dataGraph.numNodes, 1, min_qDegree, bucket_level_end_, current_q, bucket_q);
+            
+            // Populate keep array
+            keep.initialize("Keep edges", unified, dataGraph.numEdges, dev_);
+            keep.setAll(true, true);
+            uint grid_size = (current_q.count.gdata()[0] - 1) / block_size + 1;
+
+            execKernel((remove_edges_connected_to_node<T>), grid_size, block_size, dev_, true,
+                        dataGraph, current_q.device_queue->gdata()[0], keep.gdata());
+
+            // Compute new number of edges per node
+            grid_size = (dataGraph.numEdges - 1) / block_size + 1;
+            execKernel((warp_detect_deleted_edges<T>), grid_size, block_size, dev_, true,
+                        dataGraph.rowPtr, dataGraph.numNodes, keep.gdata(), nodeDegree.gdata());
+
+            // Perform scan to get new row pointer array
+            new_ptr.initialize("New row pointer", unified, dataGraph.numNodes + 1, dev_);
+            new_ptr.setAll(0, false);
+
+            uint total = 0;
+            if (dataGraph.numNodes < INT_MAX) 
+                total = CUBScanExclusive<uint, uint>(nodeDegree.gdata(), new_ptr.gdata(), dataGraph.numNodes, dev_);
+            else
+                total = cl.ExclusiveSum(nodeDegree.gdata(), new_ptr.gdata(), dataGraph.numNodes);
+            new_ptr.gdata()[dataGraph.numNodes] = total;
+            
+            // Select marked edges from ColInd
+            new_adj.initialize("New column index", unified, total, dev_);
+            if (dataGraph.numEdges < INT_MAX)
+                CUBSelect(dataGraph.colInd, new_adj.gdata(), keep.gdata(), dataGraph.numEdges, dev_);
+            else
+                cl.Select(dataGraph.colInd, new_adj.gdata(), keep.gdata(), dataGraph.numEdges);
+            
+            // Update dataGraph
+            swap_ele(dataGraph.rowPtr, new_ptr.gdata());
+            swap_ele(dataGraph.colInd, new_adj.gdata());
+            printf("Edges removed: %d\n", dataGraph.numEdges - total);
+            dataGraph.numEdges = total;
+
+            // Print Stats
+            printf("Nodes filtered: %d\n", current_q.count.gdata()[0]);
+
+            // Clean up
+            keep.freeGPU();
+            new_ptr.freeGPU();
+            new_adj.freeGPU();
+        } while (current_q.count.gdata()[0] > 0);
+
+        // Recompute max degree
+        uint grid_size = (dataGraph.numNodes - 1) / block_size + 1;
+        execKernel((getNodeDegree_kernel<T, block_size>), grid_size, block_size, dev_, false, 
+                    nodeDegree.gdata(), dataGraph, max_dDegree.gdata());
+
+        printf("New max degree: %d\n", max_dDegree.gdata()[0]);
     }
 
     template<typename T>
@@ -354,20 +445,8 @@ namespace graph
         T conc_blocks_per_SM = context.GetConCBlocks(block_size);
 
         // Initialise Arrays
-        GPUArray<uint64> counter("Temp level Counter", unified, 1, dev_);
-        GPUArray<T> maxDegree("Temp Degree", unified, 1, dev_);
         GPUArray<T> d_bitmap_states("bmp bitmap stats", AllocationTypeEnum::gpu, num_SMs * conc_blocks_per_SM, dev_);
-
-        counter.setSingle(0, 0, true);
-        maxDegree.setSingle(0, 0, true);
         d_bitmap_states.setAll(0, true);
-
-        // Compute Max Degree
-        const int dimBlock = 256;
-        GPUArray<T> nodeDegree;
-		nodeDegree.initialize("Edge Support", unified, dataGraph.numNodes, dev_);
-		uint dimGridNodes = (dataGraph.numNodes + dimBlock - 1) / dimBlock;
-		execKernel((getNodeDegree_kernel<T, dimBlock>), dimGridNodes, dimBlock, dev_, false, nodeDegree.gdata(), dataGraph, maxDegree.gdata());
 
         // GPU Constant memory
         cudaMemcpyToSymbol(KCCOUNT, &(query_sequence->N), sizeof(KCCOUNT));
@@ -383,8 +462,15 @@ namespace graph
         // Initialise Queueing
         T todo = dataGraph.numNodes;
         T span = 8192;
-        T bucket_level_end_ = 0;
         T level = 0;
+        T bucket_level_end_ = level;
+
+        // Ignore starting nodes with degree < max_qDegree.
+        bucket_scan(nodeDegree, dataGraph.numNodes, level, max_qDegree, bucket_level_end_, current_q, bucket_q);
+        todo -= current_q.count.gdata()[0];
+        current_q.count.gdata()[0] = 0;
+        level = max_qDegree;
+        bucket_level_end_ = level;
 
         // Loop over different buckets
         while(todo > 0)
@@ -397,7 +483,7 @@ namespace graph
                 todo -= current_q.count.gdata()[0];
         
                 // Array Sizes
-                uint maxDeg = level + span < maxDegree.gdata()[0] ? level + span : maxDegree.gdata()[0];
+                uint maxDeg = level + span < max_dDegree.gdata()[0] ? level + span : max_dDegree.gdata()[0];
                 uint64 numBlock = num_SMs * conc_blocks_per_SM;
                 bool persistant = true;
                 if ( current_q.count.gdata()[0] < num_SMs * conc_blocks_per_SM ) 
@@ -453,7 +539,7 @@ namespace graph
                             << ", Counter: " << counter.gdata()[0] << std::endl;
             }
             level += span;
-            if (current_q.count.gdata()[0] < num_SMs * conc_blocks_per_SM) span *= 2;
+            if (current_q.count.gdata()[0] < num_SMs * conc_blocks_per_SM) span *= 4;
         }
         std::cout << "------------- Counter = " << counter.gdata()[0] << "\n";
 
