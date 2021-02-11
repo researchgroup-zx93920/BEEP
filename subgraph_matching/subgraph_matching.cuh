@@ -374,7 +374,7 @@ namespace graph
         {
             // Find nodes with degree < min_qDegree
             T bucket_level_end_ = 1;
-            bucket_scan(nodeDegree, dataGraph.numNodes, 1, min_qDegree, bucket_level_end_, current_q, bucket_q);
+            bucket_scan(nodeDegree, dataGraph.numNodes, 1, min_qDegree - 1, bucket_level_end_, current_q, bucket_q);
             
             // Populate keep array
             keep.initialize("Keep edges", unified, dataGraph.numEdges, dev_);
@@ -410,11 +410,11 @@ namespace graph
             // Update dataGraph
             swap_ele(dataGraph.rowPtr, new_ptr.gdata());
             swap_ele(dataGraph.colInd, new_adj.gdata());
-            printf("Edges removed: %d\n", dataGraph.numEdges - total);
+            // printf("Edges removed: %d\n", dataGraph.numEdges - total);
             dataGraph.numEdges = total;
 
             // Print Stats
-            printf("Nodes filtered: %d\n", current_q.count.gdata()[0]);
+            // printf("Nodes filtered: %d\n", current_q.count.gdata()[0]);
 
             // Clean up
             keep.freeGPU();
@@ -428,32 +428,38 @@ namespace graph
                     nodeDegree.gdata(), dataGraph, max_dDegree.gdata());
 
         printf("New max degree: %d\n", max_dDegree.gdata()[0]);
+
+        CUDA_RUNTIME(cudaGetLastError());
+        cudaDeviceSynchronize();
     }
 
     template<typename T>
     void SG_Match<T>::count_subgraphs(graph::COOCSRGraph_d<T>& dataGraph)
     {
         // Initialise Kernel Dims
-        const auto block_size = 128;
-        const T partitionSize = 8;
-        const T numPartitions = block_size / partitionSize;
+        const auto block_size_LD = 128; // Block size for low degree nodes
+        const T partitionSize_LD = 8;
+        const T numPartitions_LD = block_size_LD / partitionSize_LD;
+        const auto block_size_HD = 1024; // Block size for low degree nodes
+        const T partitionSize_HD = 32;
+        const T numPartitions_HD = block_size_HD / partitionSize_HD;
+        const T bound_LD = 2048;
+        const T bound_HD = 16384+8192+4096;
         const uint dv = 32;
 
         // CUDA Initialise, gather runtime Info.
         CUDAContext context;
         T num_SMs = context.num_SMs;
-        T conc_blocks_per_SM = context.GetConCBlocks(block_size);
+        T conc_blocks_per_SM_LD = context.GetConCBlocks(block_size_LD);
+        T conc_blocks_per_SM_HD = context.GetConCBlocks(block_size_HD);
 
         // Initialise Arrays
-        GPUArray<T> d_bitmap_states("bmp bitmap stats", AllocationTypeEnum::gpu, num_SMs * conc_blocks_per_SM, dev_);
+        GPUArray<T> d_bitmap_states("bmp bitmap stats", AllocationTypeEnum::gpu, num_SMs * conc_blocks_per_SM_LD, dev_);
         d_bitmap_states.setAll(0, true);
 
         // GPU Constant memory
         cudaMemcpyToSymbol(KCCOUNT, &(query_sequence->N), sizeof(KCCOUNT));
-        cudaMemcpyToSymbol(PARTSIZE, &partitionSize, sizeof(PARTSIZE));
-        cudaMemcpyToSymbol(NUMPART, &numPartitions, sizeof(NUMPART));
-        cudaMemcpyToSymbol(MAXLEVEL, &DEPTH, sizeof(MAXLEVEL));
-        cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM), sizeof(CBPSM));        
+        cudaMemcpyToSymbol(MAXLEVEL, &DEPTH, sizeof(MAXLEVEL));       
         cudaMemcpyToSymbol(QEDGE, &(query_edges->cdata()[0]), query_edges->N * sizeof(QEDGE[0]));
         cudaMemcpyToSymbol(QEDGE_PTR, &(query_edge_ptr->cdata()[0]), query_edge_ptr->N * sizeof(QEDGE_PTR[0]));
         cudaMemcpyToSymbol(SYMNODE, &(sym_nodes->cdata()[0]), sym_nodes->N * sizeof(SYMNODE[0]));
@@ -461,7 +467,7 @@ namespace graph
 
         // Initialise Queueing
         T todo = dataGraph.numNodes;
-        T span = 8192;
+        T span = bound_LD;
         T level = 0;
         T bucket_level_end_ = level;
 
@@ -484,16 +490,19 @@ namespace graph
         
                 // Array Sizes
                 uint maxDeg = level + span < max_dDegree.gdata()[0] ? level + span : max_dDegree.gdata()[0];
-                uint64 numBlock = num_SMs * conc_blocks_per_SM;
+                uint64 numBlock = level > bound_LD ?
+                                    num_SMs * conc_blocks_per_SM_HD :
+                                    num_SMs * conc_blocks_per_SM_LD;
                 bool persistant = true;
-                if ( current_q.count.gdata()[0] < num_SMs * conc_blocks_per_SM ) 
+                if ( current_q.count.gdata()[0] < numBlock ) 
                 {
                     numBlock = current_q.count.gdata()[0];
                     persistant = false;
                 }
 
                 uint num_divs = (maxDeg + dv - 1) / dv;
-                uint64 level_size = numBlock * numPartitions * DEPTH * num_divs;
+                uint64 level_size = numBlock * DEPTH * num_divs;
+                level_size *= (level > bound_LD ? numPartitions_HD : numPartitions_LD);
                 uint64 encode_size = numBlock * maxDeg * num_divs;
                 uint64 mask_size = numBlock * num_divs;
                 //printf("Level Size = %llu, Encode Size = %llu\n", level_size, encode_size);
@@ -505,13 +514,32 @@ namespace graph
                 orient_mask.setAll(0, true);
 
                 // Constant memory
+                if ( level > bound_LD) {
+                    cudaMemcpyToSymbol(NUMPART, &numPartitions_HD, sizeof(NUMPART));
+                    cudaMemcpyToSymbol(PARTSIZE, &partitionSize_HD, sizeof(PARTSIZE));
+                    cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM_HD), sizeof(CBPSM)); 
+                }
+                else {
+                    cudaMemcpyToSymbol(NUMPART, &numPartitions_LD, sizeof(NUMPART));
+                    cudaMemcpyToSymbol(PARTSIZE, &partitionSize_LD, sizeof(PARTSIZE));
+                    cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM_LD), sizeof(CBPSM)); 
+                }
                 cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
                 cudaMemcpyToSymbol(MAXDEG, &maxDeg, sizeof(MAXDEG));
 
                 // Kernel Launch
                 auto grid_block_size = dataGraph.numNodes;
-                if (persistant) {
-                    execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
+                if (level > bound_LD && persistant) {
+                    execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size_HD, partitionSize_HD>), grid_block_size, block_size_HD, dev_, false,
+                        counter.gdata(),
+                        dataGraph,
+                        current_q.device_queue->gdata()[0],
+                        current_level.gdata(),
+                        d_bitmap_states.gdata(), node_be.gdata(),
+                        orient_mask.gdata());
+                }
+                else if(persistant) {
+                    execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size_LD, partitionSize_LD>), grid_block_size, block_size_LD, dev_, false,
                         counter.gdata(),
                         dataGraph,
                         current_q.device_queue->gdata()[0],
@@ -520,7 +548,7 @@ namespace graph
                         orient_mask.gdata());
                 }
                 else {
-                    execKernel((sgm_kernel_central_node_base_binary<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
+                    execKernel((sgm_kernel_central_node_base_binary<T, block_size_HD, partitionSize_HD>), grid_block_size, block_size_HD, dev_, false,
                         counter.gdata(),
                         dataGraph,
                         current_q.device_queue->gdata()[0],
@@ -539,7 +567,7 @@ namespace graph
                             << ", Counter: " << counter.gdata()[0] << std::endl;
             }
             level += span;
-            if (current_q.count.gdata()[0] < num_SMs * conc_blocks_per_SM) span *= 4;
+            span = bound_HD - bound_LD;
         }
         std::cout << "------------- Counter = " << counter.gdata()[0] << "\n";
 

@@ -29,6 +29,11 @@ __device__ __forceinline__ T set_mask(T idx, T partition) {
 	else return 0;
 }
 
+template<typename T, uint CPARTSIZE>
+__device__ __forceinline__ void reduce_part(T partMask, uint64& warpCount) {
+	for (int i = CPARTSIZE / 2; i >= 1; i /= 2) 
+		warpCount += __shfl_down_sync(partMask, warpCount, i);
+}
 
 template <typename T>
 __global__ void
@@ -173,12 +178,12 @@ sgm_kernel_central_node_base_binary(
 				}
 				warpCount += __popc(cl[num_divs_local + k]);
 			}
-			// reduce_part<T>(partMask, warpCount);
+			reduce_part<T, CPARTSIZE>(partMask, warpCount);
 			// warpCount += __shfl_down_sync(partMask, warpCount, 16);
 			// warpCount += __shfl_down_sync(partMask, warpCount, 8);
-			warpCount += __shfl_down_sync(partMask, warpCount, 4);
-			warpCount += __shfl_down_sync(partMask, warpCount, 2);
-			warpCount += __shfl_down_sync(partMask, warpCount, 1);
+			// warpCount += __shfl_down_sync(partMask, warpCount, 4);
+			// warpCount += __shfl_down_sync(partMask, warpCount, 2);
+			// warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
 			if (lx == 0 && l[wx] == KCCOUNT)
 				sg_count[wx] += warpCount;
@@ -231,12 +236,12 @@ sgm_kernel_central_node_base_binary(
 					}
 					warpCount += __popc(to[k]);
 				}
-				// reduce_part<T>(partMask, warpCount);
+				reduce_part<T, CPARTSIZE>(partMask, warpCount);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 16);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 8);
-				warpCount += __shfl_down_sync(partMask, warpCount, 4);
-				warpCount += __shfl_down_sync(partMask, warpCount, 2);
-				warpCount += __shfl_down_sync(partMask, warpCount, 1);
+				// warpCount += __shfl_down_sync(partMask, warpCount, 4);
+				// warpCount += __shfl_down_sync(partMask, warpCount, 2);
+				// warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
 				if (lx == 0)
 				{
@@ -250,14 +255,14 @@ sgm_kernel_central_node_base_binary(
 						level_index[wx][l[wx] - 3] = 0;
 						level_prev_index[wx][l[wx] - 1] = 0;
 
-						for (T k = lx; k < num_divs_local; k += CPARTSIZE) 
+						for (T k = lx; k < num_divs_local; k ++) 
 							cl[k] &= unset_mask(level_prev_index[wx][l[wx]-2]-1, k);
 					}
 
 					while (l[wx] > 3 && level_index[wx][l[wx] - 3] >= level_count[wx][l[wx] - 3])
 					{
 						(l[wx])--;
-						for (T k = lx; k < num_divs_local; k += CPARTSIZE) 
+						for (T k = lx; k < num_divs_local; k ++)
 							cl[k] |= set_mask(level_prev_index[wx][l[wx]-1]-1, k);
 					}
 				}
@@ -397,12 +402,12 @@ sgm_kernel_central_node_base_binary_persistant(
 				}
 				warpCount += __popc(cl[num_divs_local + k]); 
 			}
-			// reduce_part<T>(partMask, warpCount);
+			reduce_part<T, CPARTSIZE>(partMask, warpCount);
 			// warpCount += __shfl_down_sync(partMask, warpCount, 16);
 			// warpCount += __shfl_down_sync(partMask, warpCount, 8);
-			warpCount += __shfl_down_sync(partMask, warpCount, 4);
-			warpCount += __shfl_down_sync(partMask, warpCount, 2);
-			warpCount += __shfl_down_sync(partMask, warpCount, 1);
+			// warpCount += __shfl_down_sync(partMask, warpCount, 4);
+			// warpCount += __shfl_down_sync(partMask, warpCount, 2);
+			// warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
 			if (lx == 0 && l[wx] == KCCOUNT)
 				sg_count[wx] += warpCount;
@@ -455,12 +460,12 @@ sgm_kernel_central_node_base_binary_persistant(
 					}
 					warpCount += __popc(to[k]);
 				}
-				// reduce_part<T>(partMask, warpCount);
+				reduce_part<T, CPARTSIZE>(partMask, warpCount);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 16);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 8);
-				warpCount += __shfl_down_sync(partMask, warpCount, 4);
-				warpCount += __shfl_down_sync(partMask, warpCount, 2);
-				warpCount += __shfl_down_sync(partMask, warpCount, 1);
+				// warpCount += __shfl_down_sync(partMask, warpCount, 4);
+				// warpCount += __shfl_down_sync(partMask, warpCount, 2);
+				// warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
 				if (lx == 0)
 				{
@@ -474,14 +479,14 @@ sgm_kernel_central_node_base_binary_persistant(
 						level_index[wx][l[wx] - 3] = 0;
 						level_prev_index[wx][l[wx] - 1] = 0;
 
-						for (T k = lx; k < num_divs_local; k += CPARTSIZE) 
+						for (T k = lx; k < num_divs_local; k ++) 
 							cl[k] &= unset_mask(level_prev_index[wx][l[wx]-2]-1, k);
 					}
 
 					while (l[wx] > 3 && level_index[wx][l[wx] - 3] >= level_count[wx][l[wx] - 3])
 					{
 						(l[wx])--;
-						for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+						for (T k = lx; k < num_divs_local; k ++) 
 							cl[k] |= set_mask(level_prev_index[wx][l[wx]-1]-1, k);
 					}
 				}
