@@ -177,7 +177,7 @@ namespace graph
     {
         // Allocate and initialize arrays
         query_sequence->allocate_cpu(query.numNodes);
-        query_edges->allocate_cpu(query.numEdges);
+        query_edges->allocate_cpu(query.numEdges / 2);
         query_edge_ptr->allocate_cpu(query.numNodes + 1);
         
         sym_nodes->allocate_cpu(query.numNodes * (query.numNodes - 1) / 2);
@@ -362,7 +362,7 @@ namespace graph
     {
         // CubLarge
         graph::CubLarge<uint> cl(dev_);
-        const uint block_size = 512;
+        const uint block_size = 128;
 
         // Initialise Arrays
         GPUArray<bool> keep;
@@ -502,7 +502,7 @@ namespace graph
 
                 uint num_divs = (maxDeg + dv - 1) / dv;
                 uint64 level_size = numBlock * DEPTH * num_divs;
-                level_size *= (level > bound_LD ? numPartitions_HD : numPartitions_LD);
+                level_size *= (level > bound_LD || !persistant ? numPartitions_HD : numPartitions_LD);
                 uint64 encode_size = numBlock * maxDeg * num_divs;
                 uint64 mask_size = numBlock * num_divs;
                 //printf("Level Size = %llu, Encode Size = %llu\n", level_size, encode_size);
@@ -514,7 +514,7 @@ namespace graph
                 orient_mask.setAll(0, true);
 
                 // Constant memory
-                if ( level > bound_LD) {
+                if ( level > bound_LD || !persistant) {
                     cudaMemcpyToSymbol(NUMPART, &numPartitions_HD, sizeof(NUMPART));
                     cudaMemcpyToSymbol(PARTSIZE, &partitionSize_HD, sizeof(PARTSIZE));
                     cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM_HD), sizeof(CBPSM)); 
@@ -528,7 +528,7 @@ namespace graph
                 cudaMemcpyToSymbol(MAXDEG, &maxDeg, sizeof(MAXDEG));
 
                 // Kernel Launch
-                auto grid_block_size = dataGraph.numNodes;
+                auto grid_block_size = current_q.count.gdata()[0];
                 if (level > bound_LD && persistant) {
                     execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size_HD, partitionSize_HD>), grid_block_size, block_size_HD, dev_, false,
                         counter.gdata(),
