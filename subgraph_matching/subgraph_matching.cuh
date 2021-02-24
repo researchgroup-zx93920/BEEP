@@ -374,7 +374,7 @@ namespace graph
         {
             // Find nodes with degree < min_qDegree
             T bucket_level_end_ = 1;
-            bucket_scan(nodeDegree, dataGraph.numNodes, 1, min_qDegree, bucket_level_end_, current_q, bucket_q);
+            bucket_scan(nodeDegree, dataGraph.numNodes, 1, min_qDegree-1, bucket_level_end_, current_q, bucket_q);
             
             // Populate keep array
             keep.initialize("Keep edges", unified, dataGraph.numEdges, dev_);
@@ -410,11 +410,11 @@ namespace graph
             // Update dataGraph
             swap_ele(dataGraph.rowPtr, new_ptr.gdata());
             swap_ele(dataGraph.colInd, new_adj.gdata());
-            printf("Edges removed: %d\n", dataGraph.numEdges - total);
+            //printf("Edges removed: %d\n", dataGraph.numEdges - total);
             dataGraph.numEdges = total;
 
             // Print Stats
-            printf("Nodes filtered: %d\n", current_q.count.gdata()[0]);
+            //printf("Nodes filtered: %d\n", current_q.count.gdata()[0]);
 
             // Clean up
             keep.freeGPU();
@@ -434,8 +434,8 @@ namespace graph
     void SG_Match<T>::count_subgraphs(graph::COOCSRGraph_d<T>& dataGraph)
     {
         // Initialise Kernel Dims
-        const auto block_size = 128;
-        const T partitionSize = 8;
+        const auto block_size = 512;
+        const T partitionSize = 32;
         const T numPartitions = block_size / partitionSize;
         const uint dv = 32;
 
@@ -461,7 +461,7 @@ namespace graph
 
         // Initialise Queueing
         T todo = dataGraph.numNodes;
-        T span = 8192;
+        T span = 16384+4096;
         T level = 0;
         T bucket_level_end_ = level;
 
@@ -509,7 +509,7 @@ namespace graph
                 cudaMemcpyToSymbol(MAXDEG, &maxDeg, sizeof(MAXDEG));
 
                 // Kernel Launch
-                auto grid_block_size = dataGraph.numNodes;
+                auto grid_block_size = current_q.count.gdata()[0];
                 if (persistant) {
                     execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
                         counter.gdata(),
