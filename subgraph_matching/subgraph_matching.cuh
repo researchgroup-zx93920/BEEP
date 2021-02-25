@@ -177,7 +177,7 @@ namespace graph
     {
         // Allocate and initialize arrays
         query_sequence->allocate_cpu(query.numNodes);
-        query_edges->allocate_cpu(query.numEdges);
+        query_edges->allocate_cpu(query.numEdges / 2);
         query_edge_ptr->allocate_cpu(query.numNodes + 1);
         
         sym_nodes->allocate_cpu(query.numNodes * (query.numNodes - 1) / 2);
@@ -362,7 +362,7 @@ namespace graph
     {
         // CubLarge
         graph::CubLarge<uint> cl(dev_);
-        const uint block_size = 512;
+        const uint block_size = 128;
 
         // Initialise Arrays
         GPUArray<bool> keep;

@@ -88,15 +88,13 @@ sgm_kernel_central_node_base_binary(
 	__shared__ T level_count[numPartitions][DEPTH];
 	__shared__ T level_prev_index[numPartitions][DEPTH];
 
-	__shared__ T  level_offset[numPartitions];
 	__shared__ uint64 sg_count[numPartitions];
 	__shared__ T l[numPartitions];
 	__shared__ T src, srcStart, srcLen;
 
-	__shared__ T num_divs_local, encode_offset, *encode, *orient_mask;
+	__shared__ T num_divs_local, *level_offset, *encode, *orient_mask;
 
-	//__shared__ T scl[896];
-	__syncthreads();
+	__shared__ T to[BLOCK_DIM_X], newIndex[numPartitions];
 
 	for (unsigned long long i = blockIdx.x; i < (unsigned long long) current.count[0]; i += gridDim.x)
 	{
@@ -109,11 +107,13 @@ sgm_kernel_central_node_base_binary(
 
 			num_divs_local = (srcLen + 32 - 1) / 32;
 
-			encode_offset = blockIdx.x * (MAXDEG * NUMDIVS);
-			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
-
 			T orient_offset = blockIdx.x * NUMDIVS;
 			orient_mask = &orient[orient_offset];
+
+			T encode_offset = orient_offset * MAXDEG;
+			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
+
+			level_offset = &current_level[orient_offset * (numPartitions * DEPTH)];
 		}
 		__syncthreads();
 
@@ -148,14 +148,13 @@ sgm_kernel_central_node_base_binary(
 		for (T j = wx; j < srcLen; j += numPartitions)
 		{
 			if (SYMNODE_PTR[2] == 1 && (orient_mask[j/32] >> (j %32)) % 2 == 0) continue;
-			level_offset[wx] = blockIdx.x * (numPartitions * NUMDIVS * DEPTH);
-			T* cl = &current_level[level_offset[wx] + wx * (NUMDIVS * DEPTH)];
+			T* cl = level_offset + wx * (NUMDIVS * DEPTH);
 
-			if (lx < DEPTH)
+			for (T k = lx; k < DEPTH; k += CPARTSIZE)
 			{
-				level_count[wx][lx] = 0;
-				level_index[wx][lx] = 0;
-				level_prev_index[wx][lx] = 0;
+				level_count[wx][k] = 0;
+				level_index[wx][k] = 0;
+				level_prev_index[wx][k] = 0;
 			}
 			if (lx == 0)
 			{
@@ -185,56 +184,55 @@ sgm_kernel_central_node_base_binary(
 			// warpCount += __shfl_down_sync(partMask, warpCount, 2);
 			// warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
-			if (lx == 0 && l[wx] == KCCOUNT)
-				sg_count[wx] += warpCount;
-			else if (lx == 0 && KCCOUNT > 3 ) // && warpCount >= KCCOUNT - 2)
+			if (lx == 0)
 			{
-				level_count[wx][l[wx] - 3] = warpCount;
-				level_index[wx][l[wx] - 3] = 0;
-				level_prev_index[wx][1] = j + 1;
-				level_prev_index[wx][2] = 0;
+				if (l[wx] == KCCOUNT) sg_count[wx] += warpCount;
+				else {
+					level_count[wx][l[wx] - 3] = warpCount;
+					level_index[wx][l[wx] - 3] = 0;
+					level_prev_index[wx][1] = j + 1;
+					level_prev_index[wx][2] = 0;
+				}
 			}
 
 
-			__syncwarp(partMask);
 			while (level_count[wx][l[wx] - 3] > level_index[wx][l[wx] - 3])
 			{
-				//First Index
-				T* from = &(cl[num_divs_local * (l[wx] - 2)]);
-				T* to = &(cl[num_divs_local * (l[wx] - 1)]);
-				T maskBlock = level_prev_index[wx][l[wx] - 1] / 32;
-				T maskIndex = ~((1 << (level_prev_index[wx][l[wx] - 1] & 0x1F)) - 1);
-
-				T newIndex = __ffs(from[maskBlock] & maskIndex);
-				while (newIndex == 0)
-				{
-					maskIndex = 0xFFFFFFFF;
-					maskBlock++;
-					newIndex = __ffs(from[maskBlock] & maskIndex);
-				}
-				newIndex = 32 * maskBlock + newIndex - 1;
-
 				if (lx == 0)
 				{
-					level_prev_index[wx][l[wx] - 1] = newIndex + 1;
+					T* from = &(cl[num_divs_local * (l[wx] - 2)]);
+					T maskBlock = level_prev_index[wx][l[wx] - 1] / 32;
+					T maskIndex = ~((1 << (level_prev_index[wx][l[wx] - 1] & 0x1F)) - 1);
+
+					newIndex[wx] = __ffs(from[maskBlock] & maskIndex);
+					while (newIndex[wx] == 0)
+					{
+						maskIndex = 0xFFFFFFFF;
+						maskBlock++;
+						newIndex[wx] = __ffs(from[maskBlock] & maskIndex);
+					}
+					newIndex[wx] = 32 * maskBlock + newIndex[wx] - 1;
+
+					level_prev_index[wx][l[wx] - 1] = newIndex[wx] + 1;
 					level_index[wx][l[wx] - 3]++;
 				}
 
 				//Intersect
-				uint64 warpCount = 0;
+				warpCount = 0;
 				for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 				{
-					to[k] = cl[k] & unset_mask(newIndex, k);
+					to[threadIdx.x] = cl[k] & unset_mask(newIndex[wx], k);
 					// Compute Intersection
 					for (T q_idx = QEDGE_PTR[l[wx]] + 1; q_idx < QEDGE_PTR[l[wx]+1]; q_idx++) {
-						to[k] = to[k] & encode[(level_prev_index[wx][QEDGE[q_idx]] - 1) * num_divs_local + k]; 
+						to[threadIdx.x] &= encode[(level_prev_index[wx][QEDGE[q_idx]] - 1) * num_divs_local + k]; 
 					}
 					// Remove Redundancies
 					for (T sym_idx = SYMNODE_PTR[l[wx]]; sym_idx < SYMNODE_PTR[l[wx]+1]; sym_idx++) {
-						if (SYMNODE[sym_idx] > 0) to[k] &= ~(cl[(SYMNODE[sym_idx] - 1) * num_divs_local + k] & get_mask(level_prev_index[wx][SYMNODE[sym_idx]] - 1, k));
-						else to[k] &= orient_mask[k];
+						if (SYMNODE[sym_idx] > 0) to[threadIdx.x] &= ~(cl[(SYMNODE[sym_idx] - 1) * num_divs_local + k] & get_mask(level_prev_index[wx][SYMNODE[sym_idx]] - 1, k));
+						else to[threadIdx.x] &= orient_mask[k];
 					}
-					warpCount += __popc(to[k]);
+					warpCount += __popc(to[threadIdx.x]);
+					cl[(l[wx] - 1) * num_divs_local + k] = to[threadIdx.x];
 				}
 				reduce_part<T, CPARTSIZE>(partMask, warpCount);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 16);
@@ -243,6 +241,10 @@ sgm_kernel_central_node_base_binary(
 				// warpCount += __shfl_down_sync(partMask, warpCount, 2);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
+				if ( l[wx] + 1 < KCCOUNT) {
+					for (T k = lx; k < num_divs_local; k += CPARTSIZE) 
+						cl[k] &= unset_mask(level_prev_index[wx][l[wx]-1]-1, k);
+				}
 				if (lx == 0)
 				{
 					if (l[wx] + 1 == KCCOUNT) {
@@ -254,9 +256,6 @@ sgm_kernel_central_node_base_binary(
 						level_count[wx][l[wx] - 3] = warpCount;
 						level_index[wx][l[wx] - 3] = 0;
 						level_prev_index[wx][l[wx] - 1] = 0;
-
-						for (T k = lx; k < num_divs_local; k ++) 
-							cl[k] &= unset_mask(level_prev_index[wx][l[wx]-2]-1, k);
 					}
 
 					while (l[wx] > 3 && level_index[wx][l[wx] - 3] >= level_count[wx][l[wx] - 3])
@@ -273,9 +272,9 @@ sgm_kernel_central_node_base_binary(
 				atomicAdd(counter, sg_count[wx]);
 				//cpn[current.queue[i]] = sg_count[wx];
 			}
-
 			__syncwarp(partMask);
 		}
+		__syncthreads();
 	}
 }
 
@@ -299,26 +298,23 @@ sgm_kernel_central_node_base_binary_persistant(
 	__shared__ T level_count[numPartitions][DEPTH];
 	__shared__ T level_prev_index[numPartitions][DEPTH];
 
-	__shared__ T  level_offset[numPartitions];
 	__shared__ uint64 sg_count[numPartitions];
 	__shared__ T l[numPartitions];
 	__shared__ uint32_t  sm_id, levelPtr;
 	__shared__ T src, srcStart, srcLen;
 
-	__shared__ T num_divs_local, encode_offset, *encode, *orient_mask;
+	__shared__ T num_divs_local, *level_offset, *encode, *orient_mask;
 
-	//__shared__ T scl[896];
-	__syncthreads();
+	__shared__ T to[BLOCK_DIM_X], newIndex[numPartitions];
 
 	if (threadIdx.x == 0)
 	{
 		sm_id = __mysmid();
-		T temp = 0;
-		while (atomicCAS(&(levelStats[(sm_id * CBPSM) + temp]), 0, 1) != 0)
+		levelPtr = 0;
+		while (atomicCAS(&(levelStats[(sm_id * CBPSM) + levelPtr]), 0, 1) != 0)
 		{
-			temp++;
+			levelPtr++;
 		}
-		levelPtr = temp;
 	}
 	__syncthreads();
 
@@ -333,11 +329,13 @@ sgm_kernel_central_node_base_binary_persistant(
 
 			num_divs_local = (srcLen + 32 - 1) / 32;
 
-			encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
-			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
-
 			T orient_offset = (sm_id * CBPSM + levelPtr) * NUMDIVS;
 			orient_mask = &orient[orient_offset];
+
+			T encode_offset = orient_offset * MAXDEG;
+			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
+
+			level_offset = &current_level[orient_offset * (numPartitions * DEPTH)];
 		}
 		__syncthreads();
 
@@ -363,7 +361,7 @@ sgm_kernel_central_node_base_binary_persistant(
 		{
 			T dst = g.colInd[srcStart + tid];
 			T dstLen = g.rowPtr[dst + 1] - g.rowPtr[dst];
-			uint mask = get_mask(srcLen, tid/32);
+			T mask = get_mask(srcLen, tid/32);
 			bool keep = (dstLen < srcLen || ((dstLen == srcLen) && src < dst));
 			orient_mask[tid / 32] = __ballot_sync(mask, keep);
 		}
@@ -372,14 +370,13 @@ sgm_kernel_central_node_base_binary_persistant(
 		for (T j = wx; j < srcLen; j += numPartitions)
 		{
 			if (SYMNODE_PTR[2] == 1 && (orient_mask[j/32] >> (j %32)) % 2 == 0) continue;
-			level_offset[wx] = sm_id * CBPSM * (numPartitions * NUMDIVS * DEPTH) + levelPtr * (numPartitions * NUMDIVS * DEPTH);
-			T* cl = &current_level[level_offset[wx] + wx * (NUMDIVS * DEPTH)];
+			T* cl = level_offset + wx * (NUMDIVS * DEPTH);
 
-			if (lx < DEPTH)
+			for (T k = lx; k < DEPTH; k += CPARTSIZE)
 			{
-				level_count[wx][lx] = 0;
-				level_index[wx][lx] = 0;
-				level_prev_index[wx][lx] = 0;
+				level_count[wx][k] = 0;
+				level_index[wx][k] = 0;
+				level_prev_index[wx][k] = 0;
 			}
 			if (lx == 0)
 			{
@@ -409,56 +406,56 @@ sgm_kernel_central_node_base_binary_persistant(
 			// warpCount += __shfl_down_sync(partMask, warpCount, 2);
 			// warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
-			if (lx == 0 && l[wx] == KCCOUNT)
-				sg_count[wx] += warpCount;
-			else if (lx == 0 && KCCOUNT > 3 ) // && warpCount >= KCCOUNT - 2)
+			if (lx == 0)
 			{
-				level_count[wx][l[wx] - 3] = warpCount;
-				level_index[wx][l[wx] - 3] = 0;
-				level_prev_index[wx][1] = j + 1;
-				level_prev_index[wx][2] = 0;
+				if (l[wx] == KCCOUNT) sg_count[wx] += warpCount;
+				else {
+					level_count[wx][l[wx] - 3] = warpCount;
+					level_index[wx][l[wx] - 3] = 0;
+					level_prev_index[wx][1] = j + 1;
+					level_prev_index[wx][2] = 0;
+				}
 			}
 
 
-			__syncwarp(partMask);
 			while (level_count[wx][l[wx] - 3] > level_index[wx][l[wx] - 3])
 			{
 				//First Index
-				T* from = &(cl[num_divs_local * (l[wx] - 2)]);
-				T* to = &(cl[num_divs_local * (l[wx] - 1)]);
-				T maskBlock = level_prev_index[wx][l[wx] - 1] / 32;
-				T maskIndex = ~((1 << (level_prev_index[wx][l[wx] - 1] & 0x1F)) - 1);
-
-				T newIndex = __ffs(from[maskBlock] & maskIndex);
-				while (newIndex == 0)
-				{
-					maskIndex = 0xFFFFFFFF;
-					maskBlock++;
-					newIndex = __ffs(from[maskBlock] & maskIndex);
-				}
-				newIndex = 32 * maskBlock + newIndex - 1;
-
 				if (lx == 0)
 				{
-					level_prev_index[wx][l[wx] - 1] = newIndex + 1;
+					T *from = &(cl[num_divs_local * (l[wx] - 2)]);
+					T maskBlock = level_prev_index[wx][l[wx] - 1] / 32;
+					T maskIndex = ~((1 << (level_prev_index[wx][l[wx] - 1] & 0x1F)) - 1);
+
+					newIndex[wx] = __ffs(from[maskBlock] & maskIndex);
+					while (newIndex[wx] == 0)
+					{
+						maskIndex = 0xFFFFFFFF;
+						maskBlock++;
+						newIndex[wx] = __ffs(from[maskBlock] & maskIndex);
+					}
+					newIndex[wx] = 32 * maskBlock + newIndex[wx] - 1;
+
+					level_prev_index[wx][l[wx] - 1] = newIndex[wx] + 1;
 					level_index[wx][l[wx] - 3]++;
 				}
 
 				//Intersect
-				uint64 warpCount = 0;
+				warpCount = 0;
 				for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 				{
-					to[k] = cl[k] & unset_mask(newIndex, k);
+					to[threadIdx.x] = cl[k] & unset_mask(newIndex[wx], k);
 					// Compute Intersection
 					for (T q_idx = QEDGE_PTR[l[wx]] + 1; q_idx < QEDGE_PTR[l[wx]+1]; q_idx++) {
-						to[k]  &= encode[(level_prev_index[wx][QEDGE[q_idx]] - 1) * num_divs_local + k]; 
+						to[threadIdx.x] &= encode[(level_prev_index[wx][QEDGE[q_idx]] - 1) * num_divs_local + k]; 
 					}
 					// Remove Redundancies
 					for (T sym_idx = SYMNODE_PTR[l[wx]]; sym_idx < SYMNODE_PTR[l[wx]+1]; sym_idx++) {
-						if (SYMNODE[sym_idx] > 0) to[k] &= ~(cl[(SYMNODE[sym_idx] - 1) * num_divs_local + k] & get_mask(level_prev_index[wx][SYMNODE[sym_idx]] - 1, k));
-						else to[k] &= orient_mask[k];
+						if (SYMNODE[sym_idx] > 0) to[threadIdx.x] &= ~(cl[(SYMNODE[sym_idx] - 1) * num_divs_local + k] & get_mask(level_prev_index[wx][SYMNODE[sym_idx]] - 1, k));
+						else to[threadIdx.x] &= orient_mask[k];
 					}
-					warpCount += __popc(to[k]);
+					warpCount += __popc(to[threadIdx.x]);
+					cl[(l[wx] - 1) * num_divs_local + k] = to[threadIdx.x];
 				}
 				reduce_part<T, CPARTSIZE>(partMask, warpCount);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 16);
@@ -467,6 +464,10 @@ sgm_kernel_central_node_base_binary_persistant(
 				// warpCount += __shfl_down_sync(partMask, warpCount, 2);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
+				if ( l[wx] + 1 < KCCOUNT) {
+					for (T k = lx; k < num_divs_local; k += CPARTSIZE) 
+						cl[k] &= unset_mask(level_prev_index[wx][l[wx]-1]-1, k);
+				}
 				if (lx == 0)
 				{
 					if (l[wx] + 1 == KCCOUNT) {
@@ -478,9 +479,6 @@ sgm_kernel_central_node_base_binary_persistant(
 						level_count[wx][l[wx] - 3] = warpCount;
 						level_index[wx][l[wx] - 3] = 0;
 						level_prev_index[wx][l[wx] - 1] = 0;
-
-						for (T k = lx; k < num_divs_local; k ++) 
-							cl[k] &= unset_mask(level_prev_index[wx][l[wx]-2]-1, k);
 					}
 
 					while (l[wx] > 3 && level_index[wx][l[wx] - 3] >= level_count[wx][l[wx] - 3])
@@ -497,12 +495,11 @@ sgm_kernel_central_node_base_binary_persistant(
 				atomicAdd(counter, sg_count[wx]);
 				//cpn[current.queue[i]] = sg_count[wx];
 			}
-
 			__syncwarp(partMask);
 		}
+		__syncthreads();
 	}
-
-	__syncthreads();
+	
 	if (threadIdx.x == 0)
 	{
 		atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
