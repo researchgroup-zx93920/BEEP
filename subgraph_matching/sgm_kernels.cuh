@@ -167,15 +167,18 @@ sgm_kernel_central_node_base_binary(
 			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 			{
 				cl[k] = get_mask(srcLen, k) & unset_mask(j, k);
-				cl[num_divs_local + k] = (QEDGE_PTR[3] - QEDGE_PTR[2] == 2) ? 
-										encode[j * num_divs_local + k] :
-										cl[k];
+				if ( QEDGE_PTR[3] - QEDGE_PTR[2] == 2)
+					to[threadIdx.x] = encode[j * num_divs_local + k];
+				else
+					to[threadIdx.x] = cl[k];
+
 				// Remove Redundancies
 				for (T sym_idx = SYMNODE_PTR[l[wx] - 1]; sym_idx < SYMNODE_PTR[l[wx]]; sym_idx++) {
-					if (SYMNODE[sym_idx] > 0) cl[num_divs_local + k] &= ~(cl[k] & get_mask(j, k));
-					else cl[num_divs_local + k] &= orient_mask[k];
+					if (SYMNODE[sym_idx] > 0) to[threadIdx.x] &= ~(cl[k] & get_mask(j, k));
+					else to[threadIdx.x] &= orient_mask[k];
 				}
-				warpCount += __popc(cl[num_divs_local + k]);
+				cl[num_divs_local + k] = to[threadIdx.x];
+				warpCount += __popc(to[threadIdx.x]); 
 			}
 			reduce_part<T, CPARTSIZE>(partMask, warpCount);
 			// warpCount += __shfl_down_sync(partMask, warpCount, 16);
@@ -389,15 +392,18 @@ sgm_kernel_central_node_base_binary_persistant(
 			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 			{
 				cl[k] = get_mask(srcLen, k) & unset_mask(j, k);
-				cl[num_divs_local + k] = (QEDGE_PTR[3] - QEDGE_PTR[2] == 2) ? 
-										encode[j * num_divs_local + k] :
-										cl[k];
+				if ( QEDGE_PTR[3] - QEDGE_PTR[2] == 2)
+					to[threadIdx.x] = encode[j * num_divs_local + k];
+				else
+					to[threadIdx.x] = cl[k];
+
 				// Remove Redundancies
 				for (T sym_idx = SYMNODE_PTR[l[wx] - 1]; sym_idx < SYMNODE_PTR[l[wx]]; sym_idx++) {
-					if (SYMNODE[sym_idx] > 0) cl[num_divs_local + k] &= ~(cl[k] & get_mask(j, k));
-					else cl[num_divs_local + k] &= orient_mask[k];
+					if (SYMNODE[sym_idx] > 0) to[threadIdx.x] &= ~(cl[k] & get_mask(j, k));
+					else to[threadIdx.x] &= orient_mask[k];
 				}
-				warpCount += __popc(cl[num_divs_local + k]); 
+				cl[num_divs_local + k] = to[threadIdx.x];
+				warpCount += __popc(to[threadIdx.x]); 
 			}
 			reduce_part<T, CPARTSIZE>(partMask, warpCount);
 			// warpCount += __shfl_down_sync(partMask, warpCount, 16);
