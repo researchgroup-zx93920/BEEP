@@ -140,7 +140,7 @@ sgm_kernel_central_node_base_binary(
 			T dst = g.colInd[srcStart + tid];
 			T dstLen = g.rowPtr[dst + 1] - g.rowPtr[dst];
 			T mask = get_mask(srcLen, tid/32);
-			bool keep = (dstLen < srcLen || ((dstLen == srcLen) && src < dst));
+			bool keep = (dstLen > srcLen || ((dstLen == srcLen) && src < dst));
 			orient_mask[tid / 32] = __ballot_sync(mask, keep);
 		}
 		__syncthreads();
@@ -365,7 +365,7 @@ sgm_kernel_central_node_base_binary_persistant(
 			T dst = g.colInd[srcStart + tid];
 			T dstLen = g.rowPtr[dst + 1] - g.rowPtr[dst];
 			T mask = get_mask(srcLen, tid/32);
-			bool keep = (dstLen < srcLen || ((dstLen == srcLen) && src < dst));
+			bool keep = (dstLen > srcLen || ((dstLen == srcLen) && src < dst));
 			orient_mask[tid / 32] = __ballot_sync(mask, keep);
 		}
 		__syncthreads();
