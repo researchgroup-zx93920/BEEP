@@ -248,6 +248,10 @@ __device__ __forceinline__ void sgm_kernel_central_node_function(
 				// warpCount += __shfl_down_sync(partMask, warpCount, 2);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
+				if ( l[wx] + 1 < KCCOUNT) {
+					for (T k = lx; k < num_divs_local; k += CPARTSIZE) 
+						cl[k] &= unset_mask(level_prev_index[wx][l[wx]-1]-1, k);
+				}
 				if (lx == 0)
 				{
 					if (l[wx] + 1 == KCCOUNT) {
