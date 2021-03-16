@@ -166,7 +166,7 @@ namespace graph
     protected:
         // Function declarations. Definitions outside class.
         void preprocess_query(graph::COOCSRGraph<T>& patGraph);
-        void detect_symmetry(graph::COOCSRGraph<T>& graph, int orbits[MAXN]);
+        void detect_symmetry();
         void initialize(graph::COOCSRGraph_d<T>& dataGraph);
         void peel_data(graph::COOCSRGraph_d<T>& dataGraph);
         void count_subgraphs(graph::COOCSRGraph_d<T>& dataGraph);
@@ -204,26 +204,19 @@ namespace graph
             if ( degree[i] > max_qDegree ) max_qDegree = degree[i];
             if ( degree[i] < min_qDegree ) min_qDegree = degree[i]; 
         }
-           
-        // Detect symmetrical nodes in query graph
-        int orbits[MAXN];
-        detect_symmetry(query, orbits);
+
         
         // Generate Query node sequence based on "Maxmimum Likelihood Estimation" (MLE)
         // First look for node with highest node-mapping-degree d_M 
         //      (i.e., degree with nodes already in query_sequence)
-        // Nodes with same d_M are sorted with the highest symmetrical degree s_M
-        //      (i.e., most number of symmetrical nodes already in the sequence)
-        // Nodes with same d_M and p_f are sorted with their degree
+        // Nodes with same d_M are sorted with their degree
         //
         // These conditions can be combined into one as follows:
-        //      d_M * num_nodes^2 + s_M * num_nodes + node_degree
+        //      d_M * num_nodes + node_degree
 
         // Initialise d_M and s_M with 0 for all nodes
         int* d_M = new int[query.numNodes];
-        int* s_M = new int[query.numNodes];
         memset(d_M, 0, query.numNodes * sizeof(int));
-        memset(s_M, 0, query.numNodes * sizeof(int));
 
         // For ith node in the query sequence
         for ( int i = 0; i < query.numNodes; i++ ) {
@@ -233,7 +226,7 @@ namespace graph
             // Traverse all nodes to find ml and idx
             for ( int j = 0; j < query.numNodes; j++ ) {
                 if (d_M[j] >= 0) {  // d_M = -1 denotes node already in sequence
-                    uint likelihood = d_M[j] * query.numNodes * query.numNodes + s_M[j] * query.numNodes + degree[j];
+                    uint likelihood = d_M[j] * query.numNodes + degree[j];
                     if ( likelihood > ml) {
                         ml = likelihood;
                         idx = j;
@@ -247,17 +240,11 @@ namespace graph
             
             // Mark idx as done in d_M and s_M
             d_M[idx] = -1;
-            s_M[idx] = -1;
 
             // Update d_M of other nodes
             for ( int j = query.rowPtr->cdata()[idx]; j < query.rowPtr->cdata()[idx+1]; j++ ) {
                 uint neighbor = query.colInd->cdata()[j];
                 if ( d_M[neighbor] != -1 ) d_M[neighbor]++;
-            }
-
-            // Update s_M of other nodes
-            for (int j = 0; j < query.numNodes; j++) {
-                if (orbits[j] == orbits[idx] && s_M[j] != -1) s_M[j]++;
             }
 
             // Populate query edges
@@ -273,20 +260,14 @@ namespace graph
                     }
                 }
             }
-
-            // Populate symmetrical nodes
-            sym_nodes_ptr->cdata()[i+1] = sym_nodes_ptr->cdata()[i];
-            
-            for ( int j = 0; j < i; j++ ) {
-                if ( orbits[query_sequence->cdata()[j]] == orbits[idx] ) {
-                    sym_nodes->cdata()[sym_nodes_ptr->cdata()[i + 1]++] = j;
-                }
-            }
         }
+
+                   
+        // Detect symmetrical nodes in query graph
+        detect_symmetry();
         
         // Clean Up
         delete[] d_M;
-        delete[] s_M;
         delete[] degree;
 
         // Print statements to check results.
@@ -304,12 +285,6 @@ namespace graph
             printf("\n");
         }
 
-        printf("Orbits (as reported by NAUTY): ");
-        for (int i = 0; i < query.numNodes; i++) {
-            printf("%d, ", orbits[i]);
-        }
-        printf("\n");
-
         printf("Symmetrical nodes:\n");
         for (int i = 0; i < query.numNodes; i++) {
             printf("i: %d\t", i);
@@ -321,26 +296,106 @@ namespace graph
     }
 
     template<typename T>
-    void SG_Match<T>::detect_symmetry(graph::COOCSRGraph<T>& patGraph, int orbits[MAXN])
+    void SG_Match<T>::detect_symmetry()
     {
         // Define required variables for NAUTY
         graph g[MAXN];
         int lab[MAXN], ptn[MAXN];
+        int orbits[MAXN];
         static DEFAULTOPTIONS_GRAPH(opt);
         statsblk stats;
         int m = 1;
-        int n = patGraph.numNodes;
+        int n = query_sequence->N;
+
+        opt.defaultptn = FALSE;
+        for (int i = 0; i < n; i++)
+        {
+            lab[i] = i;
+            ptn[i] = 1;
+        }
+        ptn[n - 1] = 0;
 
         // Populate graph
         EMPTYGRAPH(g, m, n);
-        for (int i = 0; i < patGraph.numNodes; i++) {
-            for (int j = patGraph.rowPtr->cdata()[i]; j < patGraph.rowPtr->cdata()[i+1]; j++) {
-                ADDONEEDGE(g, i, patGraph.colInd->cdata()[j], m);
+        for (int i = 0; i < n; i++) {
+            for (int j = query_edge_ptr->cdata()[i]; j < query_edge_ptr->cdata()[i+1]; j++) {
+                ADDONEEDGE(g, i, query_edges->cdata()[j], m);
+                ADDONEEDGE(g, query_edges->cdata()[j], i, m);
             }
         }
 
-        // Call NAUTY to get orbit
-        densenauty(g, lab, ptn, orbits, &opt, &stats, m, n, NULL);
+        // Vector to hold symmetrical nodes
+        vector<int> sym[MAXN];
+        vector<T> history;
+        while (true)
+        {
+            // Call NAUTY to get orbit
+            densenauty(g, lab, ptn, orbits, &opt, &stats, m, n, NULL);
+
+            // Find the biggest orbit
+            int cnts[MAXN] = {0};
+            for (int i = 0; i < n; i++) cnts[orbits[i]]++;
+            int maxLen = 0;
+            int maxIdx = -1;
+            for (int i = 0; i < n; i++) {
+                if (cnts[i] > maxLen) {
+                    maxLen = cnts[i];
+                    maxIdx = i;
+                }
+            }
+            
+            if (maxLen == 1) break;
+
+            // Add symmetrical nodes from biggest orbit
+            for (int i = 0; i < n; i++)
+            {
+                if (orbits[i] == maxIdx && i != maxIdx)
+                    sym[i].push_back(maxIdx);
+            }
+
+            // Fix maxIdx node in a separate partition
+            history.push_back(maxIdx);
+            for (int i = 0; i < history.size(); i++)
+            {
+                lab[i] = history[i];
+                ptn[i] = 0;
+            }
+
+            int ctr = history.size();
+            for (int i = 0; i < n; i++)
+            {
+                bool found = false;
+                for (int j = 0; j < history.size(); j++ )
+                {
+                    if (history[j] == i){
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found)
+                {
+                    lab[ctr] = i;
+                    ptn[ctr] = 1;
+                    ctr++;
+                }
+            }
+            
+            /*
+            printf("Orbits:\n");
+            for (int i = 0; i < query_sequence->N; i++) {
+                printf("i: %d;\tnode: %d (Degree: %d)\n", i, query_sequence->cdata()[i], orbits[i]);
+            }
+            */
+        }
+
+        // Populate symmetrical nodes from sym
+        for (int i = 0; i < n; i++)
+        {
+            sym_nodes_ptr->cdata()[i+1] = sym_nodes_ptr->cdata()[i];
+            for (int j = 0; j < sym[i].size(); j++)
+                sym_nodes->cdata()[ sym_nodes_ptr->cdata()[i+1]++ ] = sym[i][j];
+        } 
     }
 
     template<typename T>
@@ -444,11 +499,11 @@ namespace graph
         const auto block_size_LD = 128; // Block size for low degree nodes
         const T partitionSize_LD = 8;
         const T numPartitions_LD = block_size_LD / partitionSize_LD;
-        const auto block_size_HD = 1024; // Block size for low degree nodes
+        const auto block_size_HD = 512; // Block size for low degree nodes
         const T partitionSize_HD = 32;
         const T numPartitions_HD = block_size_HD / partitionSize_HD;
         const T bound_LD = 2048;
-        const T bound_HD = 16384+8192+4096;
+        const T bound_HD = 16384+4096;
         const uint dv = 32;
 
         // CUDA Initialise, gather runtime Info.
