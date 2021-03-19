@@ -112,7 +112,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function(
 			T orient_offset = blockOffset * NUMDIVS;
 			orient_mask = &orient[orient_offset];
 
-			T encode_offset = orient_offset * MAXDEG;
+			uint64 encode_offset = (uint64) orient_offset * MAXDEG;
 			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
 
 			level_offset = &current_level[orient_offset * (numPartitions * DEPTH)];

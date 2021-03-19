@@ -252,7 +252,7 @@ static Config parseArgs(int argc, char** argv) {
         switch (opt) {
         case 'g': config.srcGraph = optarg;                                break;
         case 'r': config.dstGraph = optarg;                                break;
-        case 't': config.patGraph = optarg;
+        case 't': config.patGraph = optarg;                                break;
         case 'd': config.deviceId = atoi(optarg);                           break;
         case 'm': config.mt = parseMainTask(optarg);                       break;
         case 'x': config.printStats = true;                                 break;

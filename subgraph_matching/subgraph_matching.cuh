@@ -499,11 +499,11 @@ namespace graph
         const auto block_size_LD = 128; // Block size for low degree nodes
         const T partitionSize_LD = 8;
         const T numPartitions_LD = block_size_LD / partitionSize_LD;
-        const auto block_size_HD = 512; // Block size for low degree nodes
+        const auto block_size_HD = 1024; // Block size for high degree nodes
         const T partitionSize_HD = 32;
         const T numPartitions_HD = block_size_HD / partitionSize_HD;
         const T bound_LD = 2048;
-        const T bound_HD = 16384+4096;
+        const T bound_HD = 32768 + 16384;
         const uint dv = 32;
 
         // CUDA Initialise, gather runtime Info.
@@ -565,15 +565,14 @@ namespace graph
                 uint num_divs = (maxDeg + dv - 1) / dv;
                 uint64 level_size = numBlock * DEPTH * num_divs;
                 level_size *= (maxDeg >= bound_LD ? numPartitions_HD : numPartitions_LD);
-                level_size *= (!persistant) ? 2 : 1;
                 uint64 encode_size = numBlock * maxDeg * num_divs;
                 uint64 orient_mask_size = numBlock * num_divs;
                 //printf("Level Size = %llu, Encode Size = %llu\n", level_size, encode_size);
-                GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
                 GPUArray<T> node_be("Temp level Counter", AllocationTypeEnum::gpu, encode_size, dev_);
+                GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
                 GPUArray<T> orient_mask("Orientation mask", AllocationTypeEnum::gpu, orient_mask_size, dev_);
-                cudaMemset(current_level.gdata(), 0, level_size * sizeof(T));
                 cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T));
+                cudaMemset(current_level.gdata(), 0, level_size * sizeof(T));
                 cudaMemset(orient_mask.gdata(), 0, orient_mask_size * sizeof(T));
 
                 // Constant memory
@@ -604,7 +603,7 @@ namespace graph
                         );
                     }
                     else{    
-                        execKernel((sgm_kernel_central_node_base_binary<T, block_size_HD * 2, partitionSize_HD>), grid_block_size, block_size_HD * 2, dev_, false,
+                        execKernel((sgm_kernel_central_node_base_binary<T, block_size_HD, partitionSize_HD>), grid_block_size, block_size_HD, dev_, false,
                             counter.gdata(),
                             dataGraph,
                             current_q.device_queue->gdata()[0],
@@ -625,7 +624,7 @@ namespace graph
                         );
                     }
                     else {
-                        execKernel((sgm_kernel_central_node_base_binary<T, block_size_LD * 2, partitionSize_LD>), grid_block_size, block_size_LD * 2, dev_, false,
+                        execKernel((sgm_kernel_central_node_base_binary<T, block_size_LD, partitionSize_LD>), grid_block_size, block_size_LD, dev_, false,
                             counter.gdata(),
                             dataGraph,
                             current_q.device_queue->gdata()[0],
