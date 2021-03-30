@@ -2,15 +2,23 @@
 #include <cuda_runtime.h>
 #include "utils.cuh"
 
-#define PART_SIZE 1
-template<typename T>
-__device__ __forceinline__ void reduce_part(T mask, uint64 &count)
-{
-	// count += __shfl_down_sync(mask, count, 16);
-	// count += __shfl_down_sync(mask, count, 8);
-	//count += __shfl_down_sync(mask, count, 4);
-	// count += __shfl_down_sync(mask, count, 2);
-	// count += __shfl_down_sync(mask, count, 1);
+//#define PART_SIZE 8
+// template<typename T, uint CPARTSIZE>
+// __device__ __forceinline__ void reduce_part(T mask, uint64 &count)
+// {
+// 	// count += __shfl_down_sync(mask, count, 16);
+// 	// count += __shfl_down_sync(mask, count, 8);
+// 	// count += __shfl_down_sync(mask, count, 4);
+// 	// count += __shfl_down_sync(mask, count, 2);
+// 	// count += __shfl_down_sync(mask, count, 1);
+
+// }
+
+
+template<typename T, uint CPARTSIZE>
+__device__ __forceinline__ void reduce_part(T partMask, uint64& warpCount) {
+	for (int i = CPARTSIZE / 2; i >= 1; i /= 2) 
+		warpCount += __shfl_down_sync(partMask, warpCount, i);
 }
 
 
@@ -1324,7 +1332,7 @@ namespace graph
             // threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 2);
             // threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 1);
 
-            reduce_part<T>(partMask, threadCount);
+            reduce_part<T,CPARTSIZE>(partMask, threadCount);
 
             return threadCount;
         }
@@ -1460,7 +1468,7 @@ namespace graph
 
         }
 
-        reduce_part<T>(partMask, threadCount);
+        reduce_part<T, CPARTSIZE>(partMask, threadCount);
         return threadCount;
     }
 

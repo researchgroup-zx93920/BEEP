@@ -27,7 +27,7 @@ namespace graph
 			name = "Unknown";
 		}
 
-		void initialize(std::string s, AllocationTypeEnum at, uint size, int devId)
+		void initialize(std::string s, AllocationTypeEnum at, size_t size, int devId)
 		{
 			N = size;
 			name = s;
@@ -58,7 +58,7 @@ namespace graph
 			_at = at;
 		}
 
-		GPUArray(std::string s, AllocationTypeEnum at, uint size, int devId, bool pinned)
+		GPUArray(std::string s, AllocationTypeEnum at, size_t size, int devId, bool pinned)
 		{
 			N = size;
 			name = s;
@@ -84,7 +84,7 @@ namespace graph
 
 
 
-		GPUArray(std::string s, AllocationTypeEnum at, uint size, int devId)
+		GPUArray(std::string s, AllocationTypeEnum at, size_t size, int devId)
 		{
 			initialize(s, at, size, devId);
 		}
@@ -109,7 +109,7 @@ namespace graph
 			delete cpu_data;
 		}
 
-		void allocate_cpu(uint size)
+		void allocate_cpu(size_t size)
 		{
 			if (_at == AllocationTypeEnum::cpuonly)
 			{
@@ -126,7 +126,7 @@ namespace graph
 				Log(LogPriorityEnum::critical, "At allocate_cpu: Only CPU allocation\n");
 			}
 		}
-		void switch_to_gpu(int devId=0, uint size=0)
+		void switch_to_gpu(int devId=0, size_t size=0)
 		{
 			if (_at == AllocationTypeEnum::cpuonly)
 			{
@@ -151,7 +151,7 @@ namespace graph
 			}
 		}
 
-		void switch_to_unified(int devId, uint size = 0)
+		void switch_to_unified(int devId, size_t size = 0)
 		{
 			if (_at == AllocationTypeEnum::cpuonly)
 			{
@@ -177,7 +177,7 @@ namespace graph
 
 		}
 
-		void copyCPUtoGPU(int devId, uint size = 0)
+		void copyCPUtoGPU(int devId, size_t size = 0)
 		{
 			if (_at != cpuonly)
 			{
@@ -254,9 +254,9 @@ namespace graph
 			return val;
 		}
 
-		T* copytocpu(int startIndex, uint count=0, bool newAlloc=false)
+		T* copytocpu(uint64 startIndex, size_t count=0, bool newAlloc=false)
 		{
-			int c = count == 0 ? N : count;
+			size_t c = count == 0 ? N : count;
 
 
 			if (_at == AllocationTypeEnum::unified)

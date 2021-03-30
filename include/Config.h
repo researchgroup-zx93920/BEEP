@@ -7,6 +7,15 @@
 #include <unistd.h>
 #endif
 #include <stdio.h>
+#include "string.h"
+
+
+struct KcliqueConfig
+{
+    KCAlgoEnum Algo;
+    int PartSize;
+    bool BinaryEncode;
+};
 
 struct Config {
 
@@ -22,6 +31,8 @@ struct Config {
     bool sortEdges;
     ProcessBy processBy;
     ProcessingElementEnum processElement;
+    KcliqueConfig kcConfig;
+
 
 };
 
@@ -201,6 +212,59 @@ static AllocationTypeEnum parseAllocation(const char* s)
 
 
 
+static KcliqueConfig parseKcConfig(const char* s)
+{
+    // KCAlgoEnum Algo;
+    // int PartSize;
+    // bool BinaryEncode;
+
+    KcliqueConfig kc;
+    kc.Algo = KCAlgoEnum::GraphOrient;
+    kc.PartSize = 8;
+    kc.BinaryEncode = true;
+
+    if(strlen(s) > 2)
+    {
+        if(s[0] == 'p')
+             kc.Algo = KCAlgoEnum::Pivoting;
+        
+
+        string sp(1, s[1]);
+        int next = 2;
+        while(isdigit(s[next]))
+        {
+            sp += s[next];
+            next++;
+        }
+
+        kc.PartSize = stoi(sp);
+
+        if(s[next] == 'n')
+            kc.BinaryEncode = false;
+    }
+
+    return kc;
+
+}
+static const char* asString(KcliqueConfig kc) 
+{
+    std::string s = "";
+
+    if( kc.Algo == KCAlgoEnum::GraphOrient)
+        s+= "GO-"; 
+    else
+        s+= "PIV-";   
+    s += std::to_string(kc.PartSize);
+    s+= "-";
+    if(kc.BinaryEncode)
+        s += "BE";
+    else
+        s += "NBE";
+
+    return s.c_str();
+}
+
+
 static void usage() {
     fprintf(stderr,
         "\nUsage:  ./build/exe/src/main.cu.exe [options]"
@@ -215,7 +279,8 @@ static void usage() {
         "\n    -a <allocation>        Data allocation on GPU (default = unified)"
         "\n    -s <allocation>        Sort Read Edges by src then dst (default = false)"
         "\n    -p <processBy>        Process by node or edge (default = node)"
-        "\n    -e <process element>        Granulaity of element processor (default = t) <t: Thread, w: warp, b: block, g: grid>"
+        "\n    -e <process element>         Granulaity of element processor (default = t) <t: Thread, w: warp, b: block, g: grid>"
+        "\n    -q <kclique specs>           Specify KC Specs: (o4b --> graph orient, Partition Size = 4, binary encoeding)  (p4n --> pivoting, Partition Size = 4, NO binary encoding) default: o8b"
         "\n    -h                       Help"
         "\n"
         "\n");
@@ -235,18 +300,19 @@ static Config parseArgs(int argc, char** argv) {
     config.sortEdges = false;;
     config.processBy = ByNode;
     config.processElement = BlockWarp;
+    config.kcConfig = parseKcConfig("");
 
 #ifndef __VS__
     int opt;
 
     printf("parsing configuration .... \n");
 
-    while ((opt = getopt(argc, argv, "g:r:d:m:x:o:a:k:h:v:s:p:e:")) >= 0) {
+    while ((opt = getopt(argc, argv, "g:r:d:m:x:o:a:k:h:v:s:p:e:q:")) >= 0) {
         switch (opt) {
-        case 'g': config.srcGraph = optarg;                                break;
-        case 'r': config.dstGraph = optarg;                                break;
+        case 'g': config.srcGraph = optarg;                                 break;
+        case 'r': config.dstGraph = optarg;                                 break;
         case 'd': config.deviceId = atoi(optarg);                           break;
-        case 'm': config.mt = parseMainTask(optarg);                       break;
+        case 'm': config.mt = parseMainTask(optarg);                        break;
         case 'x': config.printStats = true;                                 break;
         case 'o': config.orient = parseOrient(optarg);                      break;
         case 'a': config.allocation = parseAllocation(optarg);              break;
@@ -254,7 +320,8 @@ static Config parseArgs(int argc, char** argv) {
         case 'k': config.k = atoi(optarg);                                  break;
         case 's': config.sortEdges = true;                                  break;
         case 'p': config.processBy = parseProcessBy(optarg);                break;
-        case 'e': config.processElement = parseElement(optarg);                break;
+        case 'e': config.processElement = parseElement(optarg);             break;
+        case 'q':  config.kcConfig = parseKcConfig(optarg);                 break;
         case 'h': usage(); exit(0);                                         break;
         default: fprintf(stderr, "\nUnrecognized option!\n");
             usage(); exit(0);
@@ -275,4 +342,9 @@ static void printConfig(Config config)
     printf("    Process By = %s\n", asString(config.processBy));
     printf("    Process Element = %s\n", asString(config.processElement));
     printf("    k: %u\n", config.k);
+
+
+    if (config.mt == KCLIQUE)
+         printf("    KC Config = %s\n", asString(config.kcConfig));
+
 }

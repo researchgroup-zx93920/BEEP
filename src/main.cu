@@ -658,6 +658,9 @@ int main(int argc, char** argv)
 
 			graph::SingleGPU_Kclique<uint> mohaclique(config.deviceId, *gd);
 
+
+			KcliqueConfig kcc = config.kcConfig;
+
 			// int k = 4;
 			// while ( k < 11)
 			{
@@ -666,9 +669,278 @@ int main(int argc, char** argv)
 				{
 					Timer t;
 					if (config.processBy == ByNode)
-						mohaclique.findKclqueIncremental_node_binary_async(config.k, *gd, config.processElement);
+					{
+						if(kcc.Algo == GraphOrient)
+						{
+
+							if(kcc.BinaryEncode)
+							{
+
+								switch(kcc.PartSize)
+								{
+									case 32:
+									mohaclique.findKclqueIncremental_node_binary_async<32>(config.k, *gd, config.processElement);
+									break;
+									case 16:
+									mohaclique.findKclqueIncremental_node_binary_async<16>(config.k, *gd, config.processElement);
+									break;
+									case 8:
+									mohaclique.findKclqueIncremental_node_binary_async<8>(config.k, *gd, config.processElement);
+									break;
+									case 4:
+									mohaclique.findKclqueIncremental_node_binary_async<4>(config.k, *gd, config.processElement);
+									break;
+									case 2:
+									mohaclique.findKclqueIncremental_node_binary_async<2>(config.k, *gd, config.processElement);
+									break;
+									case 1:
+									mohaclique.findKclqueIncremental_node_binary_async<1>(config.k, *gd, config.processElement);
+									break;
+									default:
+										Log(error, "WRONG PARTITION SIZE SELECTED\n");
+
+
+								}
+
+								
+							}
+							else
+							{
+
+
+								switch(kcc.PartSize)
+								{
+									case 32:
+									mohaclique.findKclqueIncremental_node_async<32>(config.k, *gd, config.processElement);
+									break;
+									case 16:
+									mohaclique.findKclqueIncremental_node_async<16>(config.k, *gd, config.processElement);
+									break;
+									case 8:
+									mohaclique.findKclqueIncremental_node_async<8>(config.k, *gd, config.processElement);
+									break;
+									case 4:
+									mohaclique.findKclqueIncremental_node_async<4>(config.k, *gd, config.processElement);
+									break;
+									case 2:
+									mohaclique.findKclqueIncremental_node_async<2>(config.k, *gd, config.processElement);
+									break;
+									case 1:
+									mohaclique.findKclqueIncremental_node_async<1>(config.k, *gd, config.processElement);
+									break;
+									default:
+										Log(error, "WRONG PARTITION SIZE SELECTED\n");
+
+
+								}
+
+								//mohaclique.findKclqueIncremental_node_async(config.k, *gd, config.processElement);
+							}
+
+						}
+						else // Pivoting
+						{
+							if(kcc.BinaryEncode)
+							{
+
+
+								switch(kcc.PartSize)
+								{
+									case 32:
+									mohaclique.findKclqueIncremental_node_pivot_async<32>(config.k, *gd, config.processElement);
+									break;
+									case 16:
+									mohaclique.findKclqueIncremental_node_pivot_async<16>(config.k, *gd, config.processElement);
+									break;
+									case 8:
+									mohaclique.findKclqueIncremental_node_pivot_async<8>(config.k, *gd, config.processElement);
+									break;
+									case 4:
+									mohaclique.findKclqueIncremental_node_pivot_async<4>(config.k, *gd, config.processElement);
+									break;
+									case 2:
+									mohaclique.findKclqueIncremental_node_pivot_async<2>(config.k, *gd, config.processElement);
+									break;
+									case 1:
+									mohaclique.findKclqueIncremental_node_pivot_async<1>(config.k, *gd, config.processElement);
+									break;
+									default:
+										Log(error, "WRONG PARTITION SIZE SELECTED\n");
+
+
+								}
+
+								//mohaclique.findKclqueIncremental_node_pivot_async(config.k, *gd, config.processElement);
+							}
+							else
+							{
+
+								switch(kcc.PartSize)
+								{
+									case 32:
+									mohaclique.findKclqueIncremental_node_nobin_pivot_async<32>(config.k, *gd, config.processElement);
+									break;
+									case 16:
+									mohaclique.findKclqueIncremental_node_nobin_pivot_async<16>(config.k, *gd, config.processElement);
+									break;
+									case 8:
+									mohaclique.findKclqueIncremental_node_nobin_pivot_async<8>(config.k, *gd, config.processElement);
+									break;
+									case 4:
+									mohaclique.findKclqueIncremental_node_nobin_pivot_async<4>(config.k, *gd, config.processElement);
+									break;
+									case 2:
+									mohaclique.findKclqueIncremental_node_nobin_pivot_async<2>(config.k, *gd, config.processElement);
+									break;
+									case 1:
+									mohaclique.findKclqueIncremental_node_nobin_pivot_async<1>(config.k, *gd, config.processElement);
+									break;
+									default:
+										Log(error, "WRONG PARTITION SIZE SELECTED\n");
+
+
+								}
+
+								//mohaclique.findKclqueIncremental_node_nobin_pivot_async(config.k, *gd, config.processElement);
+							}
+
+						}
+					}
 					else if (config.processBy == ByEdge)
-						mohaclique.findKclqueIncremental_edge_binary_async(config.k, *gd, config.processElement);
+					{
+						if(kcc.Algo == GraphOrient)
+						{
+
+							if(kcc.BinaryEncode)
+							{
+
+								switch(kcc.PartSize)
+								{
+									case 32:
+									mohaclique.findKclqueIncremental_edge_binary_async<32>(config.k, *gd, config.processElement);
+									break;
+									case 16:
+									mohaclique.findKclqueIncremental_edge_binary_async<16>(config.k, *gd, config.processElement);
+									break;
+									case 8:
+									mohaclique.findKclqueIncremental_edge_binary_async<8>(config.k, *gd, config.processElement);
+									break;
+									case 4:
+									mohaclique.findKclqueIncremental_edge_binary_async<4>(config.k, *gd, config.processElement);
+									break;
+									case 2:
+									mohaclique.findKclqueIncremental_edge_binary_async<2>(config.k, *gd, config.processElement);
+									break;
+									case 1:
+									mohaclique.findKclqueIncremental_edge_binary_async<1>(config.k, *gd, config.processElement);
+									break;
+									default:
+										Log(error, "WRONG PARTITION SIZE SELECTED\n");
+
+
+								}
+
+								//mohaclique.findKclqueIncremental_edge_binary_async(config.k, *gd, config.processElement);
+							}
+							else
+							{
+
+								switch(kcc.PartSize)
+								{
+									case 32:
+									mohaclique.findKclqueIncremental_edge_async<32>(config.k, *gd, config.processElement);
+									break;
+									case 16:
+									mohaclique.findKclqueIncremental_edge_async<16>(config.k, *gd, config.processElement);
+									break;
+									case 8:
+									mohaclique.findKclqueIncremental_edge_async<8>(config.k, *gd, config.processElement);
+									break;
+									case 4:
+									mohaclique.findKclqueIncremental_edge_async<4>(config.k, *gd, config.processElement);
+									break;
+									case 2:
+									mohaclique.findKclqueIncremental_edge_async<2>(config.k, *gd, config.processElement);
+									break;
+									case 1:
+									mohaclique.findKclqueIncremental_edge_async<1>(config.k, *gd, config.processElement);
+									break;
+									default:
+										Log(error, "WRONG PARTITION SIZE SELECTED\n");
+
+
+								}
+
+								//mohaclique.findKclqueIncremental_edge_async(config.k, *gd, config.processElement);
+							}
+
+						}
+						else //Pivoting
+						{
+							if(kcc.BinaryEncode)
+							{
+
+								switch(kcc.PartSize)
+								{
+									case 32:
+									mohaclique.findKclqueIncremental_edge_pivot_async<32>(config.k, *gd, config.processElement);
+									break;
+									case 16:
+									mohaclique.findKclqueIncremental_edge_pivot_async<16>(config.k, *gd, config.processElement);
+									break;
+									case 8:
+									mohaclique.findKclqueIncremental_edge_pivot_async<8>(config.k, *gd, config.processElement);
+									break;
+									case 4:
+									mohaclique.findKclqueIncremental_edge_pivot_async<4>(config.k, *gd, config.processElement);
+									break;
+									case 2:
+									mohaclique.findKclqueIncremental_edge_pivot_async<2>(config.k, *gd, config.processElement);
+									break;
+									case 1:
+									mohaclique.findKclqueIncremental_edge_pivot_async<1>(config.k, *gd, config.processElement);
+									break;
+									default:
+										Log(error, "WRONG PARTITION SIZE SELECTED\n");
+
+
+								}
+
+								//mohaclique.findKclqueIncremental_edge_pivot_async(config.k, *gd, config.processElement);
+							}
+							else
+							{
+
+								switch(kcc.PartSize)
+								{
+									case 32:
+									mohaclique.findKclqueIncremental_edge_nobin_pivot_async<32>(config.k, *gd, config.processElement);
+									break;
+									case 16:
+									mohaclique.findKclqueIncremental_edge_nobin_pivot_async<16>(config.k, *gd, config.processElement);
+									break;
+									case 8:
+									mohaclique.findKclqueIncremental_edge_nobin_pivot_async<8>(config.k, *gd, config.processElement);
+									break;
+									case 4:
+									mohaclique.findKclqueIncremental_edge_nobin_pivot_async<4>(config.k, *gd, config.processElement);
+									break;
+									case 2:
+									mohaclique.findKclqueIncremental_edge_nobin_pivot_async<2>(config.k, *gd, config.processElement);
+									break;
+									case 1:
+									mohaclique.findKclqueIncremental_edge_nobin_pivot_async<1>(config.k, *gd, config.processElement);
+									break;
+									default:
+										Log(error, "WRONG PARTITION SIZE SELECTED\n");
+
+								}
+
+								//mohaclique.findKclqueIncremental_edge_nobin_pivot_async(config.k, *gd, config.processElement);
+							}
+
+						}
+					}
 					mohaclique.sync();
 					double time = t.elapsed();
 					Log(info, "count time %f s", time);

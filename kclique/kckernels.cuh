@@ -3128,7 +3128,7 @@ kckernel_edge_block_warp_subgraph_count(
 
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
-//__launch_bounds__(BLOCK_DIM_X, 16)
+__launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
 kckernel_node_block_warp_binary_count(
 	uint64* counter,
@@ -3143,9 +3143,9 @@ kckernel_node_block_warp_binary_count(
 	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
 	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
 	const size_t lx = threadIdx.x % CPARTSIZE;
-	__shared__ T level_index[numPartitions][9];
-	__shared__ T level_count[numPartitions][9];
-	__shared__ T level_prev_index[numPartitions][9];
+	__shared__ unsigned short level_index[numPartitions][9];
+	__shared__ unsigned short level_count[numPartitions][9];
+	__shared__ unsigned short level_prev_index[numPartitions][9];
 
 	__shared__ T  level_offset[numPartitions];
 	__shared__ uint64 clique_count[numPartitions];
@@ -3240,7 +3240,7 @@ kckernel_node_block_warp_binary_count(
 			{
 				warpCount += __popc(encode[j * num_divs_local + k]);
 			}
-			reduce_part<T>(partMask, warpCount);
+			reduce_part<T, CPARTSIZE>(partMask, warpCount);
 			// warpCount += __shfl_down_sync(partMask, warpCount, 16);
 			// warpCount += __shfl_down_sync(partMask, warpCount, 8);
 			// warpCount += __shfl_down_sync(partMask, warpCount, 4);
@@ -3286,7 +3286,7 @@ kckernel_node_block_warp_binary_count(
 					to[k] = from[k] & encode[newIndex* num_divs_local + k];
 					warpCount += __popc(to[k]);
 				}
-				reduce_part<T>(partMask, warpCount);
+				reduce_part<T, CPARTSIZE>(partMask, warpCount);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 16);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 8);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 4);
@@ -3472,7 +3472,7 @@ kckernel_edge_warp_binary_count(
 			{
 				warpCount += __popc(encode[wx][j * num_divs_local[wx] + k]);
 			}
-			reduce_part<T>(mm, warpCount);
+			reduce_part<T, 32>(mm, warpCount);
 
 			if (lx == 0 && l[wx] == kclique)
 				clique_count[wx] += warpCount;
@@ -3513,7 +3513,7 @@ kckernel_edge_warp_binary_count(
 					to[k] = from[k] & encode[wx][newIndex * num_divs_local[wx] + k];
 					warpCount += __popc(to[k]);
 				}
-				reduce_part<T>(mm, warpCount);
+				reduce_part<T, 32>(mm, warpCount);
 
 				if (lx == 0)
 				{
@@ -3553,7 +3553,7 @@ kckernel_edge_warp_binary_count(
 }
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
-__launch_bounds__(BLOCK_DIM_X, 16)
+//__launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
 kckernel_edge_block_warp_binary_count_o(
 	uint64* counter,
@@ -3570,9 +3570,9 @@ kckernel_edge_block_warp_binary_count_o(
 	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
 	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
 	const size_t lx = threadIdx.x % CPARTSIZE;
-	__shared__ T level_index[numPartitions][7];
-	__shared__ T level_count[numPartitions][7];
-	__shared__ T level_prev_index[numPartitions][7];
+	__shared__ unsigned short level_index[numPartitions][8];
+	__shared__ unsigned short level_count[numPartitions][8];
+	__shared__ unsigned short level_prev_index[numPartitions][8];
 
 	__shared__ T level_offset[numPartitions];
 	__shared__ uint64 clique_count[numPartitions];
@@ -3609,16 +3609,9 @@ kckernel_edge_block_warp_binary_count_o(
 			T src = g.rowInd[current.queue[i]];
 			srcStart = g.rowPtr[src];
 			srcLen = g.rowPtr[src + 1] - srcStart;
-			//printf("src = %u, srcLen = %u\n", src, srcLen);
-		}
-		else if (threadIdx.x == 1)
-		{
 			T src2 = g.colInd[current.queue[i]];
 			src2Start = g.rowPtr[src2];
 			src2Len = g.rowPtr[src2 + 1] - src2Start;
-		}
-		else if(threadIdx.x == 2)
-		{
 			tri_offset = sm_id * CBPSM * (MAXDEG) + levelPtr * (MAXDEG);
 			tri = &adj_tri[tri_offset  /*srcStart[wx]*/];
 			scounter = 0;
@@ -3633,9 +3626,8 @@ kckernel_edge_block_warp_binary_count_o(
 		__syncthreads();
 
 		if (threadIdx.x == 0)
-			num_divs_local = (scounter + 32 - 1) / 32;
-		else if (threadIdx.x == 1)
 		{
+			num_divs_local = (scounter + 32 - 1) / 32;
 			encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
 			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
 		}
@@ -3648,11 +3640,11 @@ kckernel_edge_block_warp_binary_count_o(
 		//Encode
 		T partMask = (1 << CPARTSIZE) - 1;
 		partMask = partMask << ((wx%(32/CPARTSIZE)) * CPARTSIZE);
-		T mm = (1 << scounter) - 1;
-		mm = mm << ((wx/numPartitions) * CPARTSIZE);
-		for (unsigned long long j = wx; j < scounter; j += numPartitions)
+		// T mm = (1 << scounter) - 1;
+		// mm = mm << ((wx/numPartitions) * CPARTSIZE);
+		for (T j = wx; j < scounter; j += numPartitions)
 		{
-			for (unsigned long long k = lx; k < num_divs_local; k += CPARTSIZE)
+			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 			{
 				encode[j * num_divs_local + k] = 0x00;
 			}
@@ -3672,9 +3664,9 @@ kckernel_edge_block_warp_binary_count_o(
 		//for (unsigned long long j = wx; j < scounter; j += numPartitions)
 		{
 			T j = wtc[wx];
-			level_offset[wx] = sm_id * CBPSM * (numPartitions * NUMDIVS * 7) + levelPtr * (numPartitions * NUMDIVS * 7);
-			T* cl = &current_level[level_offset[wx] + wx * (NUMDIVS * 7)];
-			if (lx < 7)
+			level_offset[wx] = sm_id * CBPSM * (numPartitions * NUMDIVS * 8) + levelPtr * (numPartitions * NUMDIVS * 8);
+			T* cl = &current_level[level_offset[wx] + wx * (NUMDIVS * 8)];
+			if (lx < 8)
 			{
 				level_count[wx][lx] = 0;
 				level_index[wx][lx] = 0;
@@ -3688,11 +3680,11 @@ kckernel_edge_block_warp_binary_count_o(
 
 			//get warp count ??
 			uint64 warpCount = 0;
-			for (unsigned long long k = lx; k < num_divs_local; k += CPARTSIZE)
+			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 			{
 				warpCount += __popc(encode[j * num_divs_local + k]);
 			}
-			reduce_part<T>(partMask, warpCount);
+			reduce_part<T, CPARTSIZE>(partMask, warpCount);
 
 			if (lx == 0 && l[wx] == KCCOUNT)
 				clique_count[wx] += warpCount;
@@ -3732,7 +3724,7 @@ kckernel_edge_block_warp_binary_count_o(
 					to[k] = from[k] & encode[newIndex * num_divs_local + k];
 					warpCount += __popc(to[k]);
 				}
-				reduce_part<T>(partMask, warpCount);
+				reduce_part<T, CPARTSIZE>(partMask, warpCount);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 4);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 2);
 				// warpCount += __shfl_down_sync(partMask, warpCount, 1);
@@ -3827,7 +3819,7 @@ __device__ __forceinline__ uint64 explore_branch_o(uint start_level, uint num_di
 			to[k] = from[k] & encode[newIndex * num_divs_local + k];
 			warpCount += __popc(to[k]);
 		}
-		reduce_part<T>(partMask, warpCount);
+		reduce_part<T, CPARTSIZE>(partMask, warpCount);
 
 		if(lx == 0)
 		{
@@ -3900,7 +3892,7 @@ __device__ __forceinline__ uint64 explore_branch_sync(uint start_level, uint num
 			to[k] = from[k] & encode[newIndex * num_divs_local + k];
 			warpCount += __popc(to[k]);
 		}
-		reduce_part<T>(partMask, warpCount);
+		reduce_part<T, CPARTSIZE>(partMask, warpCount);
 
 		warpCount = __shfl_sync(partMask,  warpCount, 0, CPARTSIZE);
 	
@@ -3976,7 +3968,7 @@ __device__ __forceinline__ uint64 explore_branch(KCTask<T> *task, T* queue_encod
 			to[k] = from[k] & encode[newIndex * num_divs_local + k];
 			warpCount += __popc(to[k]);
 		}
-		reduce_part<T>(partMask, warpCount);
+		reduce_part<T, CPARTSIZE>(partMask, warpCount);
 
 		if(lx == 0)
 		{
@@ -4153,7 +4145,7 @@ kckernel_edge_block_warp_binary_count(
 			{
 				warpCount += __popc(encode[j * num_divs_local + k]);
 			}
-			reduce_part<T>(partMask, warpCount);
+			reduce_part<T, CPARTSIZE>(partMask, warpCount);
 
 			if (lx == 0 && l[wx] == KCCOUNT)
 				atomicAdd(counter, warpCount);
@@ -4198,7 +4190,7 @@ kckernel_edge_block_warp_binary_count(
 					to[k] = from[k] & encode[newIndex * num_divs_local + k];
 					warpCount += __popc(to[k]);
 				}
-				reduce_part<T>(partMask, warpCount);
+				reduce_part<T, CPARTSIZE>(partMask, warpCount);
 
 				if (lx == 0)
 				{
@@ -4419,7 +4411,7 @@ kckernel_node_block_warp_binary_pivot_count(
 			{
 				warpCount += __popc(encode[j * num_divs_local + k]);
 			}
-			reduce_part<T>(partMask[wx], warpCount);
+			reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
 
 			if(lx == 0 && maxCount[wx] < warpCount)
 			{
@@ -4451,7 +4443,7 @@ kckernel_node_block_warp_binary_pivot_count(
 			cl[j] = 0xFFFFFFFF;
 			warpCount += __popc(pl[j]);
 		}
-		reduce_part<T>(partMask[wx], warpCount);
+		reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
 		if(lx == 0 && threadIdx.x < num_divs_local)
 		{
 			atomicAdd(&(level_count[0]), (T)warpCount);
@@ -4539,7 +4531,7 @@ kckernel_node_block_warp_binary_pivot_count(
 						{
 							warpCount += __popc(to[k] & encode[j * num_divs_local + k]);
 						}
-						reduce_part<T>(partMask[wx], warpCount);
+						reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
 						if(lx == 0 && maxCount[wx] == srcLen + 1)
 						{
 							partition_set[wx] = true;
@@ -4596,7 +4588,7 @@ kckernel_node_block_warp_binary_pivot_count(
 						pl[(l-1)*num_divs_local + j] = ~(encode[level_pivot[l - 1] * num_divs_local + j]) & to[j] & m;
 						warpCount += __popc(pl[(l-1)*num_divs_local + j]);
 					}
-					reduce_part<T>(partMask[wx], warpCount);
+					reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
 
 					if(threadIdx.x == 0)
 					{
@@ -4780,7 +4772,7 @@ kckernel_edge_block_warp_binary_pivot_count(
 			{
 				warpCount += __popc(encode[j * num_divs_local + k]);
 			}
-			reduce_part<T>(partMask[wx], warpCount);
+			reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
 
 			if(lx == 0 && maxCount[wx] < warpCount)
 			{
@@ -4811,7 +4803,7 @@ kckernel_edge_block_warp_binary_pivot_count(
 			cl[j] = 0xFFFFFFFF;
 			warpCount += __popc(pl[j]);
 		}
-		reduce_part<T>(partMask[wx], warpCount);
+		reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
 		if(lx == 0 && threadIdx.x < num_divs_local)
 		{
 			atomicAdd(&(level_count[0]), (T)warpCount);
@@ -4897,7 +4889,7 @@ kckernel_edge_block_warp_binary_pivot_count(
 						{
 							warpCount += __popc(to[k] & encode[j * num_divs_local + k]);
 						}
-						reduce_part<T>(partMask[wx], warpCount);
+						reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
 						if(lx == 0 && maxCount[wx] == scounter + 1)
 						{
 							partition_set[wx] = true;
@@ -4954,7 +4946,7 @@ kckernel_edge_block_warp_binary_pivot_count(
 						pl[(l-2)*num_divs_local + j] = ~(encode[level_pivot[l - 2] * num_divs_local + j]) & to[j] & m;
 						warpCount += __popc(pl[(l-2)*num_divs_local + j]);
 					}
-					reduce_part<T>(partMask[wx], warpCount);
+					reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
 
 					if(threadIdx.x == 0)
 					{
