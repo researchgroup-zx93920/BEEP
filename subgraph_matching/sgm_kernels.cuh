@@ -1,6 +1,6 @@
 #pragma once
 
-const uint DEPTH = 6;
+const uint DEPTH = 10;
 
 __constant__ uint MINLEVEL;
 
@@ -115,7 +115,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function(
 			uint64 encode_offset = (uint64) orient_offset * MAXDEG;
 			encode = &adj_enc[encode_offset  /*srcStart[wx]*/];
 
-			level_offset = &current_level[orient_offset * (numPartitions * DEPTH)];
+			level_offset = &current_level[orient_offset * (numPartitions * MAXLEVEL)];
 		}
 		__syncthreads();
 
@@ -150,7 +150,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function(
 		for (T j = wx; j < srcLen; j += numPartitions)
 		{
 			if (SYMNODE_PTR[2] == 1 && (orient_mask[j/32] >> (j %32)) % 2 == 0) continue;
-			T* cl = level_offset + wx * (NUMDIVS * DEPTH);
+			T* cl = level_offset + wx * (NUMDIVS * MAXLEVEL);
 
 			for (T k = lx; k < DEPTH; k += CPARTSIZE)
 			{

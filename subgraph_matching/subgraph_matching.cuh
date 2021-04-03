@@ -146,16 +146,12 @@ namespace graph
             
             double time;
 
-            Timer qp;
+            Timer p;
             preprocess_query(patGraph);
-            time = qp.elapsed();
-            Log(info, "Template preprocessing Time: %f ms", time*1000);
-
-            Timer dp;
             initialize(dataGraph);
             peel_data(dataGraph);
-            time = dp.elapsed();
-            Log(info, "Data graph preprocessing time: %f ms", time*1000);
+            time = p.elapsed();
+            Log(info, "Preprocessing time: %f ms", time*1000);
             
             Timer t;
             count_subgraphs(dataGraph);
@@ -271,6 +267,7 @@ namespace graph
         delete[] degree;
 
         // Print statements to check results.
+        /*
         printf("Node Sequence:\n");
         for (int i = 0; i < query.numNodes; i++) {
             printf("i: %d;\tnode: %d (Degree: %d)\n", i, query_sequence->cdata()[i], query_degree->cdata()[i]);
@@ -293,6 +290,7 @@ namespace graph
             }
             printf("\n");
         }
+        */
     }
 
     template<typename T>
@@ -402,12 +400,12 @@ namespace graph
     void SG_Match<T>::initialize(graph::COOCSRGraph_d<T>& dataGraph)
     {
         const auto block_size = 256;
-        bucket_q.Create(unified, dataGraph.numEdges, dev_);
-        current_q.Create(unified, dataGraph.numEdges, dev_);
+        bucket_q.Create(unified, dataGraph.numNodes, dev_);
+        current_q.Create(unified, dataGraph.numNodes, dev_);
 
-        asc.initialize("Identity array asc", AllocationTypeEnum::gpu, dataGraph.numEdges, dev_);
-        execKernel(init_asc, (dataGraph.numEdges + BLOCK_SIZE - 1)/ BLOCK_SIZE, BLOCK_SIZE, dev_,false, 
-                    asc.gdata(), dataGraph.numEdges);
+        asc.initialize("Identity array asc", AllocationTypeEnum::gpu, dataGraph.numNodes, dev_);
+        execKernel(init_asc, (dataGraph.numNodes + BLOCK_SIZE - 1)/ BLOCK_SIZE, BLOCK_SIZE, dev_,false, 
+                    asc.gdata(), dataGraph.numNodes);
 
         CUDA_RUNTIME(cudaGetLastError());
         cudaDeviceSynchronize();
@@ -482,7 +480,7 @@ namespace graph
             keep.freeGPU();
             new_ptr.freeGPU();
             new_adj.freeGPU();
-        } while (current_q.count.gdata()[0] > 0);
+        } while (current_q.count.gdata()[0] > 0.05 * dataGraph.numNodes);
 
         // Recompute max degree
         uint grid_size = (dataGraph.numNodes - 1) / block_size + 1;
@@ -563,7 +561,7 @@ namespace graph
                 }
 
                 uint num_divs = (maxDeg + dv - 1) / dv;
-                uint64 level_size = numBlock * DEPTH * num_divs;
+                uint64 level_size = numBlock * max_qDegree * num_divs;
                 level_size *= (maxDeg >= bound_LD ? numPartitions_HD : numPartitions_LD);
                 uint64 encode_size = numBlock * maxDeg * num_divs;
                 uint64 orient_mask_size = numBlock * num_divs;
