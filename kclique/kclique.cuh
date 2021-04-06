@@ -482,7 +482,7 @@ kckernel_node_block_warp_pivot_count(
 	__shared__ bool  partition_set[numPartitions];
 	__shared__ T encode_offset, *encode;
 	__shared__ T *pl, *cl;
-	__shared__ T *level_count, *level_index, *level_prev_index, *rsize, *drop;
+	__shared__ T *level_count, /**level_index,*/ *level_prev_index, *rsize, *drop;
 	__shared__ T lo, level_item_offset;
 	__shared__ T maxCount[numPartitions], maxIndex[numPartitions], partMask[numPartitions];
 	__shared__ unsigned short cl_counter[512];
@@ -523,14 +523,14 @@ kckernel_node_block_warp_pivot_count(
 
 			level_item_offset = sm_id * CBPSM * (MAXDEG) + levelPtr * (MAXDEG);
 			level_count = &level_count_g[level_item_offset];
-			level_index = &level_index_g[level_item_offset];
+			//level_index = &level_index_g[level_item_offset];
 			level_prev_index = &level_prev_g[level_item_offset];
 			rsize = &level_r[level_item_offset ]; // will be removed
 			drop = &level_d[level_item_offset];  //will be removed
 
 			level_count[0] = 0;
 			level_prev_index[0] = 0;
-			level_index[0] = 0;
+			//level_index[0] = 0;
 			l = 2;
 			rsize[0] = 1;
 			drop[0] = 0;
@@ -636,7 +636,7 @@ kckernel_node_block_warp_pivot_count(
 		__syncthreads();
 
 		//Explore the tree
-		while((level_count[l - 2] > level_index[l - 2]))
+		while((level_count[l - 2] > 0 /*level_index[l - 2]*/))
 		{
 			T startIndex = level_prev_index[l- 2];
 			T newIndex = pl[(l-2)*srcLen + startIndex];
@@ -649,7 +649,10 @@ kckernel_node_block_warp_pivot_count(
 			if (threadIdx.x == 0)
 			{
 				level_prev_index[l - 2] = newIndex + 1;
-				level_index[l - 2]++;
+				//level_index[l - 2]++;
+
+				level_count[l - 2]--;
+
 				level_pivot[l - 1] = 0xFFFFFFFF;
 				path_more_explore = false;
 				maxIntersection = 0;
@@ -672,7 +675,7 @@ kckernel_node_block_warp_pivot_count(
 					atomicAdd(counter, ncr/*rsize[l-1]*/);
 					
 					//printf, go back
-					while (l > 2 && level_index[l - 2] >= level_count[l - 2])
+					while (l > 2 && level_count[l - 2] <= 0 /*level_index[l - 2] >= level_count[l - 2]*/)
 					{
 						(l)--;
 					}
@@ -792,7 +795,7 @@ kckernel_node_block_warp_pivot_count(
 							atomicAdd(counter, ncr/*rsize[l-1]*/);
 						}
 						//printf, go back
-						while (l > 2 && level_index[l - 2] >= level_count[l - 2])
+						while (l > 2 && level_count[l - 2] <= 0 /*level_index[l - 2] >= level_count[l - 2]*/)
 						{
 							(l)--;
 						}
@@ -835,7 +838,7 @@ kckernel_node_block_warp_pivot_count(
 						l++;
 						level_count[l-2] = 0;
 						level_prev_index[l-2] = 0;
-						level_index[l-2] = 0;
+						//level_index[l-2] = 0;
 					}
 
 					__syncthreads();
@@ -901,7 +904,7 @@ kckernel_edge_block_warp_pivot_count(
 	__shared__ bool  partition_set[numPartitions];
 	__shared__ T encode_offset, *encode, tri_offset, *tri;
 	__shared__ T *pl, *cl;
-	__shared__ T *level_count, *level_index, *level_prev_index, *rsize, *drop;
+	__shared__ T *level_count, /**level_index,*/ *level_prev_index, *rsize, *drop;
 	__shared__ T lo, level_item_offset;
 	__shared__ T maxCount[numPartitions], maxIndex[numPartitions], partMask[numPartitions];
 	__shared__ unsigned short cl_counter[512];
@@ -948,14 +951,14 @@ kckernel_edge_block_warp_pivot_count(
 
 			level_item_offset = sm_id * CBPSM * (MAXDEG) + levelPtr * (MAXDEG);
 			level_count = &level_count_g[level_item_offset];
-			level_index = &level_index_g[level_item_offset];
+			//level_index = &level_index_g[level_item_offset];
 			level_prev_index = &level_prev_g[level_item_offset];
 			rsize = &level_r[level_item_offset ]; // will be removed
 			drop = &level_d[level_item_offset];  //will be removed
 
 			level_count[0] = 0;
 			level_prev_index[0] = 0;
-			level_index[0] = 0;
+			//level_index[0] = 0;
 			l = 3;
 			rsize[0] = 1;
 			drop[0] = 0;
@@ -1064,7 +1067,7 @@ kckernel_edge_block_warp_pivot_count(
 		__syncthreads();
 
 		//Explore the tree
-		while((level_count[l - 3] > level_index[l - 3]))
+		while(level_count[l - 3] > 0 /*level_index[l - 3]*/)
 		{
 			T startIndex = level_prev_index[l- 3];
 			T newIndex = pl[(l-3)*scounter + startIndex];
@@ -1077,7 +1080,10 @@ kckernel_edge_block_warp_pivot_count(
 			if (threadIdx.x == 0)
 			{
 				level_prev_index[l - 3] = newIndex + 1;
-				level_index[l - 3]++;
+				//level_index[l - 3]++;
+
+				level_count[l - 3]--;
+
 				level_pivot[l - 2] = 0xFFFFFFFF;
 				path_more_explore = false;
 				maxIntersection = 0;
@@ -1100,7 +1106,7 @@ kckernel_edge_block_warp_pivot_count(
 					atomicAdd(counter, ncr/*rsize[l-1]*/);
 					
 					//printf, go back
-					while (l > 3 && level_index[l - 3] >= level_count[l - 3])
+					while (l > 3 && level_count[l - 3] <= 0/*level_index[l - 3] >= level_count[l - 3]*/)
 					{
 						(l)--;
 					}
@@ -1220,7 +1226,7 @@ kckernel_edge_block_warp_pivot_count(
 							atomicAdd(counter, ncr/*rsize[l-1]*/);
 						}
 						//printf, go back
-						while (l > 3 && level_index[l - 3] >= level_count[l - 3])
+						while (l > 3 && level_count[l - 3] <=0 /*level_index[l - 3] >= level_count[l - 3]*/)
 						{
 							(l)--;
 						}
@@ -1263,7 +1269,7 @@ kckernel_edge_block_warp_pivot_count(
 						l++;
 						level_count[l-3] = 0;
 						level_prev_index[l-3] = 0;
-						level_index[l-3] = 0;
+						//level_index[l-3] = 0;
 					}
 
 					__syncthreads();
@@ -2276,10 +2282,21 @@ namespace graph
 			const uint64 level_size = num_SMs * conc_blocks_per_SM * factor * max_level * num_divs;
 			const uint64 encode_size = num_SMs * conc_blocks_per_SM * maxDegree.gdata()[0] * num_divs;
 			const uint64 tri_size = num_SMs * conc_blocks_per_SM *  maxDegree.gdata()[0];
+			const uint64 stack_size = num_SMs * conc_blocks_per_SM * max_level * factor;
+
+
 			printf("Level Size = %llu, Encode Size = %llu\n", level_size, encode_size);
 			GPUArray<T> current_level2("Temp level Counter", gpu, level_size, dev_);
 			GPUArray<T> node_be("Temp level Counter", gpu, encode_size, dev_);
 			GPUArray<T> tri_list("Temp level Counter", gpu, tri_size, dev_);
+
+
+			// GPUArray<T> count_list("Temp level Counter", gpu, stack_size, dev_);
+			// GPUArray<T> index_list("Temp level Counter", gpu, stack_size, dev_);
+			// GPUArray<T> prev_list("Temp level Counter", gpu, stack_size, dev_);
+
+
+			
 
 			// simt::atomic<KCTask<T>, simt::thread_scope_device> *queue_data;
 			// CUDA_RUNTIME(cudaMalloc((void **)&queue_data, (num_SMs * conc_blocks_per_SM * QUEUE_SIZE) * sizeof(simt::atomic<KCTask<T>, simt::thread_scope_device>)));
@@ -2287,9 +2304,14 @@ namespace graph
 			// GPUArray<KCTask<T>> queue_data("test", unified, num_SMs * conc_blocks_per_SM * QUEUE_SIZE, dev_);
 			// GPUArray<T> queue_encode("test", unified, num_SMs * conc_blocks_per_SM * QUEUE_SIZE * num_divs, dev_);
 			
-			current_level2.setAll(0, true);
-			node_be.setAll(0, true);
-			tri_list.setAll(0, true);
+			current_level2.setAll(0, false);
+			node_be.setAll(0, false);
+			tri_list.setAll(0, false);
+
+			// count_list.setAll(0, false);
+			// index_list.setAll(0, false);
+			// prev_list.setAll(0, false);
+
 
 			const T numPartitions = block_size/partitionSize;
 			cudaMemcpyToSymbol(KCCOUNT, &kcount, sizeof(KCCOUNT));
@@ -2334,6 +2356,7 @@ namespace graph
 						d_bitmap_states.gdata(), node_be.gdata(), tri_list.gdata()
 					
 					);
+
 				}
 				level += span;
 
