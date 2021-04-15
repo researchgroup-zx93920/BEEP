@@ -35,15 +35,15 @@ namespace graph
 			mark.initialize("Queue Mark", at, capacity, devId);
 
 			device_queue = new GPUArray<GraphQueue_d<T, MarkType>>();
-			device_queue->initialize("Device Queue", at, 1, devId);
+			device_queue->initialize("Device Queue", unified, 1, devId);
 
 			count.switch_to_gpu();
 			queue.switch_to_gpu();
 			mark.switch_to_gpu();
 
-			device_queue->cdata()[0].count = count.gdata();
-			device_queue->cdata()[0].queue = queue.gdata();
-			device_queue->cdata()[0].mark = mark.gdata();
+			device_queue->gdata()[0].count = count.gdata();
+			device_queue->gdata()[0].queue = queue.gdata();
+			device_queue->gdata()[0].mark = mark.gdata();
 
 			device_queue->switch_to_gpu();
 		}

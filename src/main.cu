@@ -164,9 +164,9 @@ int main(int argc, char** argv)
 
 
 
-	g.rowPtr = new graph::GPUArray<uint>("Row pointer", AllocationTypeEnum::gpu, n+1, config.deviceId, true );
-	g.rowInd = new graph::GPUArray<uint>("Src Index", AllocationTypeEnum::gpu,  m, config.deviceId, true );
-	g.colInd = new graph::GPUArray<uint>("Dst Index", AllocationTypeEnum::gpu,  m, config.deviceId, true);
+	g.rowPtr = new graph::GPUArray<uint>("Row pointer", AllocationTypeEnum::cpuonly, n+1, config.deviceId, true );
+	g.rowInd = new graph::GPUArray<uint>("Src Index", AllocationTypeEnum::cpuonly,  m, config.deviceId, true );
+	g.colInd = new graph::GPUArray<uint>("Dst Index", AllocationTypeEnum::cpuonly,  m, config.deviceId, true);
 	uint *rp, *ri, *ci;
 	cudaMallocHost((void**)&rp, (n+1)*sizeof(uint));
 	cudaMallocHost((void**)&ri, (m)*sizeof(uint));
@@ -577,54 +577,6 @@ int main(int argc, char** argv)
 		double time = t.elapsed();
 		Log(info, "count time %f s", time);
 		Log(info, "MOHA %d kcore (%f teps)", mohacore.count(), m / time);
-
-
-		uint cc = 0;
-		for (uint i = 0; i < g.numNodes; i++)
-		{
-			uint srcStart = g.rowPtr->cdata()[i];
-			uint srcStop = g.rowPtr->cdata()[i + 1];
-
-			//if(mohacore.nodePriority.gdata()[i] == g.numEdges)
-			{
-				uint counter = 0;
-				uint max = 0;
-				for (uint j = srcStart; j < srcStop; j++)
-				{
-					uint dst = g.colInd->cdata()[j];
-
-					//printf("(%u, %u), ", dst, mohacore.nodePriority.gdata()[dst]);
-					// if(mohacore.nodeDegree.gdata()[i] < mohacore.nodeDegree.gdata()[dst])
-					// {
-					// 	counter++;
-					// 	if(max < mohacore.nodeDegree.gdata()[dst])
-					// 		max = mohacore.nodeDegree.gdata()[dst];
-					// }
-					// else 
-					//if(mohacore.nodeDegree.gdata()[i] == 111)
-					{
-						if (mohacore.nodePriority.gdata()[i] < mohacore.nodePriority.gdata()[dst])
-							counter++;
-
-						else if (mohacore.nodePriority.gdata()[i] == mohacore.nodePriority.gdata()[dst])
-						{
-							//if(dst < i)
-							counter++;
-						}
-					}
-				}
-				if (counter > mohacore.nodeDegree.gdata()[i])
-					printf("\n%u, %u, %u, %u, %u , (%u))\n", i, srcStop - srcStart, counter, mohacore.nodeDegree.gdata()[i], mohacore.nodePriority.gdata()[i], mohacore.nodePriority.gdata()[i]);
-
-				//break;
-			}
-
-
-		}
-		printf("Number of nodes = %u\n", cc);
-
-
-
 	}
 
 	if (config.mt == KCLIQUE)
@@ -964,7 +916,7 @@ int main(int argc, char** argv)
 	//#define VLDB2020
 #ifdef VLDB2020
 	//We need unified to do stream compaction
-		graph::GPUArray<int> output("KT Output", AllocationTypeEnum::unified, m / 2, 0);
+		graph::GPUArray<int> output("KT Output", AllocationTypeEnum::unified, m / 2, config.deviceId);
 		graph::BmpGpu<uint> bmp(config.deviceId);
 		bmp.getEidAndEdgeList(g);// CPU
 		bmp.InitBMP(*gd);
@@ -991,7 +943,7 @@ int main(int argc, char** argv)
 		mohatruss.sync();
 		double time = t.elapsed();
 		Log(info, "count time %f s", time);
-		Log(info, "MOHA %d ktruss (%f teps)", mohatruss.count(), m / time); */
+		Log(info, "MOHA %d ktruss (%f teps)", mohatruss.count(), m / time);
 #endif	
 
 #define OUR_NEW_KTRUSS
@@ -1027,7 +979,7 @@ int main(int argc, char** argv)
 		geid.colInd = colIndex.gdata();
 		geid.eid = EID.gdata();
 
-		graph::SingleGPU_KtrussMod<uint, PeelType> mohatrussM(config.deviceId);
+		graph::SingleGPU_KtrussMod<uint, PeelType> mohatrussM(config.deviceId, config.allocation);
 
 		Timer t;
 		graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(config.deviceId, m, n, mohatrussM.stream());
