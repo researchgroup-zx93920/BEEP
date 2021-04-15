@@ -146,27 +146,9 @@ int main(int argc, char** argv)
 	g.numEdges = m;
 	g.numNodes = n;
 
-	//Redundunt, will be removed
-	// g.rowPtr = new graph::GPUArray<uint>("Row pointer", gpu, n+1, config.deviceId, true, true);
-	// g.rowInd = new graph::GPUArray<uint>("Src Index", gpu, m, config.deviceId, true, true);
-	// g.colInd = new graph::GPUArray<uint>("Dst Index", gpu, m, config.deviceId, true, true);
-	// uint *rp, *ri, *ci;
-	// cudaMallocHost((void**)&rp, (n+1)*sizeof(uint));
-	// cudaMallocHost((void**)&ri, (m)*sizeof(uint));
-	// cudaMallocHost((void**)&ci, (m)*sizeof(uint));
-	// CUDA_RUNTIME(cudaMemcpy(rp, csrcoo.row_ptr(), (n+1)*sizeof(uint), cudaMemcpyKind::cudaMemcpyHostToHost));
-	// CUDA_RUNTIME(cudaMemcpy(ri, csrcoo.row_ind(), (m)*sizeof(uint) , cudaMemcpyKind::cudaMemcpyHostToHost));
-	// CUDA_RUNTIME(cudaMemcpy(ci, csrcoo.col_ind(), (m)*sizeof(uint), cudaMemcpyKind::cudaMemcpyHostToHost));
-
-	// g.rowPtr->cdata() = rp;
-	// g.rowInd->cdata() = ri;
-	// g.colInd->cdata() = ci;
-
-
-
-	g.rowPtr = new graph::GPUArray<uint>("Row pointer", AllocationTypeEnum::cpuonly, n+1, config.deviceId, true );
-	g.rowInd = new graph::GPUArray<uint>("Src Index", AllocationTypeEnum::cpuonly,  m, config.deviceId, true );
-	g.colInd = new graph::GPUArray<uint>("Dst Index", AllocationTypeEnum::cpuonly,  m, config.deviceId, true);
+	g.rowPtr = new graph::GPUArray<uint>("Row pointer", AllocationTypeEnum::noalloc, n+1, config.deviceId, true );
+	g.rowInd = new graph::GPUArray<uint>("Src Index", AllocationTypeEnum::noalloc,  m, config.deviceId, true );
+	g.colInd = new graph::GPUArray<uint>("Dst Index", AllocationTypeEnum::noalloc,  m, config.deviceId, true);
 	uint *rp, *ri, *ci;
 	cudaMallocHost((void**)&rp, (n+1)*sizeof(uint));
 	cudaMallocHost((void**)&ri, (m)*sizeof(uint));
@@ -175,14 +157,9 @@ int main(int argc, char** argv)
 	CUDA_RUNTIME(cudaMemcpy(ri, csrcoo.row_ind(), (m)*sizeof(uint) , cudaMemcpyKind::cudaMemcpyHostToHost));
 	CUDA_RUNTIME(cudaMemcpy(ci, csrcoo.col_ind(), (m)*sizeof(uint), cudaMemcpyKind::cudaMemcpyHostToHost));
 
-	g.rowPtr->cdata() = rp;
-	g.rowInd->cdata() = ri;
-	g.colInd->cdata() = ci;
-
-
-	// g.rowPtr->cdata() = csrcoo.row_ptr();
-	// g.rowInd->cdata() = csrcoo.row_ind();
-	// g.colInd->cdata() = csrcoo.col_ind();
+	g.rowPtr->cdata() = rp; g.rowPtr->setAlloc(cpuonly);
+	g.rowInd->cdata() = ri; g.rowInd->setAlloc(cpuonly);
+	g.colInd->cdata() = ci; g.colInd->setAlloc(cpuonly);
 
 	///Now we need to orient the graph
 	Timer total_timer;
@@ -192,7 +169,6 @@ int main(int argc, char** argv)
 
 	double total = total_timer.elapsed();
 	Log(info, "Transfer Time: %f s", total);
-
 
 	Timer t;
 	graph::SingleGPU_Kcore<uint, PeelType> mohacore(config.deviceId);
