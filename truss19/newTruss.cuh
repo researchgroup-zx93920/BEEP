@@ -454,15 +454,15 @@ namespace graph
 				}
 				else
 				{
-					if (percDeleted_l > 0.1)
-					{
-						StreamComapction(g.numNodes, g.numEdges, g.rowPtr_csr, g.colInd_csr, g.eid, processed,
-							edge_deleted,
-							newRowPtr, new_eid, newColIndex_csr,
-							numEdges, todo);
+					// if (percDeleted_l > 0.1)
+					// {
+					// 	StreamComapction(g.numNodes, g.numEdges, g.rowPtr_csr, g.colInd_csr, g.eid, processed,
+					// 		edge_deleted,
+					// 		newRowPtr, new_eid, newColIndex_csr,
+					// 		numEdges, todo);
 
-						numEdges = todo;
-					}
+					// 	numEdges = todo;
+					// }
 
 				}
 				level++;
