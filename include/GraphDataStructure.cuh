@@ -33,22 +33,31 @@ namespace graph
         graph->numEdges = g.numEdges;
         graph->capacity = g.capacity;
 
+        g.rowPtr->switch_to_gpu(dev, g.numNodes + 1);
+        graph->rowPtr = g.rowPtr->gdata();
+
         if (at == AllocationTypeEnum::unified)
         {
-            g.rowPtr->switch_to_unified(dev, g.numNodes + 1);
             g.rowInd->switch_to_unified(dev, g.numEdges);
             g.colInd->switch_to_unified(dev, g.numEdges);
+            graph->rowInd = g.rowInd->gdata();
+            graph->colInd = g.colInd->gdata();
         }
         else if (at == AllocationTypeEnum::gpu)
         {
-            g.rowPtr->switch_to_gpu(dev, g.numNodes + 1);
+           
             g.rowInd->switch_to_gpu(dev, g.numEdges);
             g.colInd->switch_to_gpu(dev, g.numEdges);
+            graph->rowInd = g.rowInd->gdata();
+            graph->colInd = g.colInd->gdata();
+        }
+        else if(at == AllocationTypeEnum::zerocopy)
+        {
+            graph->rowInd = g.rowInd->cdata();
+            graph->colInd = g.colInd->cdata();
         }
 
-        graph->rowPtr = g.rowPtr->gdata();
-        graph->rowInd = g.rowInd->gdata();
-        graph->colInd = g.colInd->gdata();
+       
     }
 
    template<typename T>

@@ -103,7 +103,8 @@ namespace graph
 			{
 				freed = true;
 				CUDA_RUNTIME(cudaSetDevice(_deviceId));
-				CUDA_RUNTIME(cudaFree(gpu_data));
+				if(_at == AllocationTypeEnum::gpu || _at == AllocationTypeEnum::unified)
+					CUDA_RUNTIME(cudaFree(gpu_data));
 				CUDA_RUNTIME(cudaStreamDestroy(_stream));
 				N = 0;
 			}

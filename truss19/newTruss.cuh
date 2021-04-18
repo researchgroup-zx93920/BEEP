@@ -263,9 +263,9 @@ namespace graph
 			if (shrink_first_time) { //shrink first time, allocate the buffers
 				shrink_first_time = false;
 				Timer alloc_timer;
-				new_adj.initialize("New Adj", gpu, new_edge_num * 2, dev_);
-				new_eid.initialize("New EID", gpu, new_edge_num * 2, dev_);
-				new_offset.initialize("New Row Pointer", unified, (n + 1), dev_);
+				new_adj.initialize("New Adj", at_, new_edge_num * 2, dev_);
+				new_eid.initialize("New EID", at_, new_edge_num * 2, dev_);
+				new_offset.initialize("New Row Pointer", at_, (n + 1), dev_);
 				edge_deleted.initialize("Edge deleted", gpu, old_edge_num * 2, dev_);
 			}
 			graph::CubLarge<uint> s(dev_);

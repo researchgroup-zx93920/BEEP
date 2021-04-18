@@ -164,9 +164,27 @@ int main(int argc, char** argv)
 	///Now we need to orient the graph
 	Timer total_timer;
 
-	graph::COOCSRGraph_d<uint>* gd;
-	to_csrcoo_device(g, gd, config.deviceId, config.allocation); //got to device !!
+	graph::COOCSRGraph_d<uint>* gd = (graph::COOCSRGraph_d<uint>*)malloc(sizeof(graph::COOCSRGraph_d<uint>));
+	g.rowPtr->switch_to_gpu(config.deviceId);
 
+	gd->numNodes = g.numNodes;
+	gd->numEdges = g.numEdges;
+	gd->capacity = g.capacity;
+	gd->rowPtr = g.rowPtr->gdata();
+
+	if(!config.isSmall || g.numEdges > 500000000)
+	{
+		gd->rowInd = g.rowInd->cdata();
+		gd->colInd = g.colInd->cdata();
+
+	}
+	else
+	{
+		g.rowInd->switch_to_gpu(config.deviceId);
+		g.colInd->switch_to_gpu(config.deviceId);
+		gd->rowInd = g.rowInd->gdata();
+		gd->colInd = g.colInd->gdata();
+	}
 	double total = total_timer.elapsed();
 	Log(info, "Transfer Time: %f s", total);
 
@@ -179,9 +197,9 @@ int main(int argc, char** argv)
 		else if (config.orient == Degree)
 			mohacore.getNodeDegree(*gd);
 
-		graph::GPUArray<uint> rowInd_half("Half Row Index", AllocationTypeEnum::unified, m / 2, config.deviceId),
-			colInd_half("Half Col Index", AllocationTypeEnum::unified, m / 2, config.deviceId),
-			new_rowPtr("New", AllocationTypeEnum::unified, n + 1, config.deviceId),
+		graph::GPUArray<uint> rowInd_half("Half Row Index", config.allocation, m / 2, config.deviceId),
+			colInd_half("Half Col Index", config.allocation, m / 2, config.deviceId),
+			new_rowPtr("New Row Pointer", config.allocation, n + 1, config.deviceId),
 			asc("ASC temp", AllocationTypeEnum::unified, m, config.deviceId);
 		graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, config.deviceId);
 
@@ -214,7 +232,7 @@ int main(int argc, char** argv)
 
 		execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), new_rowPtr.gdata());
 		uint total = CUBScanExclusive<uint, uint>(new_rowPtr.gdata(), new_rowPtr.gdata(), n, config.deviceId, 0, config.allocation);
-		new_rowPtr.gdata()[n] = total;
+		new_rowPtr.setSingle(n, total, false);
 		//assert(total == new_edge_num * 2);
 		cudaDeviceSynchronize();
 		asc.freeGPU();
@@ -230,7 +248,14 @@ int main(int argc, char** argv)
 		g.rowPtr = &new_rowPtr;
 		g.rowInd = &rowInd_half;
 		g.colInd = &colInd_half;
-		to_csrcoo_device(g, gd, config.deviceId, config.allocation); //got to device !!
+		//to_csrcoo_device(g, gd, config.deviceId, config.allocation); //got to device !!
+
+		gd->numNodes = g.numNodes;
+		gd->numEdges = g.numEdges;
+		gd->capacity = g.capacity;
+		gd->rowPtr = new_rowPtr.gdata();
+		gd->rowInd = g.rowInd->gdata();
+		gd->colInd = g.colInd->gdata();
 
 
 	}

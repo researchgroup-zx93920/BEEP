@@ -32,6 +32,7 @@ struct Config {
     ProcessBy processBy;
     ProcessingElementEnum processElement;
     KcliqueConfig kcConfig;
+    bool isSmall;
 
 
 };
@@ -272,6 +273,7 @@ static void usage() {
         "\nOptions:"
         "\n    -g <Src graph FileName>       Name of file with input graph (default = )"
         "\n    -r <Dst graph FileName>       Name of file with dst graph only for conversion (default = )"
+        "\n    -w   <is small graph>         Use global memory to allocate the undirected graph, otherwise zerocopy memory"
         "\n    -d <Device Id>                      GPU Device Id (default = 0)"
         "\n    -m <MainTask>     Name of the task to perform (default = TC)"
         "\n    -x                   Print Graph Stats         "
@@ -301,16 +303,18 @@ static Config parseArgs(int argc, char** argv) {
     config.processBy = ByNode;
     config.processElement = BlockWarp;
     config.kcConfig = parseKcConfig("");
+    config.isSmall = false;
 
 #ifndef __VS__
     int opt;
 
     printf("parsing configuration .... \n");
 
-    while ((opt = getopt(argc, argv, "g:r:d:m:x:o:a:k:h:v:s:p:e:q:")) >= 0) {
+    while ((opt = getopt(argc, argv, "g:r:d:m:x:o:a:k:h:v:s:p:e:q:w:")) >= 0) {
         switch (opt) {
         case 'g': config.srcGraph = optarg;                                 break;
         case 'r': config.dstGraph = optarg;                                 break;
+        case 'w': config.isSmall = true;                                    break;
         case 'd': config.deviceId = atoi(optarg);                           break;
         case 'm': config.mt = parseMainTask(optarg);                        break;
         case 'x': config.printStats = true;                                 break;
@@ -337,6 +341,7 @@ static void printConfig(Config config)
     printf("    DST Graph: %s\n", config.dstGraph);
     printf("    Device Id = %u\n", config.deviceId);
     printf("    Allocation = %s\n", asString(config.allocation));
+    printf("    Small Graph = %s\n", config.isSmall? "Small Graph Allocation" : "Large Graph Allocation");
     printf("    Main Task = %s\n", asString(config.mt));
     printf("    Graph Orientation = %s\n", asString(config.orient));
     printf("    Process By = %s\n", asString(config.processBy));

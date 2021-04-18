@@ -438,7 +438,7 @@ namespace graph
 			const size_t nodeOffset = 0, const size_t edgeOffset = 0)
 		{
 			const int dimBlock = 256;
-			nodeDegree.initialize("Node Degree", unified, g.numNodes, dev_);
+			nodeDegree.initialize("Node Degree", gpu, g.numNodes, dev_);
 			uint dimGridNodes = (g.numNodes + dimBlock - 1) / dimBlock;
 			execKernel(getNodeDegree_kernel<T>, dimGridNodes, dimBlock, dev_, false, nodeDegree.gdata(), g);
 
@@ -472,7 +472,7 @@ namespace graph
 			processed.setAll(false, false);
 
 
-			nodePriority.initialize("Edge Support", unified, g.numNodes, dev_);
+			nodePriority.initialize("Edge Support", gpu, g.numNodes, dev_);
 			nodePriority.setAll(g.numEdges, false);
 
 			uint numDeleted_l = 0;
