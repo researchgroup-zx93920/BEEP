@@ -23,10 +23,9 @@ namespace graph
     private:
         // GPU info
         int dev_;
-        cudaStream_t stream_;
-        AllocationTypeEnum alloc_;
 
         // Configuration
+        MAINTASK task_;
         ProcessBy by_;
 
         // Processed query graphs
@@ -38,6 +37,7 @@ namespace graph
         GPUArray<uint>* sym_nodes_ptr;
         
         uint min_qDegree, max_qDegree;
+        uint unmat_level;
 
         // Processed data graph info
         GPUArray<uint64> counter;
@@ -97,18 +97,17 @@ namespace graph
 
     public:
         // Constructors
-        SG_Match(int dev = 0, ProcessBy by = ByNode, AllocationTypeEnum alloc = AllocationTypeEnum::cpuonly, cudaStream_t stream = 0) :
-            dev_(dev),
+        SG_Match(MAINTASK task = GRAPH_MATCH, ProcessBy by = ByNode, int dev = 0) :
+            task_(task),
             by_(by),
-            alloc_(alloc),
-            stream_(stream) 
+            dev_(dev)
         {
-            query_sequence = new GPUArray<T>("Query Sequence", alloc_);
-            query_degree = new GPUArray<T>("Query degree", alloc_);
-            query_edges = new GPUArray<uint>("Query edges", alloc_);
-            query_edge_ptr = new GPUArray<uint>("Query edge ptr", alloc_); 
-            sym_nodes = new GPUArray<uint>("Symmetrical nodes", alloc_);
-            sym_nodes_ptr = new GPUArray<uint>("Symmetrical node pointer", alloc_);
+            query_sequence = new GPUArray<T>("Query Sequence", cpuonly);
+            query_degree = new GPUArray<T>("Query degree", cpuonly);
+            query_edges = new GPUArray<uint>("Query edges", cpuonly);
+            query_edge_ptr = new GPUArray<uint>("Query edge ptr", cpuonly); 
+            sym_nodes = new GPUArray<uint>("Symmetrical nodes", cpuonly);
+            sym_nodes_ptr = new GPUArray<uint>("Symmetrical node pointer", cpuonly);
 
             counter.initialize("Temp level Counter", unified, 1, dev_);
             max_dDegree.initialize("Temp Degree", unified, 1, dev_);
@@ -120,6 +119,8 @@ namespace graph
             
             max_qDegree = 0;
             min_qDegree = INT_MAX;
+
+            unmat_level = 0;
         }
 
         // Destructor
@@ -146,8 +147,8 @@ namespace graph
         void run(graph::COOCSRGraph_d<T>& dataGraph, graph::COOCSRGraph<T>& patGraph)
         {
             CUDA_RUNTIME(cudaSetDevice(dev_));
-		    CUDA_RUNTIME(cudaStreamCreate(&stream_));
-            CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+		    //CUDA_RUNTIME(cudaStreamCreate(&stream_));
+            //CUDA_RUNTIME(cudaStreamSynchronize(stream_));
             
             double time;
 
@@ -168,6 +169,7 @@ namespace graph
         // Function declarations. Definitions outside class.
         void preprocess_query(graph::COOCSRGraph<T>& patGraph);
         void detect_symmetry();
+        void check_unmat();
         void initialize(graph::COOCSRGraph_d<T>& dataGraph);
         void peel_data(graph::COOCSRGraph_d<T>& dataGraph);
         void count_subgraphs(graph::COOCSRGraph_d<T>& dataGraph);
@@ -266,13 +268,16 @@ namespace graph
                    
         // Detect symmetrical nodes in query graph
         detect_symmetry();
+
+        // Check for unmaterialized nodes
+        if (task_ == GRAPH_COUNT) check_unmat();
         
         // Clean Up
         delete[] d_M;
         delete[] degree;
 
         // Print statements to check results.
-        /*
+
         printf("Node Sequence:\n");
         for (int i = 0; i < query.numNodes; i++) {
             printf("i: %d;\tnode: %d (Degree: %d)\n", i, query_sequence->cdata()[i], query_degree->cdata()[i]);
@@ -287,6 +292,8 @@ namespace graph
             printf("\n");
         }
 
+        printf("Number of levels (other than last) to unmaterialize: %d\n", unmat_level);
+
         printf("Symmetrical nodes:\n");
         for (int i = 0; i < query.numNodes; i++) {
             printf("i: %d\t", i);
@@ -295,7 +302,7 @@ namespace graph
             }
             printf("\n");
         }
-        */
+
     }
 
     template<typename T>
@@ -402,6 +409,24 @@ namespace graph
     }
 
     template<typename T>
+    void SG_Match<T>::check_unmat()
+    {
+        // For now we only check for last two levels to be unmat
+        // Last level is always unmat
+        unmat_level = 0;
+        // 2nd to last level is unmat if not used by last level
+        bool found = false;
+        for (int i = query_edge_ptr->cdata()[query_sequence->N-1]; i < query_edge_ptr->cdata()[query_sequence->N]; i++) {
+            if (query_edges->cdata()[i] == query_sequence->N - 2) {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) unmat_level++;
+    }
+
+    template<typename T>
     void SG_Match<T>::initialize(graph::COOCSRGraph_d<T>& dataGraph)
     {
         const auto block_size = 256;
@@ -409,7 +434,7 @@ namespace graph
         bucket_q.Create(unified, qSize, dev_);
         current_q.Create(unified, qSize, dev_);
 
-        asc.initialize("Identity array asc", AllocationTypeEnum::gpu, qSize, dev_);
+        asc.initialize("Identity array asc", unified, qSize, dev_);
         execKernel(init_asc, (qSize + BLOCK_SIZE - 1)/ BLOCK_SIZE, BLOCK_SIZE, dev_,false, 
                     asc.gdata(), qSize);
 
@@ -544,6 +569,7 @@ namespace graph
 
         // GPU Constant memory
         cudaMemcpyToSymbol(KCCOUNT, &(query_sequence->N), sizeof(KCCOUNT));
+        cudaMemcpyToSymbol(LUNMAT, &(unmat_level), sizeof(LUNMAT));
         cudaMemcpyToSymbol(MAXLEVEL, &max_qDegree, sizeof(MAXLEVEL));       
         cudaMemcpyToSymbol(MINLEVEL, &min_qDegree, sizeof(MINLEVEL));
         cudaMemcpyToSymbol(QEDGE, &(query_edges->cdata()[0]), query_edges->N * sizeof(QEDGE[0]));

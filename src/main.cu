@@ -773,7 +773,7 @@ int main(int argc, char** argv)
 
 	}
 
-	if (config.mt == GRAPH_MATCH)
+	if (config.mt == GRAPH_MATCH || config.mt == GRAPH_COUNT)
 	{
 		// Read Template graph from file
 		graph::EdgeListFile patFile(config.patGraph);
@@ -799,7 +799,7 @@ int main(int argc, char** argv)
 		patG.colInd->cdata() = patCsrcoo.col_ind();
 
 		// Initialise subgraph matcher class
-		graph::SG_Match<uint>* sgm = new graph::SG_Match<uint>(config.deviceId);
+		graph::SG_Match<uint>* sgm = new graph::SG_Match<uint>(config.mt, config.processBy, config.deviceId);
 		
 		// Process template and count subgraphs
 		sgm->run(*gd, patG);

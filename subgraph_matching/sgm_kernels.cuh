@@ -3,6 +3,7 @@
 const uint DEPTH = 10;
 
 __constant__ uint MINLEVEL;
+__constant__ uint LUNMAT;
 
 __constant__ uint QEDGE[DEPTH * (DEPTH-1) / 2];
 __constant__ uint QEDGE_PTR[DEPTH + 1];
@@ -69,6 +70,40 @@ remove_edges_connected_to_node(
 			}
 		}
 	}
+}
+
+template<typename T, uint CPARTSIZE, bool MAT>
+__device__ __forceinline__ void compute_intersection(
+	uint64 &wc,
+	const size_t lx, const T partMask,
+	const T num_divs_local, const T maskIdx, const T lvl,
+	T *to, T* cl, T* level_prev_index, T *encode, T *orient_mask
+)
+{
+	wc = 0;
+	for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+	{
+		to[threadIdx.x] = cl[k] & unset_mask(maskIdx, k);
+		// Compute Intersection
+		for (T q_idx = QEDGE_PTR[lvl] + 1; q_idx < QEDGE_PTR[lvl+1]; q_idx++) {
+			to[threadIdx.x] &= encode[(level_prev_index[QEDGE[q_idx]] - 1) * num_divs_local + k]; 
+		}
+		// Remove Redundancies
+		for (T sym_idx = SYMNODE_PTR[lvl]; sym_idx < SYMNODE_PTR[lvl+1]; sym_idx++) {
+			if (!MAT && SYMNODE[sym_idx] == lvl - 1) continue;
+			if (SYMNODE[sym_idx] > 0) to[threadIdx.x] &= ~(cl[(SYMNODE[sym_idx] - 1) * num_divs_local + k] & get_mask(level_prev_index[SYMNODE[sym_idx]] - 1, k));
+			else to[threadIdx.x] &= orient_mask[k];
+		}
+		wc += __popc(to[threadIdx.x]);
+		cl[(lvl - 1) * num_divs_local + k] = to[threadIdx.x];
+	}
+	reduce_part<T, CPARTSIZE>(partMask, wc);
+	
+	// warpCount += __shfl_down_sync(partMask, warpCount, 16);
+	// warpCount += __shfl_down_sync(partMask, warpCount, 8);
+	// warpCount += __shfl_down_sync(partMask, warpCount, 4);
+	// warpCount += __shfl_down_sync(partMask, warpCount, 2);
+	// warpCount += __shfl_down_sync(partMask, warpCount, 1);
 }
 
 template<typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
@@ -162,6 +197,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			{
 				l[wx] = 3;
 				sg_count[wx] = 0;
+				level_prev_index[wx][1] = j + 1;
 			}
 
 			//get warp count ??
@@ -189,14 +225,33 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			// warpCount += __shfl_down_sync(partMask, warpCount, 2);
 			// warpCount += __shfl_down_sync(partMask, warpCount, 1);
 
+			if (l[wx] == KCCOUNT - LUNMAT && LUNMAT == 1)
+			{
+				uint64 tmpCount;
+				compute_intersection<T, CPARTSIZE, false>(
+					tmpCount, lx, partMask, num_divs_local, j, l[wx], to, cl, level_prev_index[wx], encode, orient_mask
+				);
+				warpCount *= tmpCount;
+
+				tmpCount = 0;
+				for (T k = lx; k < num_divs_local; k+= CPARTSIZE)
+				{
+					tmpCount += __popc(cl[num_divs_local + k] & cl[2 * num_divs_local + k]);
+				}
+				reduce_part<T, CPARTSIZE>(partMask, tmpCount);
+				
+				warpCount -= tmpCount;
+
+				if (SYMNODE_PTR[l[wx]+1] > SYMNODE_PTR[l[wx]] &&
+					SYMNODE[SYMNODE_PTR[l[wx]+1] - 1] == l[wx] - 1)
+					warpCount /= 2;
+			}
 			if (lx == 0)
 			{
-				if (l[wx] == KCCOUNT) sg_count[wx] += warpCount;
+				if (l[wx] == KCCOUNT - LUNMAT) sg_count[wx] += warpCount;
 				else {
 					level_count[wx][l[wx] - 3] = warpCount;
 					level_index[wx][l[wx] - 3] = 0;
-					level_prev_index[wx][1] = j + 1;
-					level_prev_index[wx][2] = 0;
 				}
 			}
 
@@ -225,39 +280,42 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 				__syncwarp(partMask);
 
 				//Intersect
-				warpCount = 0;
-				for (T k = lx; k < num_divs_local; k += CPARTSIZE)
-				{
-					to[threadIdx.x] = cl[k] & unset_mask(newIndex[wx], k);
-					// Compute Intersection
-					for (T q_idx = QEDGE_PTR[l[wx]] + 1; q_idx < QEDGE_PTR[l[wx]+1]; q_idx++) {
-						to[threadIdx.x] &= encode[(level_prev_index[wx][QEDGE[q_idx]] - 1) * num_divs_local + k]; 
-					}
-					// Remove Redundancies
-					for (T sym_idx = SYMNODE_PTR[l[wx]]; sym_idx < SYMNODE_PTR[l[wx]+1]; sym_idx++) {
-						if (SYMNODE[sym_idx] > 0) to[threadIdx.x] &= ~(cl[(SYMNODE[sym_idx] - 1) * num_divs_local + k] & get_mask(level_prev_index[wx][SYMNODE[sym_idx]] - 1, k));
-						else to[threadIdx.x] &= orient_mask[k];
-					}
-					warpCount += __popc(to[threadIdx.x]);
-					cl[(l[wx] - 1) * num_divs_local + k] = to[threadIdx.x];
-				}
-				reduce_part<T, CPARTSIZE>(partMask, warpCount);
-				// warpCount += __shfl_down_sync(partMask, warpCount, 16);
-				// warpCount += __shfl_down_sync(partMask, warpCount, 8);
-				// warpCount += __shfl_down_sync(partMask, warpCount, 4);
-				// warpCount += __shfl_down_sync(partMask, warpCount, 2);
-				// warpCount += __shfl_down_sync(partMask, warpCount, 1);
+				compute_intersection<T, CPARTSIZE, true>(
+					warpCount, lx, partMask, num_divs_local, newIndex[wx], l[wx], to, cl, level_prev_index[wx], encode, orient_mask
+				);
 
-				if ( l[wx] + 1 < KCCOUNT) {
+				if (l[wx] + 1 == KCCOUNT - LUNMAT && LUNMAT == 1)
+				{
+					uint64 tmpCount;
+					compute_intersection<T, CPARTSIZE, false>(
+						tmpCount, lx, partMask, num_divs_local, newIndex[wx], l[wx] + 1, to, cl, level_prev_index[wx], encode, orient_mask
+					);
+					warpCount *= tmpCount;
+
+					tmpCount = 0;
+					for (T k = lx; k < num_divs_local; k+= CPARTSIZE)
+					{
+						tmpCount += __popc(cl[(l[wx] - 1) * num_divs_local + k] & cl[l[wx] * num_divs_local + k]);
+					}
+					reduce_part<T, CPARTSIZE>(partMask, tmpCount);
+					
+					warpCount -= tmpCount;
+
+					if (SYMNODE_PTR[l[wx]+2] > SYMNODE_PTR[l[wx]+1] &&
+						SYMNODE[SYMNODE_PTR[l[wx]+2] - 1] == l[wx])
+						warpCount /= 2;
+				}
+
+				if ( l[wx] + 1 < KCCOUNT - LUNMAT) {
 					for (T k = lx; k < num_divs_local; k += CPARTSIZE) 
 						cl[k] &= unset_mask(level_prev_index[wx][l[wx]-1]-1, k);
 				}
 				if (lx == 0)
 				{
-					if (l[wx] + 1 == KCCOUNT) {
+					if (l[wx] + 1 == KCCOUNT - LUNMAT) {
 						sg_count[wx] += warpCount;
 					}
-					else if (l[wx] + 1 < KCCOUNT) //&& warpCount >= KCCOUNT - l[wx])
+					else if (l[wx] + 1 < KCCOUNT - LUNMAT) //&& warpCount >= KCCOUNT - l[wx])
 					{
 						(l[wx])++;
 						level_count[wx][l[wx] - 3] = warpCount;

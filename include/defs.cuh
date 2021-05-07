@@ -47,6 +47,7 @@ enum MAINTASK {
     KTRUSS,
     KCLIQUE,
     CROSSDECOMP,
-    GRAPH_MATCH
+    GRAPH_MATCH,
+    GRAPH_COUNT
 
 };

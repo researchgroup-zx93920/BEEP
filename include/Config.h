@@ -62,6 +62,9 @@ static MAINTASK parseMainTask(const char* s)
     if (strcmp(s, "sgm") == 0)
         return GRAPH_MATCH;
 
+    if (strcmp(s, "sgc") == 0)
+        return GRAPH_COUNT;
+
     fprintf(stderr, "Unrecognized -mt option (Main TASK): %s\n", s);
     exit(0);
 }
@@ -79,6 +82,7 @@ static const char* asString(MAINTASK mt) {
     case KCLIQUE:            return "kclique";
     case CROSSDECOMP:   return "cd";
     case GRAPH_MATCH:   return "sgm";
+    case GRAPH_COUNT:   return "sgc";
 
     default:
         fprintf(stderr, "Unrecognized main task\n");
