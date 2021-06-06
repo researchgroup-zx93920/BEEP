@@ -67,6 +67,9 @@ static MAINTASK parseMainTask(const char* s)
     if (strcmp(s, "kclique") == 0)
         return KCLIQUE;
 
+    if (strcmp(s, "kclique-local") == 0)
+        return KCLIQUE_LOCAL;
+
     if (strcmp(s, "cd") == 0)
         return CROSSDECOMP;
 
@@ -85,6 +88,7 @@ static const char* asString(MAINTASK mt) {
     case KCORE:            return "kcore";
     case KTRUSS:            return "ktruss";
     case KCLIQUE:            return "kclique";
+    case KCLIQUE_LOCAL:            return "kclique-local";
     case CROSSDECOMP:   return "cd";
 
     default:
@@ -273,13 +277,15 @@ static void usage() {
         "\nOptions:"
         "\n    -g <Src graph FileName>       Name of file with input graph (default = )"
         "\n    -r <Dst graph FileName>       Name of file with dst graph only for conversion (default = )"
-        "\n    -w   <is small graph>         Use global memory to allocate the undirected graph, otherwise zerocopy memory"
+        "\n    -w <is small graph>         Use global memory to allocate the undirected graph, otherwise zerocopy memory"
         "\n    -d <Device Id>                      GPU Device Id (default = 0)"
         "\n    -m <MainTask>     Name of the task to perform (default = TC)"
         "\n    -x                   Print Graph Stats         "
         "\n    -o <orientGraph>       How to orient undirected to directed graph (default = full)"
         "\n    -a <allocation>        Data allocation on GPU (default = unified)"
-        "\n    -s <allocation>        Sort Read Edges by src then dst (default = false)"
+        "\n    -v <verbosity>        Verbosity"
+        "\n    -k <k>        k"
+        "\n    -s <sort>        Sort Read Edges by src then dst (default = false)"
         "\n    -p <processBy>        Process by node or edge (default = node)"
         "\n    -e <process element>         Granulaity of element processor (default = t) <t: Thread, w: warp, b: block, g: grid>"
         "\n    -q <kclique specs>           Specify KC Specs: (o4b --> graph orient, Partition Size = 4, binary encoeding)  (p4n --> pivoting, Partition Size = 4, NO binary encoding) default: o8b"
@@ -349,7 +355,7 @@ static void printConfig(Config config)
     printf("    k: %u\n", config.k);
 
 
-    if (config.mt == KCLIQUE)
+    if (config.mt == KCLIQUE || config.mt == KCLIQUE_LOCAL)
          printf("    KC Config = %s\n", asString(config.kcConfig));
 
 }

@@ -1,3 +1,4 @@
+#pragma once
 
 __constant__ uint KCCOUNT;
 __constant__ uint MAXDEG;

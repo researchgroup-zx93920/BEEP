@@ -33,6 +33,7 @@
 
 #include "../kcore/kcore.cuh"
 #include "../kclique/kclique.cuh"
+#include "../kclique/kclique_local.cuh"
 
 
 #include "../include/Config.h"
@@ -907,6 +908,164 @@ int main(int argc, char** argv)
 		}
 	}
 
+	if (config.mt == KCLIQUE_LOCAL)
+	{
+		if (config.orient == None)
+			Log(warn, "Redundunt K-cliques, Please orient the graph\n");
+
+		// read the nCr values, to be saved in (Constant or global or )
+		graph::SingleGPU_Kclique_Local<uint> localclique(config.deviceId, *gd);
+
+		KcliqueConfig kcc = config.kcConfig;
+
+		Timer t;
+		if (config.processBy == ByNode)
+		{
+			if(kcc.Algo == GraphOrient)
+			{
+				if(kcc.BinaryEncode)
+				{
+					switch(kcc.PartSize)
+					{
+						case 32:
+						localclique.findKclqueIncremental_node_binary_async_local<32>(config.k, *gd);
+						break;
+						case 16:
+						localclique.findKclqueIncremental_node_binary_async_local<16>(config.k, *gd);
+						break;
+						case 8:
+						localclique.findKclqueIncremental_node_binary_async_local<8>(config.k, *gd);
+						break;
+						case 4:
+						localclique.findKclqueIncremental_node_binary_async_local<4>(config.k, *gd);
+						break;
+						case 2:
+						localclique.findKclqueIncremental_node_binary_async_local<2>(config.k, *gd);
+						break;
+						case 1:
+						localclique.findKclqueIncremental_node_binary_async_local<1>(config.k, *gd);
+						break;
+						default:
+							Log(error, "WRONG PARTITION SIZE SELECTED\n");
+					}
+				}
+				else
+				{
+					Log(error, "LOCAL CLIQUE COUNTING IS NOT IMPLEMENTED FOR NON-BINARY ENCODING\n");
+				}
+			}
+			else // Pivoting
+			{
+				if(kcc.BinaryEncode)
+				{
+					switch(kcc.PartSize)
+					{
+						Log(error, "LOCAL CLIQUE COUNTING USING PIVOTING ALGORITHM IS NOT FINISHED\n");
+						// case 32:
+						// mohaclique.findKclqueIncremental_node_pivot_async<32>(config.k, *gd, config.processElement);
+						// break;
+						// case 16:
+						// mohaclique.findKclqueIncremental_node_pivot_async<16>(config.k, *gd, config.processElement);
+						// break;
+						// case 8:
+						// mohaclique.findKclqueIncremental_node_pivot_async<8>(config.k, *gd, config.processElement);
+						// break;
+						// case 4:
+						// mohaclique.findKclqueIncremental_node_pivot_async<4>(config.k, *gd, config.processElement);
+						// break;
+						// case 2:
+						// mohaclique.findKclqueIncremental_node_pivot_async<2>(config.k, *gd, config.processElement);
+						// break;
+						// case 1:
+						// mohaclique.findKclqueIncremental_node_pivot_async<1>(config.k, *gd, config.processElement);
+						// break;
+						// default:
+						// 	Log(error, "WRONG PARTITION SIZE SELECTED\n");
+					}
+				}
+				else
+				{
+					Log(error, "LOCAL CLIQUE COUNTING IS NOT IMPLEMENTED FOR NON-BINARY ENCODING\n");
+				}
+			}
+		}
+		else if (config.processBy == ByEdge)
+		{
+			if(kcc.Algo == GraphOrient)
+			{
+				if(kcc.BinaryEncode)
+				{
+					Log(error, "LOCAL CLIQUE COUNTING USING GRAPH ORIENTATION ALGORITHM IS NOT FINISHED\n");
+					// switch(kcc.PartSize)
+					// {
+					// 	case 32:
+					// 	mohaclique.findKclqueIncremental_edge_binary_async<32>(config.k, *gd, config.processElement);
+					// 	break;
+					// 	case 16:
+					// 	mohaclique.findKclqueIncremental_edge_binary_async<16>(config.k, *gd, config.processElement);
+					// 	break;
+					// 	case 8:
+					// 	mohaclique.findKclqueIncremental_edge_binary_async<8>(config.k, *gd, config.processElement);
+					// 	break;
+					// 	case 4:
+					// 	mohaclique.findKclqueIncremental_edge_binary_async<4>(config.k, *gd, config.processElement);
+					// 	break;
+					// 	case 2:
+					// 	mohaclique.findKclqueIncremental_edge_binary_async<2>(config.k, *gd, config.processElement);
+					// 	break;
+					// 	case 1:
+					// 	mohaclique.findKclqueIncremental_edge_binary_async<1>(config.k, *gd, config.processElement);
+					// 	break;
+					// 	default:
+					// 		Log(error, "WRONG PARTITION SIZE SELECTED\n");
+					// }
+				}
+				else
+				{
+					Log(error, "LOCAL CLIQUE COUNTING IS NOT IMPLEMENTED FOR NON-BINARY ENCODING\n");
+				}
+			}
+			else // Pivoting
+			{
+				if(kcc.BinaryEncode)
+				{
+					Log(error, "LOCAL CLIQUE COUNTING USING PIVOTING ALGORITHM IS NOT FINISHED\n");
+					// switch(kcc.PartSize)
+					// {
+					// 	case 32:
+					// 	mohaclique.findKclqueIncremental_edge_pivot_async<32>(config.k, *gd, config.processElement);
+					// 	break;
+					// 	case 16:
+					// 	mohaclique.findKclqueIncremental_edge_pivot_async<16>(config.k, *gd, config.processElement);
+					// 	break;
+					// 	case 8:
+					// 	mohaclique.findKclqueIncremental_edge_pivot_async<8>(config.k, *gd, config.processElement);
+					// 	break;
+					// 	case 4:
+					// 	mohaclique.findKclqueIncremental_edge_pivot_async<4>(config.k, *gd, config.processElement);
+					// 	break;
+					// 	case 2:
+					// 	mohaclique.findKclqueIncremental_edge_pivot_async<2>(config.k, *gd, config.processElement);
+					// 	break;
+					// 	case 1:
+					// 	mohaclique.findKclqueIncremental_edge_pivot_async<1>(config.k, *gd, config.processElement);
+					// 	break;
+					// 	default:
+					// 		Log(error, "WRONG PARTITION SIZE SELECTED\n");
+					// }
+				}
+				else
+				{
+					Log(error, "LOCAL CLIQUE COUNTING IS NOT IMPLEMENTED FOR NON-BINARY ENCODING\n");
+				}
+			}
+		}
+		localclique.sync();
+		double time = t.elapsed();
+		// (teps: traversed edges per second)
+		Log(info, "count time %f s (%f teps)", time, m / time);
+		localclique.show(n);
+	}
 
 	if (config.mt == KTRUSS)
 	{

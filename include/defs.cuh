@@ -47,6 +47,7 @@ enum MAINTASK {
     KCORE,
     KTRUSS,
     KCLIQUE,
+    KCLIQUE_LOCAL,
     CROSSDECOMP
 
 };
