@@ -227,7 +227,7 @@ namespace graph
 				if (current_q.count.gdata()[0] > 0)
 				{
 					auto grid_block_size = current_q.count.gdata()[0];
-					execKernel((kckernel_node_block_warp_binary_count_local_globalmem_delay_loop<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
+					execKernel((kckernel_node_block_warp_binary_count_local_globalmem_lazy_loop<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
 						counter.gdata(),
 						g,
 						current_q.device_queue->gdata()[0],

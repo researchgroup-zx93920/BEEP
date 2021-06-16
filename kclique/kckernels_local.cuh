@@ -46,7 +46,7 @@
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
-kckernel_node_block_warp_binary_count_local_sharedmem_delay_deep(
+kckernel_node_block_warp_binary_count_local_sharedmem_lazy_deep(
 	uint64* counter,
 	graph::COOCSRGraph_d<T> g,
 	const  graph::GraphQueue_d<T, bool>  current,
@@ -285,7 +285,7 @@ kckernel_node_block_warp_binary_count_local_sharedmem_delay_deep(
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
-kckernel_node_block_warp_binary_count_local_globalmem_delay_deep(
+kckernel_node_block_warp_binary_count_local_globalmem_lazy_deep(
 	uint64* counter,
 	graph::COOCSRGraph_d<T> g,
 	const  graph::GraphQueue_d<T, bool>  current,
@@ -1122,7 +1122,7 @@ kckernel_node_block_warp_binary_count_local_baseline_deep(
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
-kckernel_node_block_warp_binary_count_local_sharedmem_delay_loop(
+kckernel_node_block_warp_binary_count_local_sharedmem_lazy_loop(
 	uint64* counter,
 	graph::COOCSRGraph_d<T> g,
 	const  graph::GraphQueue_d<T, bool>  current,
@@ -1368,7 +1368,7 @@ kckernel_node_block_warp_binary_count_local_sharedmem_delay_loop(
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
-kckernel_node_block_warp_binary_count_local_globalmem_delay_loop(
+kckernel_node_block_warp_binary_count_local_globalmem_lazy_loop(
 	uint64* counter,
 	graph::COOCSRGraph_d<T> g,
 	const  graph::GraphQueue_d<T, bool>  current,
