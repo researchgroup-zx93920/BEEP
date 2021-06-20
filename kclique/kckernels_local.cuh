@@ -42,7 +42,7 @@
  *			}
  *			__syncthreads();
  */
-
+/*
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
@@ -257,6 +257,7 @@ kckernel_node_block_warp_binary_count_local_sharedmem_lazy_deep(
         atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
     }
 }
+*/
 
 /* AtomicAdd to GlobalMemory with accumulation through levels + Deep:
  * 		Use atomicAdd to increase the local_clique counter in global memory,
@@ -281,7 +282,7 @@ kckernel_node_block_warp_binary_count_local_sharedmem_lazy_deep(
  * 			atomicAdd(&cpn[current.queue[i]], clique_count[wx]);
  *			atomicAdd(&cpn[g.colInd[srcStart + j]], clique_count[wx]);
  */
-
+/*
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
@@ -472,6 +473,7 @@ kckernel_node_block_warp_binary_count_local_globalmem_lazy_deep(
         atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
     }
 }
+*/
 
 /* AtomicAdd to SharedMemory + Deep: Use atomicAdd to increase the local_clique counter in shared memory,
  *                                   whenever we find a clique. And increase the global counter later.
@@ -509,7 +511,7 @@ kckernel_node_block_warp_binary_count_local_globalmem_lazy_deep(
  *			}
  *			__syncthreads();
  */
-
+/*
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
@@ -724,6 +726,7 @@ kckernel_node_block_warp_binary_count_local_sharedmem_direct_deep(
         atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
     }
 }
+*/
 
 /* AtomicAdd to GlobalMemory + Deep: Use atomicAdd to increase the local_clique counter in global memory,
  *                                   whenever we find a clique. This kernel is built on top of baseline_deep.
@@ -739,7 +742,7 @@ kckernel_node_block_warp_binary_count_local_sharedmem_direct_deep(
  * 			atomicAdd(&cpn[current.queue[i]], clique_count[wx]);
  *			atomicAdd(&cpn[g.colInd[srcStart + j]], clique_count[wx]);
  */
-
+/*
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
@@ -929,6 +932,7 @@ kckernel_node_block_warp_binary_count_local_globalmem_direct_deep(
         atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
     }
 }
+*/
 
 /* Baseline + Deep
  * Intuition: In the original k-kclique counting kernel, we didn't search the k'th level,
@@ -939,7 +943,7 @@ kckernel_node_block_warp_binary_count_local_globalmem_direct_deep(
  *            of counting (k + 1)-clique in the original kernel. But should be a bit faster since we skip the last intersection 
  *            done in the original kernel. 
  */
-
+/*
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
@@ -1117,6 +1121,7 @@ kckernel_node_block_warp_binary_count_local_baseline_deep(
         atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
     }
 }
+*/
 
 /* AtomicAdd to SharedMemory with accumulation through levels + Loop */
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
@@ -1164,7 +1169,7 @@ kckernel_node_block_warp_binary_count_local_sharedmem_lazy_loop(
     }
     __syncthreads();
 
-    for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
+    for (T i = blockIdx.x; i < (T)current.count[0]; i += gridDim.x)
     {
         //block things
         if (threadIdx.x == 0)
@@ -1176,7 +1181,7 @@ kckernel_node_block_warp_binary_count_local_sharedmem_lazy_loop(
         __syncthreads();
 
         // Clear local_clique counter in shared memory
-        for (unsigned int idx = threadIdx.x; idx < srcLen; idx += blockDim.x)
+        for (T idx = threadIdx.x; idx < srcLen; idx += blockDim.x)
         {
             local_clique_count[idx] = 0;
         }
@@ -1226,7 +1231,7 @@ kckernel_node_block_warp_binary_count_local_sharedmem_lazy_loop(
             }
 
             uint64 warpCount = 0;
-            for (unsigned long long k = lx; k < num_divs_local; k += CPARTSIZE)
+            for (T k = lx; k < num_divs_local; k += CPARTSIZE)
             {
                 warpCount += __popc(encode[j * num_divs_local + k]);
             }
@@ -1346,7 +1351,7 @@ kckernel_node_block_warp_binary_count_local_sharedmem_lazy_loop(
         }
         __syncthreads();
 
-        for (unsigned int idx = threadIdx.x; idx < srcLen; idx += blockDim.x)
+        for (T idx = threadIdx.x; idx < srcLen; idx += blockDim.x)
         {
             atomicAdd(&cpn[g.colInd[srcStart + idx]], local_clique_count[idx]);
         }
@@ -1408,7 +1413,7 @@ kckernel_node_block_warp_binary_count_local_globalmem_lazy_loop(
     }
     __syncthreads();
 
-    for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
+    for (T i = blockIdx.x; i < (T)current.count[0]; i += gridDim.x)
     {
         //block things
         if (threadIdx.x == 0)
@@ -1459,7 +1464,7 @@ kckernel_node_block_warp_binary_count_local_globalmem_lazy_loop(
             }
 
             uint64 warpCount = 0;
-            for (unsigned long long k = lx; k < num_divs_local; k += CPARTSIZE)
+            for (T k = lx; k < num_divs_local; k += CPARTSIZE)
             {
                 warpCount += __popc(encode[j * num_divs_local + k]);
             }
@@ -1631,7 +1636,7 @@ kckernel_node_block_warp_binary_count_local_sharedmem_direct_loop(
     }
     __syncthreads();
 
-    for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
+    for (T i = blockIdx.x; i < (T)current.count[0]; i += gridDim.x)
     {
         //block things
         if (threadIdx.x == 0)
@@ -1643,7 +1648,7 @@ kckernel_node_block_warp_binary_count_local_sharedmem_direct_loop(
         __syncthreads();
 
         // Clear local_clique counter in shared memory
-        for (unsigned int idx = threadIdx.x; idx < srcLen; idx += blockDim.x)
+        for (T idx = threadIdx.x; idx < srcLen; idx += blockDim.x)
         {
             local_clique_count[idx] = 0;
         }
@@ -1692,7 +1697,7 @@ kckernel_node_block_warp_binary_count_local_sharedmem_direct_loop(
             }
 
             uint64 warpCount = 0;
-            for (unsigned long long k = lx; k < num_divs_local; k += CPARTSIZE)
+            for (T k = lx; k < num_divs_local; k += CPARTSIZE)
             {
                 warpCount += __popc(encode[j * num_divs_local + k]);
             }
@@ -1816,7 +1821,7 @@ kckernel_node_block_warp_binary_count_local_sharedmem_direct_loop(
         }
         __syncthreads();
 
-        for (unsigned int idx = threadIdx.x; idx < srcLen; idx += blockDim.x)
+        for (T idx = threadIdx.x; idx < srcLen; idx += blockDim.x)
         {
             atomicAdd(&cpn[g.colInd[srcStart + idx]], local_clique_count[idx]);
         }
@@ -1876,7 +1881,7 @@ kckernel_node_block_warp_binary_count_local_globalmem_direct_loop(
     }
     __syncthreads();
 
-    for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
+    for (T i = blockIdx.x; i < (T)current.count[0]; i += gridDim.x)
     {
         //block things
         if (threadIdx.x == 0)
@@ -1926,7 +1931,7 @@ kckernel_node_block_warp_binary_count_local_globalmem_direct_loop(
             }
 
             uint64 warpCount = 0;
-            for (unsigned long long k = lx; k < num_divs_local; k += CPARTSIZE)
+            for (T k = lx; k < num_divs_local; k += CPARTSIZE)
             {
                 warpCount += __popc(encode[j * num_divs_local + k]);
             }
@@ -2059,7 +2064,8 @@ kckernel_node_block_warp_binary_count_local_globalmem_direct_loop(
 }
 
 
-/* Baseline + Loop */
+/* Baseline Node + Loop */
+/*
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X, 16)
 __global__ void
@@ -2261,6 +2267,1094 @@ kckernel_node_block_warp_binary_count_local_baseline_loop(
     }
     __syncthreads();
 
+    if (threadIdx.x == 0)
+    {
+        atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
+    }
+}
+*/
+
+template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
+__launch_bounds__(BLOCK_DIM_X, 16)
+__global__ void
+kckernel_edge_block_warp_binary_count_local_globalmem_direct_loop(
+    uint64* counter,
+    graph::COOCSRGraph_d<T> g,
+    const  graph::GraphQueue_d<T, bool>  current,
+    T* current_level,
+    uint64* cpn,
+    T* levelStats,
+    T* adj_enc,
+    T* adj_tri
+)
+{
+    //will be removed later
+    constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
+    const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
+    const int lx = threadIdx.x % CPARTSIZE;
+    
+    __shared__ unsigned short level_count[numPartitions][8];
+    __shared__ unsigned short level_prev_index[numPartitions][8];
+
+    __shared__ uint64 clique_count[numPartitions];
+    __shared__ T l[numPartitions], tc, wtc[numPartitions];
+    __shared__ uint32_t  sm_id, levelPtr;
+    __shared__ T src, srcStart, srcLen;
+    __shared__ T src2, src2Start, src2Len;
+    __shared__ T num_divs_local, encode_offset, *encode, tri_offset, *tri, scounter;
+    __shared__ uint64 shared_warp_count[numPartitions];
+    
+    __syncthreads();
+
+    if (threadIdx.x == 0)
+    {
+        sm_id = __mysmid();
+        T temp = 0;
+        while (atomicCAS(&(levelStats[(sm_id * CBPSM) + temp]), 0, 1) != 0)
+        {
+            temp++;
+        }
+        levelPtr = temp;
+    }
+    __syncthreads();
+
+    for (T i = blockIdx.x; i < (T)current.count[0]; i += gridDim.x)
+    {
+        //block things
+        if (threadIdx.x == 0)
+        {
+            src = g.rowInd[current.queue[i]];
+            srcStart = g.rowPtr[src];
+            srcLen = g.rowPtr[src + 1] - srcStart;
+            src2 = g.colInd[current.queue[i]];
+            src2Start = g.rowPtr[src2];
+            src2Len = g.rowPtr[src2 + 1] - src2Start;
+            tri_offset = sm_id * CBPSM * (MAXDEG) + levelPtr * (MAXDEG);
+            tri = &adj_tri[tri_offset];
+            scounter = 0;
+            tc = 0;
+        }
+        __syncthreads();
+
+        //get tri list: by block :!!
+        graph::block_count_and_set_tri<BLOCK_DIM_X, T>(&g.colInd[srcStart], srcLen, &g.colInd[src2Start], src2Len,
+            tri, &scounter);
+        __syncthreads();
+
+        if (threadIdx.x == 0)
+        {
+            num_divs_local = (scounter + 32 - 1) / 32;
+            encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
+            encode = &adj_enc[encode_offset];
+        }
+        __syncthreads();
+
+        if(KCCOUNT == 3)
+        {
+            if (threadIdx.x == 0)
+            {
+                atomicAdd(counter, scounter);
+                atomicAdd(&cpn[src], scounter);
+                atomicAdd(&cpn[src2], scounter);
+            }
+            __syncthreads();
+
+            for (T k = threadIdx.x; k < scounter; k += blockDim.x)
+            {
+                atomicAdd(&cpn[tri[k]], 1);
+            }
+            __syncthreads();
+        }
+
+        //Encode
+        T partMask = (1 << CPARTSIZE) - 1;
+        partMask = partMask << ((wx%(32/CPARTSIZE)) * CPARTSIZE);
+        for (T j = wx; j < scounter; j += numPartitions)
+        {
+            for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+            {
+                encode[j * num_divs_local + k] = 0x00;
+            }
+            __syncwarp(partMask);
+            graph::warp_sorted_count_and_encode<WARPS_PER_BLOCK, T, true, CPARTSIZE>(tri, scounter,
+                &g.colInd[g.rowPtr[tri[j]]], g.rowPtr[tri[j] + 1] - g.rowPtr[tri[j]],
+                &encode[j * num_divs_local]);
+        }
+        __syncthreads(); //Done encoding
+
+        if(lx == 0)
+            wtc[wx] = atomicAdd(&(tc), 1);
+        __syncwarp(partMask);
+
+        T* cl = &current_level[((sm_id * CBPSM + levelPtr) * numPartitions + wx) * NUMDIVS * 8];
+
+        while(wtc[wx] < scounter)
+        //for (unsigned long long j = wx; j < scounter; j += numPartitions)
+        {
+            T j = wtc[wx];
+            if (lx == 0)
+            {
+                level_count[wx][0] = 0;
+                level_prev_index[wx][0] = 0;
+                l[wx] = 4;
+                clique_count[wx] = 0;
+            }
+
+            uint64 warpCount = 0;
+            for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+            {
+                warpCount += __popc(encode[j * num_divs_local + k]);
+            }
+            reduce_part<T, CPARTSIZE>(partMask, warpCount);
+
+            if (lx == 0)
+            {
+                if (l[wx] == KCCOUNT)
+                {
+                    clique_count[wx] += warpCount;
+                }
+                else if (KCCOUNT > 4 && warpCount >= KCCOUNT - 3)
+                {
+                    level_count[wx][0] = warpCount;
+                }
+            }
+             __syncwarp(partMask);
+
+            if (l[wx] == KCCOUNT)
+            {
+                for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+                {
+                    T cur = encode[j * num_divs_local + k], idx = 0;
+                    while((idx = __ffs(cur)) != 0)
+                    {
+                        --idx;
+                        cur ^= (1 << idx);
+                        idx = 32 * k + idx;
+                        atomicAdd(&cpn[tri[idx]], 1);
+                    }
+                }
+                __syncwarp(partMask);
+            }
+
+            while (level_count[wx][l[wx] - 4] > 0)
+            {
+                // First Index
+                T* from = l[wx] == 4 ? &(encode[num_divs_local * j]) : &(cl[num_divs_local * (l[wx] - 4)]);
+                T* to = &(cl[num_divs_local * (l[wx] - 3)]);
+                T maskBlock = level_prev_index[wx][l[wx] - 4] / 32;
+                T maskIndex = ~((1 << (level_prev_index[wx][l[wx] - 4] & 0x1F)) -1);
+                
+                T newIndex = __ffs(from[maskBlock] & maskIndex);
+                while(newIndex == 0)
+                {
+                    maskIndex = 0xFFFFFFFF;
+                    maskBlock++;
+                    newIndex = __ffs(from[maskBlock] & maskIndex);
+                }
+                newIndex =  32*maskBlock + newIndex - 1;
+
+                if (lx == 0)
+                {
+                    level_prev_index[wx][l[wx] - 4] = newIndex + 1;
+                    level_count[wx][l[wx] - 4]--; 
+                }
+
+                warpCount = 0;
+                for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+                {
+                    to[k] = from[k] & encode[newIndex * num_divs_local + k];
+                    warpCount += __popc(to[k]);
+                }
+                reduce_part<T, CPARTSIZE>(partMask, warpCount);
+
+                if (lx == 0)
+                {
+                    shared_warp_count[wx] = warpCount;
+                }
+                __syncwarp(partMask);
+
+                if (l[wx] + 1 == KCCOUNT && shared_warp_count[wx] != 0)
+                {
+                    for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+                    {
+                        T cur = to[k], idx = 0;
+                        while((idx = __ffs(cur)) != 0)
+                        {
+                            --idx;
+                            cur ^= (1 << idx);
+                            idx = 32 * k + idx;
+                            atomicAdd(&cpn[tri[idx]], 1);
+                        }
+                    }
+                    for (T k = lx; k < KCCOUNT - 4; k += CPARTSIZE)
+                    {
+                        atomicAdd(&cpn[tri[level_prev_index[wx][k] - 1]], shared_warp_count[wx]);
+                    }
+                    __syncwarp(partMask);
+                }
+
+                if (lx == 0)
+                {
+                    if (l[wx] + 1 == KCCOUNT)
+                    {
+                        clique_count[wx] += warpCount;
+                    }
+                    else if (l[wx] + 1 < KCCOUNT && warpCount >= KCCOUNT - l[wx])
+                    {
+                        (l[wx])++;
+                        level_count[wx][l[wx] - 4] = warpCount;
+                        level_prev_index[wx][l[wx] - 4] = 0;
+                    }
+                
+                    while (l[wx] > 4 && level_count[wx][l[wx] - 4] <= 0)
+                    {
+                        (l[wx])--;
+                    }
+                }
+                __syncwarp(partMask);
+            }
+
+            if (lx == 0)
+            {
+                atomicAdd(counter, clique_count[wx]);
+                atomicAdd(&cpn[src], clique_count[wx]);
+                atomicAdd(&cpn[src2], clique_count[wx]);
+                atomicAdd(&cpn[tri[j]], clique_count[wx]);
+                wtc[wx] = atomicAdd(&(tc), 1);
+            }
+            __syncwarp(partMask);
+        }
+        __syncthreads();
+    }
+
+    __syncthreads();
+    if (threadIdx.x == 0)
+    {
+        atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
+    }
+}
+
+template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
+__launch_bounds__(BLOCK_DIM_X, 16)
+__global__ void
+kckernel_edge_block_warp_binary_count_local_globalmem_lazy_loop(
+    uint64* counter,
+    graph::COOCSRGraph_d<T> g,
+    const  graph::GraphQueue_d<T, bool>  current,
+    T* current_level,
+    uint64* cpn,
+    T* levelStats,
+    T* adj_enc,
+    T* adj_tri
+)
+{
+    //will be removed later
+    constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
+    const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
+    const int lx = threadIdx.x % CPARTSIZE;
+    
+    __shared__ unsigned short level_count[numPartitions][8];
+    __shared__ unsigned short level_prev_index[numPartitions][8];
+
+    __shared__ uint64 clique_count[numPartitions];
+    __shared__ T l[numPartitions], tc, wtc[numPartitions];
+    __shared__ uint32_t  sm_id, levelPtr;
+    __shared__ T src, srcStart, srcLen;
+    __shared__ T src2, src2Start, src2Len;
+    __shared__ T num_divs_local, encode_offset, *encode, tri_offset, *tri, scounter;
+    
+    __shared__ uint64 level_local_clique_count[numPartitions][8];
+    
+    __syncthreads();
+
+    if (threadIdx.x == 0)
+    {
+        sm_id = __mysmid();
+        T temp = 0;
+        while (atomicCAS(&(levelStats[(sm_id * CBPSM) + temp]), 0, 1) != 0)
+        {
+            temp++;
+        }
+        levelPtr = temp;
+    }
+    __syncthreads();
+
+    for (T i = blockIdx.x; i < (T)current.count[0]; i += gridDim.x)
+    {
+        //block things
+        if (threadIdx.x == 0)
+        {
+            src = g.rowInd[current.queue[i]];
+            srcStart = g.rowPtr[src];
+            srcLen = g.rowPtr[src + 1] - srcStart;
+            src2 = g.colInd[current.queue[i]];
+            src2Start = g.rowPtr[src2];
+            src2Len = g.rowPtr[src2 + 1] - src2Start;
+            tri_offset = sm_id * CBPSM * (MAXDEG) + levelPtr * (MAXDEG);
+            tri = &adj_tri[tri_offset];
+            scounter = 0;
+            tc = 0;
+        }
+        __syncthreads();
+
+        //get tri list: by block :!!
+        graph::block_count_and_set_tri<BLOCK_DIM_X, T>(&g.colInd[srcStart], srcLen, &g.colInd[src2Start], src2Len,
+            tri, &scounter);
+        __syncthreads();
+
+        if (threadIdx.x == 0)
+        {
+            num_divs_local = (scounter + 32 - 1) / 32;
+            encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
+            encode = &adj_enc[encode_offset];
+        }
+        __syncthreads();
+
+        if(KCCOUNT == 3)
+        {
+            if (threadIdx.x == 0)
+            {
+                atomicAdd(counter, scounter);
+                atomicAdd(&cpn[src], scounter);
+                atomicAdd(&cpn[src2], scounter);
+            }
+            __syncthreads();
+
+            for (T k = threadIdx.x; k < scounter; k += blockDim.x)
+            {
+                atomicAdd(&cpn[tri[k]], 1);
+            }
+            __syncthreads();
+        }
+
+        //Encode
+        T partMask = (1 << CPARTSIZE) - 1;
+        partMask = partMask << ((wx%(32/CPARTSIZE)) * CPARTSIZE);
+        for (T j = wx; j < scounter; j += numPartitions)
+        {
+            for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+            {
+                encode[j * num_divs_local + k] = 0x00;
+            }
+            __syncwarp(partMask);
+            graph::warp_sorted_count_and_encode<WARPS_PER_BLOCK, T, true, CPARTSIZE>(tri, scounter,
+                &g.colInd[g.rowPtr[tri[j]]], g.rowPtr[tri[j] + 1] - g.rowPtr[tri[j]],
+                &encode[j * num_divs_local]);
+        }
+        __syncthreads(); //Done encoding
+
+        if(lx == 0)
+            wtc[wx] = atomicAdd(&(tc), 1);
+        __syncwarp(partMask);
+
+        T* cl = &current_level[((sm_id * CBPSM + levelPtr) * numPartitions + wx) * NUMDIVS * 8];
+
+        while(wtc[wx] < scounter)
+        //for (unsigned long long j = wx; j < scounter; j += numPartitions)
+        {
+            T j = wtc[wx];
+            if (lx == 0)
+            {
+                level_count[wx][0] = 0;
+                level_prev_index[wx][0] = 0;
+                l[wx] = 4;
+                clique_count[wx] = 0;
+                level_local_clique_count[wx][0] = 0;
+            }
+
+            uint64 warpCount = 0;
+            for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+            {
+                warpCount += __popc(encode[j * num_divs_local + k]);
+            }
+            reduce_part<T, CPARTSIZE>(partMask, warpCount);
+
+            if (lx == 0)
+            {
+                if (l[wx] == KCCOUNT)
+                {
+                    clique_count[wx] += warpCount;
+                }
+                else if (KCCOUNT > 4 && warpCount >= KCCOUNT - 3)
+                {
+                    level_count[wx][0] = warpCount;
+                }
+            }
+             __syncwarp(partMask);
+
+            if (l[wx] == KCCOUNT)
+            {
+                for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+                {
+                    T cur = encode[j * num_divs_local + k], idx = 0;
+                    while((idx = __ffs(cur)) != 0)
+                    {
+                        --idx;
+                        cur ^= (1 << idx);
+                        idx = 32 * k + idx;
+                        atomicAdd(&cpn[tri[idx]], 1);
+                    }
+                }
+                __syncwarp(partMask);
+            }
+
+            while (level_count[wx][l[wx] - 4] > 0)
+            {
+                // First Index
+                T* from = l[wx] == 4 ? &(encode[num_divs_local * j]) : &(cl[num_divs_local * (l[wx] - 4)]);
+                T* to = &(cl[num_divs_local * (l[wx] - 3)]);
+                T maskBlock = level_prev_index[wx][l[wx] - 4] / 32;
+                T maskIndex = ~((1 << (level_prev_index[wx][l[wx] - 4] & 0x1F)) -1);
+                
+                T newIndex = __ffs(from[maskBlock] & maskIndex);
+                while(newIndex == 0)
+                {
+                    maskIndex = 0xFFFFFFFF;
+                    maskBlock++;
+                    newIndex = __ffs(from[maskBlock] & maskIndex);
+                }
+                newIndex =  32*maskBlock + newIndex - 1;
+
+                if (lx == 0)
+                {
+                    level_prev_index[wx][l[wx] - 4] = newIndex + 1;
+                    level_count[wx][l[wx] - 4]--; 
+                }
+
+                warpCount = 0;
+                for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+                {
+                    to[k] = from[k] & encode[newIndex * num_divs_local + k];
+                    warpCount += __popc(to[k]);
+                }
+                reduce_part<T, CPARTSIZE>(partMask, warpCount);
+
+                if (l[wx] + 1 == KCCOUNT)
+                {
+                    for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+                    {
+                        T cur = to[k], idx = 0;
+                        while((idx = __ffs(cur)) != 0)
+                        {
+                            --idx;
+                            cur ^= (1 << idx);
+                            idx = 32 * k + idx;
+                            atomicAdd(&cpn[tri[idx]], 1);
+                        }
+                    }
+                    __syncwarp(partMask);
+                }
+
+                if (lx == 0)
+                {
+                    if (l[wx] + 1 == KCCOUNT)
+                    {
+                        clique_count[wx] += warpCount;
+                        atomicAdd(&cpn[tri[newIndex]], warpCount);
+                        level_local_clique_count[wx][l[wx] - 4] += warpCount;
+                    }
+                    else if (l[wx] + 1 < KCCOUNT && warpCount >= KCCOUNT - l[wx])
+                    {
+                        (l[wx])++;
+                        level_count[wx][l[wx] - 4] = warpCount;
+                        level_prev_index[wx][l[wx] - 4] = 0;
+                        level_local_clique_count[wx][l[wx] - 4] = 0;
+                    }
+                
+                    while (l[wx] > 4 && level_count[wx][l[wx] - 4] <= 0)
+                    {
+                        uint64 cur = level_local_clique_count[wx][l[wx] - 4];
+                        level_local_clique_count[wx][l[wx] - 5] += cur;
+                        atomicAdd(&cpn[tri[level_prev_index[wx][l[wx] - 5] - 1]], cur);
+                        (l[wx])--;
+                    }
+                }
+                __syncwarp(partMask);
+            }
+
+            if (lx == 0)
+            {
+                atomicAdd(counter, clique_count[wx]);
+                atomicAdd(&cpn[src], clique_count[wx]);
+                atomicAdd(&cpn[src2], clique_count[wx]);
+                atomicAdd(&cpn[tri[j]], clique_count[wx]);
+                wtc[wx] = atomicAdd(&(tc), 1);
+            }
+            __syncwarp(partMask);
+        }
+        __syncthreads();
+    }
+
+    __syncthreads();
+    if (threadIdx.x == 0)
+    {
+        atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
+    }
+}
+
+
+template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
+__launch_bounds__(BLOCK_DIM_X, 16)
+__global__ void
+kckernel_edge_block_warp_binary_count_local_sharedmem_direct_loop(
+    uint64* counter,
+    graph::COOCSRGraph_d<T> g,
+    const  graph::GraphQueue_d<T, bool>  current,
+    T* current_level,
+    uint64* cpn,
+    T* levelStats,
+    T* adj_enc,
+    T* adj_tri
+)
+{
+    //will be removed later
+    constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
+    const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
+    const int lx = threadIdx.x % CPARTSIZE;
+    
+    __shared__ unsigned short level_count[numPartitions][8];
+    __shared__ unsigned short level_prev_index[numPartitions][8];
+
+    __shared__ uint64 clique_count[numPartitions];
+    __shared__ T l[numPartitions], tc, wtc[numPartitions];
+    __shared__ uint32_t  sm_id, levelPtr;
+    __shared__ T src, srcStart, srcLen;
+    __shared__ T src2, src2Start, src2Len;
+    __shared__ T num_divs_local, encode_offset, *encode, tri_offset, *tri, scounter;
+    __shared__ uint64 shared_warp_count[numPartitions];
+    __shared__ uint64 local_clique_count[1024];
+    __shared__ uint64 src_count, src2_count;
+
+    __syncthreads();
+
+    if (threadIdx.x == 0)
+    {
+        sm_id = __mysmid();
+        T temp = 0;
+        while (atomicCAS(&(levelStats[(sm_id * CBPSM) + temp]), 0, 1) != 0)
+        {
+            temp++;
+        }
+        levelPtr = temp;
+    }
+    __syncthreads();
+
+    for (T i = blockIdx.x; i < (T)current.count[0]; i += gridDim.x)
+    {
+        //block things
+        if (threadIdx.x == 0)
+        {
+            src = g.rowInd[current.queue[i]];
+            srcStart = g.rowPtr[src];
+            srcLen = g.rowPtr[src + 1] - srcStart;
+            src2 = g.colInd[current.queue[i]];
+            src2Start = g.rowPtr[src2];
+            src2Len = g.rowPtr[src2 + 1] - src2Start;
+            tri_offset = sm_id * CBPSM * (MAXDEG) + levelPtr * (MAXDEG);
+            tri = &adj_tri[tri_offset];
+            scounter = 0;
+            tc = 0;
+        }
+        __syncthreads();
+
+        // Clear local_clique counter in shared memory
+        for (T idx = threadIdx.x; idx < srcLen; idx += blockDim.x)
+        {
+            local_clique_count[idx] = 0;
+        }
+        if (threadIdx.x == 0)
+        {
+            src_count = 0;
+            src2_count = 0;
+        }
+        __syncthreads();
+
+        //get tri list: by block :!!
+        graph::block_count_and_set_tri<BLOCK_DIM_X, T>(&g.colInd[srcStart], srcLen, &g.colInd[src2Start], src2Len,
+            tri, &scounter);
+        __syncthreads();
+
+        if (threadIdx.x == 0)
+        {
+            num_divs_local = (scounter + 32 - 1) / 32;
+            encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
+            encode = &adj_enc[encode_offset];
+        }
+        __syncthreads();
+
+        if(KCCOUNT == 3)
+        {
+            if (threadIdx.x == 0)
+            {
+                atomicAdd(counter, scounter);
+                atomicAdd(&src_count, scounter);
+                atomicAdd(&src2_count, scounter);
+            }
+            __syncthreads();
+
+            for (T k = threadIdx.x; k < scounter; k += blockDim.x)
+            {
+                atomicAdd(&local_clique_count[k], 1);
+            }
+            __syncthreads();
+        }
+
+        //Encode
+        T partMask = (1 << CPARTSIZE) - 1;
+        partMask = partMask << ((wx%(32/CPARTSIZE)) * CPARTSIZE);
+        for (T j = wx; j < scounter; j += numPartitions)
+        {
+            for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+            {
+                encode[j * num_divs_local + k] = 0x00;
+            }
+            __syncwarp(partMask);
+            graph::warp_sorted_count_and_encode<WARPS_PER_BLOCK, T, true, CPARTSIZE>(tri, scounter,
+                &g.colInd[g.rowPtr[tri[j]]], g.rowPtr[tri[j] + 1] - g.rowPtr[tri[j]],
+                &encode[j * num_divs_local]);
+        }
+        __syncthreads(); //Done encoding
+
+        if(lx == 0)
+            wtc[wx] = atomicAdd(&(tc), 1);
+        __syncwarp(partMask);
+
+        T* cl = &current_level[((sm_id * CBPSM + levelPtr) * numPartitions + wx) * NUMDIVS * 8];
+
+        while(wtc[wx] < scounter)
+        //for (unsigned long long j = wx; j < scounter; j += numPartitions)
+        {
+            T j = wtc[wx];
+            if (lx == 0)
+            {
+                level_count[wx][0] = 0;
+                level_prev_index[wx][0] = 0;
+                l[wx] = 4;
+                clique_count[wx] = 0;
+            }
+
+            uint64 warpCount = 0;
+            for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+            {
+                warpCount += __popc(encode[j * num_divs_local + k]);
+            }
+            reduce_part<T, CPARTSIZE>(partMask, warpCount);
+
+            if (lx == 0)
+            {
+                if (l[wx] == KCCOUNT)
+                {
+                    clique_count[wx] += warpCount;
+                }
+                else if (KCCOUNT > 4 && warpCount >= KCCOUNT - 3)
+                {
+                    level_count[wx][0] = warpCount;
+                }
+            }
+             __syncwarp(partMask);
+
+            if (l[wx] == KCCOUNT)
+            {
+                for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+                {
+                    T cur = encode[j * num_divs_local + k], idx = 0;
+                    while((idx = __ffs(cur)) != 0)
+                    {
+                        --idx;
+                        cur ^= (1 << idx);
+                        idx = 32 * k + idx;
+                        atomicAdd(&local_clique_count[idx], 1);
+                    }
+                }
+                __syncwarp(partMask);
+            }
+
+            while (level_count[wx][l[wx] - 4] > 0)
+            {
+                // First Index
+                T* from = l[wx] == 4 ? &(encode[num_divs_local * j]) : &(cl[num_divs_local * (l[wx] - 4)]);
+                T* to = &(cl[num_divs_local * (l[wx] - 3)]);
+                T maskBlock = level_prev_index[wx][l[wx] - 4] / 32;
+                T maskIndex = ~((1 << (level_prev_index[wx][l[wx] - 4] & 0x1F)) -1);
+                
+                T newIndex = __ffs(from[maskBlock] & maskIndex);
+                while(newIndex == 0)
+                {
+                    maskIndex = 0xFFFFFFFF;
+                    maskBlock++;
+                    newIndex = __ffs(from[maskBlock] & maskIndex);
+                }
+                newIndex =  32*maskBlock + newIndex - 1;
+
+                if (lx == 0)
+                {
+                    level_prev_index[wx][l[wx] - 4] = newIndex + 1;
+                    level_count[wx][l[wx] - 4]--; 
+                }
+
+                warpCount = 0;
+                for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+                {
+                    to[k] = from[k] & encode[newIndex * num_divs_local + k];
+                    warpCount += __popc(to[k]);
+                }
+                reduce_part<T, CPARTSIZE>(partMask, warpCount);
+
+                if (lx == 0)
+                {
+                    shared_warp_count[wx] = warpCount;
+                }
+                __syncwarp(partMask);
+
+                if (l[wx] + 1 == KCCOUNT && shared_warp_count[wx] != 0)
+                {
+                    for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+                    {
+                        T cur = to[k], idx = 0;
+                        while((idx = __ffs(cur)) != 0)
+                        {
+                            --idx;
+                            cur ^= (1 << idx);
+                            idx = 32 * k + idx;
+                            atomicAdd(&local_clique_count[idx], 1);
+                        }
+                    }
+                    for (T k = lx; k < KCCOUNT - 4; k += CPARTSIZE)
+                    {
+                        atomicAdd(&local_clique_count[level_prev_index[wx][k] - 1], shared_warp_count[wx]);
+                    }
+                    __syncwarp(partMask);
+                }
+
+                if (lx == 0)
+                {
+                    if (l[wx] + 1 == KCCOUNT)
+                    {
+                        clique_count[wx] += warpCount;
+                    }
+                    else if (l[wx] + 1 < KCCOUNT && warpCount >= KCCOUNT - l[wx])
+                    {
+                        (l[wx])++;
+                        level_count[wx][l[wx] - 4] = warpCount;
+                        level_prev_index[wx][l[wx] - 4] = 0;
+                    }
+                
+                    while (l[wx] > 4 && level_count[wx][l[wx] - 4] <= 0)
+                    {
+                        (l[wx])--;
+                    }
+                }
+                __syncwarp(partMask);
+            }
+
+            if (lx == 0)
+            {
+                atomicAdd(counter, clique_count[wx]);
+                atomicAdd(&src_count, clique_count[wx]);
+                atomicAdd(&src2_count, clique_count[wx]);
+                atomicAdd(&local_clique_count[j], clique_count[wx]);
+                wtc[wx] = atomicAdd(&(tc), 1);
+            }
+            __syncwarp(partMask);
+        }
+        __syncthreads();
+
+        for (T idx = threadIdx.x; idx < scounter; idx += blockDim.x)
+        {
+            atomicAdd(&cpn[tri[idx]], local_clique_count[idx]);
+        }
+        if (threadIdx.x == 0)
+        {
+            atomicAdd(&cpn[src], src_count);
+            atomicAdd(&cpn[src2], src2_count);
+        }
+        __syncthreads();
+    }
+
+    __syncthreads();
+    if (threadIdx.x == 0)
+    {
+        atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
+    }
+}
+
+template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
+__launch_bounds__(BLOCK_DIM_X, 16)
+__global__ void
+kckernel_edge_block_warp_binary_count_local_sharedmem_lazy_loop(
+    uint64* counter,
+    graph::COOCSRGraph_d<T> g,
+    const  graph::GraphQueue_d<T, bool>  current,
+    T* current_level,
+    uint64* cpn,
+    T* levelStats,
+    T* adj_enc,
+    T* adj_tri
+)
+{
+    //will be removed later
+    constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
+    const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
+    const int lx = threadIdx.x % CPARTSIZE;
+    
+    __shared__ unsigned short level_count[numPartitions][8];
+    __shared__ unsigned short level_prev_index[numPartitions][8];
+
+    __shared__ uint64 clique_count[numPartitions];
+    __shared__ T l[numPartitions], tc, wtc[numPartitions];
+    __shared__ uint32_t  sm_id, levelPtr;
+    __shared__ T src, srcStart, srcLen;
+    __shared__ T src2, src2Start, src2Len;
+    __shared__ T num_divs_local, encode_offset, *encode, tri_offset, *tri, scounter;
+    
+    __shared__ uint64 local_clique_count[1024];
+    __shared__ uint64 src_count, src2_count;
+    __shared__ uint64 level_local_clique_count[numPartitions][8];
+    
+    __syncthreads();
+
+    if (threadIdx.x == 0)
+    {
+        sm_id = __mysmid();
+        T temp = 0;
+        while (atomicCAS(&(levelStats[(sm_id * CBPSM) + temp]), 0, 1) != 0)
+        {
+            temp++;
+        }
+        levelPtr = temp;
+    }
+    __syncthreads();
+
+    for (T i = blockIdx.x; i < (T)current.count[0]; i += gridDim.x)
+    {
+        //block things
+        if (threadIdx.x == 0)
+        {
+            src = g.rowInd[current.queue[i]];
+            srcStart = g.rowPtr[src];
+            srcLen = g.rowPtr[src + 1] - srcStart;
+            src2 = g.colInd[current.queue[i]];
+            src2Start = g.rowPtr[src2];
+            src2Len = g.rowPtr[src2 + 1] - src2Start;
+            tri_offset = sm_id * CBPSM * (MAXDEG) + levelPtr * (MAXDEG);
+            tri = &adj_tri[tri_offset];
+            scounter = 0;
+            tc = 0;
+        }
+        __syncthreads();
+
+        // Clear local_clique counter in shared memory
+        for (T idx = threadIdx.x; idx < srcLen; idx += blockDim.x)
+        {
+            local_clique_count[idx] = 0;
+        }
+        if (threadIdx.x == 0)
+        {
+            src_count = 0;
+            src2_count = 0;
+        }
+        __syncthreads();
+
+        //get tri list: by block :!!
+        graph::block_count_and_set_tri<BLOCK_DIM_X, T>(&g.colInd[srcStart], srcLen, &g.colInd[src2Start], src2Len,
+            tri, &scounter);
+        __syncthreads();
+
+        if (threadIdx.x == 0)
+        {
+            num_divs_local = (scounter + 32 - 1) / 32;
+            encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
+            encode = &adj_enc[encode_offset];
+        }
+        __syncthreads();
+
+        if(KCCOUNT == 3)
+        {
+            if (threadIdx.x == 0)
+            {
+                atomicAdd(counter, scounter);
+                atomicAdd(&src_count, scounter);
+                atomicAdd(&src2_count, scounter);
+            }
+            __syncthreads();
+
+            for (T k = threadIdx.x; k < scounter; k += blockDim.x)
+            {
+                atomicAdd(&local_clique_count[k], 1);
+            }
+            __syncthreads();
+        }
+
+        //Encode
+        T partMask = (1 << CPARTSIZE) - 1;
+        partMask = partMask << ((wx%(32/CPARTSIZE)) * CPARTSIZE);
+        for (T j = wx; j < scounter; j += numPartitions)
+        {
+            for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+            {
+                encode[j * num_divs_local + k] = 0x00;
+            }
+            __syncwarp(partMask);
+            graph::warp_sorted_count_and_encode<WARPS_PER_BLOCK, T, true, CPARTSIZE>(tri, scounter,
+                &g.colInd[g.rowPtr[tri[j]]], g.rowPtr[tri[j] + 1] - g.rowPtr[tri[j]],
+                &encode[j * num_divs_local]);
+        }
+        __syncthreads(); //Done encoding
+
+        if(lx == 0)
+            wtc[wx] = atomicAdd(&(tc), 1);
+        __syncwarp(partMask);
+
+        T* cl = &current_level[((sm_id * CBPSM + levelPtr) * numPartitions + wx) * NUMDIVS * 8];
+
+        while(wtc[wx] < scounter)
+        //for (unsigned long long j = wx; j < scounter; j += numPartitions)
+        {
+            T j = wtc[wx];
+            if (lx == 0)
+            {
+                level_count[wx][0] = 0;
+                level_prev_index[wx][0] = 0;
+                l[wx] = 4;
+                clique_count[wx] = 0;
+                level_local_clique_count[wx][0] = 0;
+            }
+
+            uint64 warpCount = 0;
+            for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+            {
+                warpCount += __popc(encode[j * num_divs_local + k]);
+            }
+            reduce_part<T, CPARTSIZE>(partMask, warpCount);
+
+            if (lx == 0)
+            {
+                if (l[wx] == KCCOUNT)
+                {
+                    clique_count[wx] += warpCount;
+                }
+                else if (KCCOUNT > 4 && warpCount >= KCCOUNT - 3)
+                {
+                    level_count[wx][0] = warpCount;
+                }
+            }
+             __syncwarp(partMask);
+
+            if (l[wx] == KCCOUNT)
+            {
+                for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+                {
+                    T cur = encode[j * num_divs_local + k], idx = 0;
+                    while((idx = __ffs(cur)) != 0)
+                    {
+                        --idx;
+                        cur ^= (1 << idx);
+                        idx = 32 * k + idx;
+                        atomicAdd(&local_clique_count[idx], 1);
+                    }
+                }
+                __syncwarp(partMask);
+            }
+
+            while (level_count[wx][l[wx] - 4] > 0)
+            {
+                // First Index
+                T* from = l[wx] == 4 ? &(encode[num_divs_local * j]) : &(cl[num_divs_local * (l[wx] - 4)]);
+                T* to = &(cl[num_divs_local * (l[wx] - 3)]);
+                T maskBlock = level_prev_index[wx][l[wx] - 4] / 32;
+                T maskIndex = ~((1 << (level_prev_index[wx][l[wx] - 4] & 0x1F)) -1);
+                
+                T newIndex = __ffs(from[maskBlock] & maskIndex);
+                while(newIndex == 0)
+                {
+                    maskIndex = 0xFFFFFFFF;
+                    maskBlock++;
+                    newIndex = __ffs(from[maskBlock] & maskIndex);
+                }
+                newIndex =  32*maskBlock + newIndex - 1;
+
+                if (lx == 0)
+                {
+                    level_prev_index[wx][l[wx] - 4] = newIndex + 1;
+                    level_count[wx][l[wx] - 4]--; 
+                }
+
+                warpCount = 0;
+                for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+                {
+                    to[k] = from[k] & encode[newIndex * num_divs_local + k];
+                    warpCount += __popc(to[k]);
+                }
+                reduce_part<T, CPARTSIZE>(partMask, warpCount);
+
+                if (l[wx] + 1 == KCCOUNT)
+                {
+                    for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+                    {
+                        T cur = to[k], idx = 0;
+                        while((idx = __ffs(cur)) != 0)
+                        {
+                            --idx;
+                            cur ^= (1 << idx);
+                            idx = 32 * k + idx;
+                            atomicAdd(&local_clique_count[idx], 1);
+                        }
+                    }
+                    __syncwarp(partMask);
+                }
+
+                if (lx == 0)
+                {
+                    if (l[wx] + 1 == KCCOUNT)
+                    {
+                        clique_count[wx] += warpCount;
+                        atomicAdd(&local_clique_count[newIndex], warpCount);
+                        level_local_clique_count[wx][l[wx] - 4] += warpCount;
+                    }
+                    else if (l[wx] + 1 < KCCOUNT && warpCount >= KCCOUNT - l[wx])
+                    {
+                        (l[wx])++;
+                        level_count[wx][l[wx] - 4] = warpCount;
+                        level_prev_index[wx][l[wx] - 4] = 0;
+                        level_local_clique_count[wx][l[wx] - 4] = 0;
+                    }
+                
+                    while (l[wx] > 4 && level_count[wx][l[wx] - 4] <= 0)
+                    {
+                        uint64 cur = level_local_clique_count[wx][l[wx] - 4];
+                        level_local_clique_count[wx][l[wx] - 5] += cur;
+                        atomicAdd(&local_clique_count[level_prev_index[wx][l[wx] - 5] - 1], cur);
+                        (l[wx])--;
+                    }
+                }
+                __syncwarp(partMask);
+            }
+
+            if (lx == 0)
+            {
+                atomicAdd(counter, clique_count[wx]);
+                atomicAdd(&src_count, clique_count[wx]);
+                atomicAdd(&src2_count, clique_count[wx]);
+                atomicAdd(&local_clique_count[j], clique_count[wx]);
+                wtc[wx] = atomicAdd(&(tc), 1);
+            }
+            __syncwarp(partMask);
+        }
+        __syncthreads();
+
+        for (T idx = threadIdx.x; idx < scounter; idx += blockDim.x)
+        {
+            atomicAdd(&cpn[tri[idx]], local_clique_count[idx]);
+        }
+        if (threadIdx.x == 0)
+        {
+            atomicAdd(&cpn[src], src_count);
+            atomicAdd(&cpn[src2], src2_count);
+        }
+        __syncthreads();
+    }
+
+    __syncthreads();
     if (threadIdx.x == 0)
     {
         atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);

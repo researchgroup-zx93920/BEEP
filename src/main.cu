@@ -656,7 +656,7 @@ int main(int argc, char** argv)
 
 								}
 
-								
+
 							}
 							else
 							{
@@ -995,30 +995,29 @@ int main(int argc, char** argv)
 			{
 				if(kcc.BinaryEncode)
 				{
-					Log(error, "LOCAL CLIQUE COUNTING USING GRAPH ORIENTATION ALGORITHM IS NOT FINISHED\n");
-					// switch(kcc.PartSize)
-					// {
-					// 	case 32:
-					// 	mohaclique.findKclqueIncremental_edge_binary_async<32>(config.k, *gd, config.processElement);
-					// 	break;
-					// 	case 16:
-					// 	mohaclique.findKclqueIncremental_edge_binary_async<16>(config.k, *gd, config.processElement);
-					// 	break;
-					// 	case 8:
-					// 	mohaclique.findKclqueIncremental_edge_binary_async<8>(config.k, *gd, config.processElement);
-					// 	break;
-					// 	case 4:
-					// 	mohaclique.findKclqueIncremental_edge_binary_async<4>(config.k, *gd, config.processElement);
-					// 	break;
-					// 	case 2:
-					// 	mohaclique.findKclqueIncremental_edge_binary_async<2>(config.k, *gd, config.processElement);
-					// 	break;
-					// 	case 1:
-					// 	mohaclique.findKclqueIncremental_edge_binary_async<1>(config.k, *gd, config.processElement);
-					// 	break;
-					// 	default:
-					// 		Log(error, "WRONG PARTITION SIZE SELECTED\n");
-					// }
+					switch(kcc.PartSize)
+					{
+						case 32:
+						localclique.findKclqueIncremental_edge_binary_async_local<32>(config.k, *gd);
+						break;
+						case 16:
+						localclique.findKclqueIncremental_edge_binary_async_local<16>(config.k, *gd);
+						break;
+						case 8:
+						localclique.findKclqueIncremental_edge_binary_async_local<8>(config.k, *gd);
+						break;
+						case 4:
+						localclique.findKclqueIncremental_edge_binary_async_local<4>(config.k, *gd);
+						break;
+						case 2:
+						localclique.findKclqueIncremental_edge_binary_async_local<2>(config.k, *gd);
+						break;
+						case 1:
+						localclique.findKclqueIncremental_edge_binary_async_local<1>(config.k, *gd);
+						break;
+						default:
+							Log(error, "WRONG PARTITION SIZE SELECTED\n");
+					}
 				}
 				else
 				{
@@ -1104,7 +1103,7 @@ int main(int argc, char** argv)
 		double time = t.elapsed();
 		Log(info, "count time %f s", time);
 		Log(info, "MOHA %d ktruss (%f teps)", mohatruss.count(), m / time);
-#endif	
+#endif
 
 #define OUR_NEW_KTRUSS
 #ifdef OUR_NEW_KTRUSS
@@ -1234,8 +1233,8 @@ int main(int argc, char** argv)
 //	for (int i = levelStartIndex; i < num_elem_lev + levelStartIndex; i++)
 //	{
 //		Node parent = BT.cdata()[i];
-//		
-//		//left 
+//
+//		//left
 //		int leftIndex = 2 * i + 1; //New Index
 //		int leftVal = (parent.l + parent.i) / 2; //PrevIndex
 
