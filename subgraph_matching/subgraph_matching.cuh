@@ -635,10 +635,10 @@ namespace graph
                 uint64 offset_size = (!persistant && by_ == ByEdge) ? dataGraph.numNodes : 1;
 
                 //printf("Level Size = %llu, Encode Size = %llu\n", level_size, encode_size);
-                GPUArray<T> node_be("Temp level Counter", AllocationTypeEnum::gpu, encode_size, dev_);
+                GPUArray<T> node_be("Temp level Counter", AllocationTypeEnum::unified, encode_size, dev_);
                 GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
-                GPUArray<T> orient_mask("Orientation mask", AllocationTypeEnum::gpu, orient_mask_size, dev_);
-                GPUArray<unsigned char> offset("Encoding offset", AllocationTypeEnum::gpu, offset_size, dev_);
+                GPUArray<T> orient_mask("Orientation mask", AllocationTypeEnum::unified, orient_mask_size, dev_);
+                GPUArray<unsigned char> offset("Encoding offset", AllocationTypeEnum::unified, offset_size, dev_);
                 cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T));
                 cudaMemset(current_level.gdata(), 0, level_size * sizeof(T));
                 cudaMemset(orient_mask.gdata(), 0, orient_mask_size * sizeof(T));
@@ -684,11 +684,14 @@ namespace graph
                         );
                     }
                     else {
-                        execKernel((sgm_kernel_compute_encoding<T, block_size_HD, partitionSize_HD>), current_nq.count.gdata()[0], block_size_HD, dev_, false,
+                        sgm_cpu_compute_encoding(dataGraph, current_nq, 
+                            node_be.gdata(), orient_mask.gdata(), offset.gdata()
+                        );
+                        /*execKernel((sgm_kernel_compute_encoding<T, block_size_HD, partitionSize_HD>), current_nq.count.gdata()[0], block_size_HD, dev_, false,
                             dataGraph,
                             current_nq.device_queue->gdata()[0],
                             node_be.gdata(), orient_mask.gdata(), offset.gdata()
-                        );
+                        );*/
                         execKernel((sgm_kernel_pre_encoded<T, block_size_HD, partitionSize_HD>), grid_block_size, block_size_HD, dev_, false,
                             counter.gdata(),
                             dataGraph,
@@ -722,11 +725,14 @@ namespace graph
                         );
                     }
                     else {
-                        execKernel((sgm_kernel_compute_encoding<T, block_size_LD, partitionSize_LD>), current_nq.count.gdata()[0], block_size_LD, dev_, false,
+                        sgm_cpu_compute_encoding(dataGraph, current_nq, 
+                            node_be.gdata(), orient_mask.gdata(), offset.gdata()
+                        );
+                        /*execKernel((sgm_kernel_compute_encoding<T, block_size_LD, partitionSize_LD>), current_nq.count.gdata()[0], block_size_LD, dev_, false,
                             dataGraph,
                             current_nq.device_queue->gdata()[0],
                             node_be.gdata(), orient_mask.gdata(), offset.gdata()
-                        );
+                        );*/
                         execKernel((sgm_kernel_pre_encoded<T, block_size_LD, partitionSize_LD>), grid_block_size, block_size_LD, dev_, false,
                             counter.gdata(),
                             dataGraph,
