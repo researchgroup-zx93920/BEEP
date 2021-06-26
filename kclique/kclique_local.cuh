@@ -361,6 +361,7 @@ namespace graph
             }
 
             nCr.switch_to_gpu();
+            free(tmpnCr);
 
             CUDA_RUNTIME(cudaSetDevice(dev_));
             const auto block_size = 128;
@@ -490,6 +491,7 @@ namespace graph
             }
 
             nCr.switch_to_gpu();
+            free(tmpnCr);
 
             CUDA_RUNTIME(cudaSetDevice(dev_));
             const auto block_size = 128;
