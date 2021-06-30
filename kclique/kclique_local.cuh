@@ -239,7 +239,7 @@ namespace graph
             }
 
             std::cout.imbue(std::locale(""));
-            std::cout << " Nodes = " << g.numNodes << " Counter = " << counter.gdata()[0] << "\n";
+            std::cout << "Nodes = " << g.numNodes << " Counter = " << counter.gdata()[0] << "\n";
 
             current_level2.freeGPU();
             counter.freeGPU();
@@ -329,7 +329,7 @@ namespace graph
             }
 
             std::cout.imbue(std::locale(""));
-            std::cout << " Nodes = " << g.numNodes << ", Edges = " << g.numEdges << ", Counter = " << counter.gdata()[0] << "\n";
+            std::cout << "Nodes = " << g.numNodes << ", Edges = " << g.numEdges << ", Counter = " << counter.gdata()[0] << "\n";
 
             current_level2.freeGPU();
             counter.freeGPU();
@@ -455,7 +455,7 @@ namespace graph
             }
 
             std::cout.imbue(std::locale(""));
-            std::cout << " Nodes = " << g.numNodes << " Counter = " << counter.gdata()[0] << "\n";
+            std::cout << "Nodes = " << g.numNodes << " Counter = " << counter.gdata()[0] << "\n";
 
             counter.freeGPU();
             current_level2.freeGPU();
@@ -500,7 +500,7 @@ namespace graph
             T level = 0;
             T span = 1024;
             T bucket_level_end_ = level;
-            T todo = g.numNodes;
+            T todo = g.numEdges;
             GPUArray <uint64> counter("Global Clique Counter", unified, 1, dev_);
             cpn = GPUArray <uint64> ("Local clique Counter", gpu, g.numNodes, dev_);
             GPUArray <T> maxDegree("Max Degree", unified, 1, dev_);
@@ -510,16 +510,17 @@ namespace graph
 
             counter.setSingle(0, 0, true);
             maxDegree.setSingle(0, 0, true);
+            execKernel((get_max_degree<T, 128>), (g.numEdges + 128 - 1) / 128, 128, dev_, false, g, edgePtr.gdata(), maxDegree.gdata());
             d_bitmap_states.setAll(0, true);
             cpn.setAll(0, true);
-            getNodeDegree(g, maxDegree.gdata());
-            bucket_scan(nodeDegree, g.numNodes, 0, kcount - 1, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
+
+            bucket_edge_scan(edgePtr, g.numEdges, 0, kcount - 2, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
             todo -= current_q.count.gdata()[0];
             current_q.count.gdata()[0] = 0;
-            level = kcount - 1;
+            level = kcount - 2;
             bucket_level_end_ = level;
 
-            const T partitionSize = PSIZE; //PART_SIZE;
+            const T partitionSize = PSIZE; 
             T factor = (block_size / partitionSize);
 
             const uint dv = 32;
@@ -527,7 +528,9 @@ namespace graph
             uint num_divs = (maxDegree.gdata()[0] + dv - 1) / dv;
             
             const uint64 encode_size = num_SMs * conc_blocks_per_SM * maxDegree.gdata()[0] * num_divs; //per block
+            const uint64 tri_size = num_SMs * conc_blocks_per_SM *  maxDegree.gdata()[0]; //per block
             GPUArray<T> node_be("Binary Encoding Array", gpu, encode_size, dev_);
+            GPUArray<T> tri_list("Triangle List", gpu, tri_size, dev_);
 
             const uint64 level_size = num_SMs * conc_blocks_per_SM * /*factor **/ max_level * num_divs; //per partition
             const uint64 level_item_size = num_SMs * conc_blocks_per_SM * /*factor **/ max_level; //per partition
@@ -559,39 +562,40 @@ namespace graph
                 cudaDeviceSynchronize();
 
                 //1 bucket fill
-                bucket_scan(nodeDegree, g.numNodes, level, span, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
+                bucket_edge_scan(edgePtr, g.numEdges, level, span, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
                 CUDA_RUNTIME(cudaGetLastError());
                 cudaDeviceSynchronize();
 
                 todo -= current_q.count.gdata()[0];
                 if (current_q.count.gdata()[0] > 0)
                 {
-                    auto grid_block_size =  current_q.count.gdata()[0];
-                    execKernel((kckernel_node_block_warp_binary_pivot_count_local_globalmem_direct_loop<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
-                        counter.gdata(),
-                        g,
-                        current_q.device_queue->gdata()[0],
-                        current_level2.gdata(), cpn.gdata(),
-                        d_bitmap_states.gdata(), node_be.gdata(),
-                    
-                        possible.gdata(),
-                        level_count.gdata(),
-                        level_prev.gdata(),
-                        level_d.gdata(),
-                        nCr.gdata()
-                    );
+                    auto grid_block_size = current_q.count.gdata()[0];
+                    execKernel((kckernel_edge_block_warp_binary_pivot_count_local_globalmem_direct_loop<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
+                            counter.gdata(),
+                            g,
+                            current_q.device_queue->gdata()[0],
+                            current_level2.gdata(), cpn.gdata(),
+                            d_bitmap_states.gdata(), node_be.gdata(), tri_list.gdata(),
+
+                            possible.gdata(),
+                            level_count.gdata(),
+                            level_prev.gdata(),
+                            level_d.gdata(),
+                            nCr.gdata()
+                        );
                 }
                 level += span;
             }
 
             std::cout.imbue(std::locale(""));
-            std::cout << " Nodes = " << g.numNodes << " Counter = " << counter.gdata()[0] << "\n";
+            std::cout << "Nodes = " << g.numNodes << ", Edges = " << g.numEdges << ", Counter = " << counter.gdata()[0] << "\n";
 
             counter.freeGPU();
             current_level2.freeGPU();
             d_bitmap_states.freeGPU();
             maxDegree.freeGPU();
             node_be.freeGPU();
+            tri_list.freeGPU();
             possible.freeGPU();
             level_count.freeGPU();
             level_prev.freeGPU();
@@ -601,7 +605,7 @@ namespace graph
             cpn.freeGPU();
         }
 
-        void free()
+        void free_memory()
         {
             current_q.free();
             bucket_q.free();
@@ -629,7 +633,7 @@ namespace graph
 
         ~SingleGPU_Kclique_Local()
         {
-            free();
+            free_memory();
         }
 
         void sync() { CUDA_RUNTIME(cudaStreamSynchronize(stream_)); }
