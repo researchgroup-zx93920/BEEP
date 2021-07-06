@@ -3642,32 +3642,47 @@ kckernel_node_block_warp_binary_pivot_count_local_base(
                     }
                     __syncthreads();
 
-                    if(lx == 0 && maxIntersection == maxCount[wx])
-                    {	
-                        atomicMin(&(level_pivot[l-1]), maxIndex[wx]);
-                    }
-                    __syncthreads();
-
-                    uint64 warpCount = 0;
-                    for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                    if(l + maxIntersection + 1 < KCCOUNT)
                     {
-                        T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
-                        pl[(l - 1)*num_divs_local + j] = ~(encode[level_pivot[l - 1] * num_divs_local + j]) & to[j] & m;
-                        warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
+                        __syncthreads();
+                        if(threadIdx.x == 0)
+                        {	                            
+                            while (l > 2 && level_count[l - 2] == 0)
+                            {
+                                (l)--;
+                            }
+                        }
+                        __syncthreads();
                     }
-                    reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
-
-                    if(threadIdx.x == 0)
+                    else
                     {
-                        l++;
-                        level_count[l-2] = 0;
-                        level_prev_index[l-2] = 0;
-                    }
-                    __syncthreads();
+                        if(lx == 0 && maxIntersection == maxCount[wx])
+                        {	
+                            atomicMin(&(level_pivot[l-1]), maxIndex[wx]);
+                        }
+                        __syncthreads();
 
-                    if(lx == 0 && threadIdx.x < num_divs_local)
-                    {
-                        atomicAdd(&(level_count[l - 2]), warpCount);
+                        uint64 warpCount = 0;
+                        for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                        {
+                            T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
+                            pl[(l - 1)*num_divs_local + j] = ~(encode[level_pivot[l - 1] * num_divs_local + j]) & to[j] & m;
+                            warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
+                        }
+                        reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+
+                        if(threadIdx.x == 0)
+                        {
+                            l++;
+                            level_count[l-2] = 0;
+                            level_prev_index[l-2] = 0;
+                        }
+                        __syncthreads();
+
+                        if(lx == 0 && threadIdx.x < num_divs_local)
+                        {
+                            atomicAdd(&(level_count[l - 2]), warpCount);
+                        }
                     }
                 }
             }
@@ -3993,32 +4008,47 @@ kckernel_node_block_warp_binary_pivot_count_local_globalmem_direct_loop(
                     }
                     __syncthreads();
 
-                    if(lx == 0 && maxIntersection == maxCount[wx])
-                    {	
-                        atomicMin(&(level_pivot[l-1]), maxIndex[wx]);
-                    }
-                    __syncthreads();
-
-                    uint64 warpCount = 0;
-                    for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                    if(l + maxIntersection + 1 < KCCOUNT)
                     {
-                        T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
-                        pl[(l - 1)*num_divs_local + j] = ~(encode[level_pivot[l - 1] * num_divs_local + j]) & to[j] & m;
-                        warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
+                        __syncthreads();
+                        if(threadIdx.x == 0)
+                        {	                            
+                            while (l > 2 && level_count[l - 2] == 0)
+                            {
+                                (l)--;
+                            }
+                        }
+                        __syncthreads();
                     }
-                    reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
-
-                    if(threadIdx.x == 0)
+                    else
                     {
-                        l++;
-                        level_count[l-2] = 0;
-                        level_prev_index[l-2] = 0;
-                    }
-                    __syncthreads();
+                        if(lx == 0 && maxIntersection == maxCount[wx])
+                        {	
+                            atomicMin(&(level_pivot[l-1]), maxIndex[wx]);
+                        }
+                        __syncthreads();
 
-                    if(lx == 0 && threadIdx.x < num_divs_local)
-                    {
-                        atomicAdd(&(level_count[l - 2]), warpCount);
+                        uint64 warpCount = 0;
+                        for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                        {
+                            T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
+                            pl[(l - 1)*num_divs_local + j] = ~(encode[level_pivot[l - 1] * num_divs_local + j]) & to[j] & m;
+                            warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
+                        }
+                        reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+
+                        if(threadIdx.x == 0)
+                        {
+                            l++;
+                            level_count[l-2] = 0;
+                            level_prev_index[l-2] = 0;
+                        }
+                        __syncthreads();
+
+                        if(lx == 0 && threadIdx.x < num_divs_local)
+                        {
+                            atomicAdd(&(level_count[l - 2]), warpCount);
+                        }
                     }
                 }
             }
@@ -4356,32 +4386,48 @@ kckernel_node_block_warp_binary_pivot_count_local_sharedmem_direct_loop(
                     }
                     __syncthreads();
 
-                    if(lx == 0 && maxIntersection == maxCount[wx])
-                    {	
-                        atomicMin(&(level_pivot[l-1]), maxIndex[wx]);
-                    }
-                    __syncthreads();
-
-                    uint64 warpCount = 0;
-                    for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                    if(l + maxIntersection + 1 < KCCOUNT)
                     {
-                        T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
-                        pl[(l - 1)*num_divs_local + j] = ~(encode[level_pivot[l - 1] * num_divs_local + j]) & to[j] & m;
-                        warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
+                        __syncthreads();
+                        if(threadIdx.x == 0)
+                        {	                            
+                            while (l > 2 && level_count[l - 2] == 0)
+                            {
+                                (l)--;
+                            }
+                        }
+                        __syncthreads();
                     }
-                    reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
-
-                    if(threadIdx.x == 0)
+                    else
                     {
-                        l++;
-                        level_count[l-2] = 0;
-                        level_prev_index[l-2] = 0;
-                    }
-                    __syncthreads();
 
-                    if(lx == 0 && threadIdx.x < num_divs_local)
-                    {
-                        atomicAdd(&(level_count[l - 2]), warpCount);
+                        if(lx == 0 && maxIntersection == maxCount[wx])
+                        {	
+                            atomicMin(&(level_pivot[l-1]), maxIndex[wx]);
+                        }
+                        __syncthreads();
+
+                        uint64 warpCount = 0;
+                        for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                        {
+                            T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
+                            pl[(l - 1)*num_divs_local + j] = ~(encode[level_pivot[l - 1] * num_divs_local + j]) & to[j] & m;
+                            warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
+                        }
+                        reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+
+                        if(threadIdx.x == 0)
+                        {
+                            l++;
+                            level_count[l-2] = 0;
+                            level_prev_index[l-2] = 0;
+                        }
+                        __syncthreads();
+
+                        if(lx == 0 && threadIdx.x < num_divs_local)
+                        {
+                            atomicAdd(&(level_count[l - 2]), warpCount);
+                        }
                     }
                 }
             }
@@ -4731,34 +4777,62 @@ kckernel_node_block_warp_binary_pivot_count_local_globalmem_lazy_loop(
                     }
                     __syncthreads();
 
-                    if(lx == 0 && maxIntersection == maxCount[wx])
-                    {	
-                        atomicMin(&(level_pivot[l-1]), maxIndex[wx]);
-                    }
-                    __syncthreads();
-
-                    uint64 warpCount = 0;
-                    for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                    if(l + maxIntersection + 1 < KCCOUNT)
                     {
-                        T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
-                        pl[(l - 1)*num_divs_local + j] = ~(encode[level_pivot[l - 1] * num_divs_local + j]) & to[j] & m;
-                        warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
+                        __syncthreads();
+                        if(threadIdx.x == 0)
+                        {	                            
+                            while (l > 2 && level_count[l - 2] == 0)
+                            {
+                                uint64 cur_pivot = local_level_choose_pivot[l - 2];
+                                uint64 cur_hold = local_level_choose_hold[l - 2];
+                                local_level_choose_pivot[l - 3] += cur_pivot;
+                                local_level_choose_hold[l - 3] += cur_hold;
+                                T cur = level_prev_index[l - 3] - 1;
+                                if(cur == level_pivot[l - 3])
+                                {
+                                    atomicAdd(&cpn[g.colInd[srcStart + cur]], cur_pivot);
+                                }
+                                else
+                                {
+                                    atomicAdd(&cpn[g.colInd[srcStart + cur]], cur_hold);
+                                }
+                                (l)--;
+                            }
+                        }
+                        __syncthreads();
                     }
-                    reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
-
-                    if(threadIdx.x == 0)
+                    else
                     {
-                        l++;
-                        level_count[l-2] = 0;
-                        level_prev_index[l-2] = 0;
-                        local_level_choose_pivot[l - 2] = 0;
-                        local_level_choose_hold[l - 2] = 0;
-                    }
-                    __syncthreads();
+                        if(lx == 0 && maxIntersection == maxCount[wx])
+                        {	
+                            atomicMin(&(level_pivot[l-1]), maxIndex[wx]);
+                        }
+                        __syncthreads();
 
-                    if(lx == 0 && threadIdx.x < num_divs_local)
-                    {
-                        atomicAdd(&(level_count[l - 2]), warpCount);
+                        uint64 warpCount = 0;
+                        for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                        {
+                            T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
+                            pl[(l - 1)*num_divs_local + j] = ~(encode[level_pivot[l - 1] * num_divs_local + j]) & to[j] & m;
+                            warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
+                        }
+                        reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+
+                        if(threadIdx.x == 0)
+                        {
+                            l++;
+                            level_count[l-2] = 0;
+                            level_prev_index[l-2] = 0;
+                            local_level_choose_pivot[l - 2] = 0;
+                            local_level_choose_hold[l - 2] = 0;
+                        }
+                        __syncthreads();
+
+                        if(lx == 0 && threadIdx.x < num_divs_local)
+                        {
+                            atomicAdd(&(level_count[l - 2]), warpCount);
+                        }
                     }
                 }
             }
@@ -5112,34 +5186,62 @@ kckernel_node_block_warp_binary_pivot_count_local_sharedmem_lazy_loop(
                     }
                     __syncthreads();
 
-                    if(lx == 0 && maxIntersection == maxCount[wx])
-                    {	
-                        atomicMin(&(level_pivot[l-1]), maxIndex[wx]);
-                    }
-                    __syncthreads();
-
-                    uint64 warpCount = 0;
-                    for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                    if(l + maxIntersection + 1 < KCCOUNT)
                     {
-                        T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
-                        pl[(l - 1)*num_divs_local + j] = ~(encode[level_pivot[l - 1] * num_divs_local + j]) & to[j] & m;
-                        warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
+                        __syncthreads();
+                        if(threadIdx.x == 0)
+                        {	                            
+                            while (l > 2 && level_count[l - 2] == 0)
+                            {
+                                uint64 cur_pivot = local_level_choose_pivot[l - 2];
+                                uint64 cur_hold = local_level_choose_hold[l - 2];
+                                local_level_choose_pivot[l - 3] += cur_pivot;
+                                local_level_choose_hold[l - 3] += cur_hold;
+                                T cur = level_prev_index[l - 3] - 1;
+                                if(cur == level_pivot[l - 3])
+                                {
+                                    atomicAdd(&local_clique_count[cur], cur_pivot);
+                                }
+                                else
+                                {
+                                    atomicAdd(&local_clique_count[cur], cur_hold);
+                                }
+                                (l)--;
+                            }
+                        }
+                        __syncthreads();
                     }
-                    reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
-
-                    if(threadIdx.x == 0)
+                    else
                     {
-                        l++;
-                        level_count[l-2] = 0;
-                        level_prev_index[l-2] = 0;
-                        local_level_choose_pivot[l - 2] = 0;
-                        local_level_choose_hold[l - 2] = 0;
-                    }
-                    __syncthreads();
+                        if(lx == 0 && maxIntersection == maxCount[wx])
+                        {	
+                            atomicMin(&(level_pivot[l-1]), maxIndex[wx]);
+                        }
+                        __syncthreads();
 
-                    if(lx == 0 && threadIdx.x < num_divs_local)
-                    {
-                        atomicAdd(&(level_count[l - 2]), warpCount);
+                        uint64 warpCount = 0;
+                        for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                        {
+                            T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
+                            pl[(l - 1)*num_divs_local + j] = ~(encode[level_pivot[l - 1] * num_divs_local + j]) & to[j] & m;
+                            warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
+                        }
+                        reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+
+                        if(threadIdx.x == 0)
+                        {
+                            l++;
+                            level_count[l-2] = 0;
+                            level_prev_index[l-2] = 0;
+                            local_level_choose_pivot[l - 2] = 0;
+                            local_level_choose_hold[l - 2] = 0;
+                        }
+                        __syncthreads();
+
+                        if(lx == 0 && threadIdx.x < num_divs_local)
+                        {
+                            atomicAdd(&(level_count[l - 2]), warpCount);
+                        }
                     }
                 }
             }
@@ -5474,32 +5576,47 @@ kckernel_edge_block_warp_binary_pivot_count_local_base(
                     }
                     __syncthreads();
 
-                    if(lx == 0 && maxIntersection == maxCount[wx])
-                    {	
-                        atomicMin(&(level_pivot[l-2]), maxIndex[wx]);
-                    }
-                    __syncthreads();
-
-                    uint64 warpCount = 0;
-                    for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                    if(l + maxIntersection + 1 < KCCOUNT)
                     {
-                        T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
-                        pl[(l - 2)*num_divs_local + j] = ~(encode[level_pivot[l - 2] * num_divs_local + j]) & to[j] & m;
-                        warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
+                        __syncthreads();
+                        if(threadIdx.x == 0)
+                        {	   
+                            while (l > 3 && level_count[l - 3] == 0)
+                            {
+                                (l)--;
+                            }                         
+                        }
+                        __syncthreads();
                     }
-                    reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
-
-                    if(threadIdx.x == 0)
+                    else
                     {
-                        l++;
-                        level_count[l-3] = 0;
-                        level_prev_index[l-3] = 0;
-                    }
+                        if(lx == 0 && maxIntersection == maxCount[wx])
+                        {	
+                            atomicMin(&(level_pivot[l-2]), maxIndex[wx]);
+                        }
+                        __syncthreads();
 
-                    __syncthreads();
-                    if(lx == 0 && threadIdx.x < num_divs_local)
-                    {
-                        atomicAdd(&(level_count[l - 3]), warpCount);
+                        uint64 warpCount = 0;
+                        for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                        {
+                            T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
+                            pl[(l - 2)*num_divs_local + j] = ~(encode[level_pivot[l - 2] * num_divs_local + j]) & to[j] & m;
+                            warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
+                        }
+                        reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+
+                        if(threadIdx.x == 0)
+                        {
+                            l++;
+                            level_count[l-3] = 0;
+                            level_prev_index[l-3] = 0;
+                        }
+
+                        __syncthreads();
+                        if(lx == 0 && threadIdx.x < num_divs_local)
+                        {
+                            atomicAdd(&(level_count[l - 3]), warpCount);
+                        }
                     }
                 }
             }
@@ -5856,32 +5973,47 @@ kckernel_edge_block_warp_binary_pivot_count_local_globalmem_direct_loop(
                     }
                     __syncthreads();
 
-                    if(lx == 0 && maxIntersection == maxCount[wx])
-                    {	
-                        atomicMin(&(level_pivot[l-2]), maxIndex[wx]);
-                    }
-                    __syncthreads();
-
-                    uint64 warpCount = 0;
-                    for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                    if(l + maxIntersection + 1 < KCCOUNT)
                     {
-                        T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
-                        pl[(l - 2)*num_divs_local + j] = ~(encode[level_pivot[l - 2] * num_divs_local + j]) & to[j] & m;
-                        warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
+                        __syncthreads();
+                        if(threadIdx.x == 0)
+                        {	   
+                            while (l > 3 && level_count[l - 3] == 0)
+                            {
+                                (l)--;
+                            }                         
+                        }
+                        __syncthreads();
                     }
-                    reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
-
-                    if(threadIdx.x == 0)
+                    else
                     {
-                        l++;
-                        level_count[l-3] = 0;
-                        level_prev_index[l-3] = 0;
-                    }
+                        if(lx == 0 && maxIntersection == maxCount[wx])
+                        {	
+                            atomicMin(&(level_pivot[l-2]), maxIndex[wx]);
+                        }
+                        __syncthreads();
 
-                    __syncthreads();
-                    if(lx == 0 && threadIdx.x < num_divs_local)
-                    {
-                        atomicAdd(&(level_count[l - 3]), warpCount);
+                        uint64 warpCount = 0;
+                        for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                        {
+                            T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
+                            pl[(l - 2)*num_divs_local + j] = ~(encode[level_pivot[l - 2] * num_divs_local + j]) & to[j] & m;
+                            warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
+                        }
+                        reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+
+                        if(threadIdx.x == 0)
+                        {
+                            l++;
+                            level_count[l-3] = 0;
+                            level_prev_index[l-3] = 0;
+                        }
+
+                        __syncthreads();
+                        if(lx == 0 && threadIdx.x < num_divs_local)
+                        {
+                            atomicAdd(&(level_count[l - 3]), warpCount);
+                        }
                     }
                 }
             }
@@ -6249,32 +6381,47 @@ kckernel_edge_block_warp_binary_pivot_count_local_sharedmem_direct_loop(
                     }
                     __syncthreads();
 
-                    if(lx == 0 && maxIntersection == maxCount[wx])
-                    {	
-                        atomicMin(&(level_pivot[l-2]), maxIndex[wx]);
-                    }
-                    __syncthreads();
-
-                    uint64 warpCount = 0;
-                    for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                    if(l + maxIntersection + 1 < KCCOUNT)
                     {
-                        T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
-                        pl[(l - 2)*num_divs_local + j] = ~(encode[level_pivot[l - 2] * num_divs_local + j]) & to[j] & m;
-                        warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
+                        __syncthreads();
+                        if(threadIdx.x == 0)
+                        {	   
+                            while (l > 3 && level_count[l - 3] == 0)
+                            {
+                                (l)--;
+                            }                         
+                        }
+                        __syncthreads();
                     }
-                    reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
-
-                    if(threadIdx.x == 0)
+                    else
                     {
-                        l++;
-                        level_count[l-3] = 0;
-                        level_prev_index[l-3] = 0;
-                    }
+                        if(lx == 0 && maxIntersection == maxCount[wx])
+                        {	
+                            atomicMin(&(level_pivot[l-2]), maxIndex[wx]);
+                        }
+                        __syncthreads();
 
-                    __syncthreads();
-                    if(lx == 0 && threadIdx.x < num_divs_local)
-                    {
-                        atomicAdd(&(level_count[l - 3]), warpCount);
+                        uint64 warpCount = 0;
+                        for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                        {
+                            T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
+                            pl[(l - 2)*num_divs_local + j] = ~(encode[level_pivot[l - 2] * num_divs_local + j]) & to[j] & m;
+                            warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
+                        }
+                        reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+
+                        if(threadIdx.x == 0)
+                        {
+                            l++;
+                            level_count[l-3] = 0;
+                            level_prev_index[l-3] = 0;
+                        }
+
+                        __syncthreads();
+                        if(lx == 0 && threadIdx.x < num_divs_local)
+                        {
+                            atomicAdd(&(level_count[l - 3]), warpCount);
+                        }
                     }
                 }
             }
@@ -6652,34 +6799,62 @@ kckernel_edge_block_warp_binary_pivot_count_local_globalmem_lazy_loop(
                     }
                     __syncthreads();
 
-                    if(lx == 0 && maxIntersection == maxCount[wx])
-                    {	
-                        atomicMin(&(level_pivot[l-2]), maxIndex[wx]);
-                    }
-                    __syncthreads();
-
-                    uint64 warpCount = 0;
-                    for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                    if(l + maxIntersection + 1 < KCCOUNT)
                     {
-                        T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
-                        pl[(l - 2)*num_divs_local + j] = ~(encode[level_pivot[l - 2] * num_divs_local + j]) & to[j] & m;
-                        warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
+                        __syncthreads();
+                        if(threadIdx.x == 0)
+                        {	   
+                            while (l > 3 && level_count[l - 3] == 0)
+                            {
+                                uint64 cur_pivot = local_level_choose_pivot[l - 3];
+                                uint64 cur_hold = local_level_choose_hold[l - 3];
+                                local_level_choose_pivot[l - 4] += cur_pivot;
+                                local_level_choose_hold[l - 4] += cur_hold;
+                                T cur = level_prev_index[l - 4] - 1;
+                                if(cur == level_pivot[l - 4])
+                                {
+                                    atomicAdd(&cpn[tri[cur]], cur_pivot);
+                                }
+                                else
+                                {
+                                    atomicAdd(&cpn[tri[cur]], cur_hold);
+                                }
+                                (l)--;
+                            }                       
+                        }
+                        __syncthreads();
                     }
-                    reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
-
-                    if(threadIdx.x == 0)
+                    else
                     {
-                        l++;
-                        level_count[l-3] = 0;
-                        level_prev_index[l-3] = 0;
-                        local_level_choose_pivot[l - 3] = 0;
-                        local_level_choose_hold[l - 3] = 0;
-                    }
+                        if(lx == 0 && maxIntersection == maxCount[wx])
+                        {	
+                            atomicMin(&(level_pivot[l-2]), maxIndex[wx]);
+                        }
+                        __syncthreads();
 
-                    __syncthreads();
-                    if(lx == 0 && threadIdx.x < num_divs_local)
-                    {
-                        atomicAdd(&(level_count[l - 3]), warpCount);
+                        uint64 warpCount = 0;
+                        for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                        {
+                            T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
+                            pl[(l - 2)*num_divs_local + j] = ~(encode[level_pivot[l - 2] * num_divs_local + j]) & to[j] & m;
+                            warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
+                        }
+                        reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+
+                        if(threadIdx.x == 0)
+                        {
+                            l++;
+                            level_count[l-3] = 0;
+                            level_prev_index[l-3] = 0;
+                            local_level_choose_pivot[l - 3] = 0;
+                            local_level_choose_hold[l - 3] = 0;
+                        }
+
+                        __syncthreads();
+                        if(lx == 0 && threadIdx.x < num_divs_local)
+                        {
+                            atomicAdd(&(level_count[l - 3]), warpCount);
+                        }
                     }
                 }
             }
@@ -7061,34 +7236,62 @@ kckernel_edge_block_warp_binary_pivot_count_local_sharedmem_lazy_loop(
                     }
                     __syncthreads();
 
-                    if(lx == 0 && maxIntersection == maxCount[wx])
-                    {	
-                        atomicMin(&(level_pivot[l-2]), maxIndex[wx]);
-                    }
-                    __syncthreads();
-
-                    uint64 warpCount = 0;
-                    for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                    if(l + maxIntersection + 1 < KCCOUNT)
                     {
-                        T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
-                        pl[(l - 2)*num_divs_local + j] = ~(encode[level_pivot[l - 2] * num_divs_local + j]) & to[j] & m;
-                        warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
+                        __syncthreads();
+                        if(threadIdx.x == 0)
+                        {	   
+                            while (l > 3 && level_count[l - 3] == 0)
+                            {
+                                uint64 cur_pivot = local_level_choose_pivot[l - 3];
+                                uint64 cur_hold = local_level_choose_hold[l - 3];
+                                local_level_choose_pivot[l - 4] += cur_pivot;
+                                local_level_choose_hold[l - 4] += cur_hold;
+                                T cur = level_prev_index[l - 4] - 1;
+                                if(cur == level_pivot[l - 4])
+                                {
+                                    atomicAdd(&local_clique_count[cur], cur_pivot);
+                                }
+                                else
+                                {
+                                    atomicAdd(&local_clique_count[cur], cur_hold);
+                                }
+                                (l)--;
+                            }                 
+                        }
+                        __syncthreads();
                     }
-                    reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
-
-                    if(threadIdx.x == 0)
+                    else
                     {
-                        l++;
-                        level_count[l-3] = 0;
-                        level_prev_index[l-3] = 0;
-                        local_level_choose_pivot[l - 3] = 0;
-                        local_level_choose_hold[l - 3] = 0;
-                    }
+                        if(lx == 0 && maxIntersection == maxCount[wx])
+                        {	
+                            atomicMin(&(level_pivot[l-2]), maxIndex[wx]);
+                        }
+                        __syncthreads();
 
-                    __syncthreads();
-                    if(lx == 0 && threadIdx.x < num_divs_local)
-                    {
-                        atomicAdd(&(level_count[l - 3]), warpCount);
+                        uint64 warpCount = 0;
+                        for (T j = threadIdx.x; j < num_divs_local; j += BLOCK_DIM_X)
+                        {
+                            T m = (j == lastMask_i) ? lastMask_ii : 0xFFFFFFFF;
+                            pl[(l - 2)*num_divs_local + j] = ~(encode[level_pivot[l - 2] * num_divs_local + j]) & to[j] & m;
+                            warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
+                        }
+                        reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+
+                        if(threadIdx.x == 0)
+                        {
+                            l++;
+                            level_count[l-3] = 0;
+                            level_prev_index[l-3] = 0;
+                            local_level_choose_pivot[l - 3] = 0;
+                            local_level_choose_hold[l - 3] = 0;
+                        }
+
+                        __syncthreads();
+                        if(lx == 0 && threadIdx.x < num_divs_local)
+                        {
+                            atomicAdd(&(level_count[l - 3]), warpCount);
+                        }
                     }
                 }
             }
