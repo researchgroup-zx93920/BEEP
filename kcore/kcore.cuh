@@ -370,7 +370,7 @@ namespace graph
 		void AscendingGpu(int n, GPUArray<T>& identity_arr_asc)
 		{
 			long grid_size = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
-			identity_arr_asc.initialize("Identity Array Asc", AllocationTypeEnum::unified, n, dev_);
+			identity_arr_asc.initialize("Identity Array Asc", gpu, n, dev_);
 			execKernel(init_asc, grid_size, BLOCK_SIZE, dev_, false, identity_arr_asc.gdata(), n);
 		}
 
@@ -456,7 +456,7 @@ namespace graph
 			int bucket_level_end_ = level;
 			//Lets apply queues and buckets
 			graph::GraphQueue<T, bool> bucket_q;
-			bucket_q.Create(unified, g.numNodes, dev_);
+			bucket_q.Create(gpu, g.numNodes, dev_);
 
 			graph::GraphQueue<T, bool> current_q;
 			current_q.Create(gpu, g.numNodes, dev_);
@@ -468,8 +468,8 @@ namespace graph
 			AscendingGpu(g.numNodes, identity_arr_asc);
 
 
-			processed.initialize("is Deleted (Processed)", unified, g.numNodes, dev_);
-			processed.setAll(false, false);
+			// processed.initialize("is Deleted (Processed)", gpu, g.numNodes, dev_);
+			// processed.setAll(false, false);
 
 
 			nodePriority.initialize("Edge Support", gpu, g.numNodes, dev_);
@@ -580,10 +580,11 @@ namespace graph
 			current_q.free();
 			next_q.free();
 			bucket_q.free();
+			identity_arr_asc.freeGPU();
 
 			k = level;
 
-			printf("Max Core = %d\n", k - 1);
+			//printf("Max Core = %d\n", k - 1);
 		}
 
 		uint findKtrussIncremental_sync(int kmin, int kmax, TcBase<T>* tcCounter, EidGraph_d<T>& g, int* reverseIndex, EncodeDataType* bitMap, const size_t nodeOffset = 0, const size_t edgeOffset = 0)

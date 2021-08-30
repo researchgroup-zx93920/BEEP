@@ -67,6 +67,10 @@ static MAINTASK parseMainTask(const char* s)
     if (strcmp(s, "kclique") == 0)
         return KCLIQUE;
 
+    
+    if (strcmp(s, "maximal") == 0)
+        return MAXIMAL;
+
     if (strcmp(s, "cd") == 0)
         return CROSSDECOMP;
 
@@ -308,7 +312,7 @@ static Config parseArgs(int argc, char** argv) {
 #ifndef __VS__
     int opt;
 
-    printf("parsing configuration .... \n");
+    //printf("parsing configuration .... \n");
 
     while ((opt = getopt(argc, argv, "g:r:d:m:x:o:a:k:h:v:s:p:e:q:w:")) >= 0) {
         switch (opt) {
@@ -337,19 +341,19 @@ static Config parseArgs(int argc, char** argv) {
 
 static void printConfig(Config config)
 {
-    printf("    Graph: %s\n", config.srcGraph);
-    printf("    DST Graph: %s\n", config.dstGraph);
-    printf("    Device Id = %u\n", config.deviceId);
-    printf("    Allocation = %s\n", asString(config.allocation));
-    printf("    Small Graph = %s\n", config.isSmall? "Small Graph Allocation" : "Large Graph Allocation");
-    printf("    Main Task = %s\n", asString(config.mt));
-    printf("    Graph Orientation = %s\n", asString(config.orient));
-    printf("    Process By = %s\n", asString(config.processBy));
-    printf("    Process Element = %s\n", asString(config.processElement));
-    printf("    k: %u\n", config.k);
+    // printf("    Graph: %s\n", config.srcGraph);
+    // //printf("    DST Graph: %s\n", config.dstGraph);
+    // printf("    Device Id = %u, ", config.deviceId);
+    // printf("    Allocation = %s, ", asString(config.allocation));
+    // printf("    Small Graph = %s, ", config.isSmall? "Small Graph Allocation" : "Large Graph Allocation");
+    // printf("    Main Task = %s, ", asString(config.mt));
+    // printf("    Graph Orientation = %s, ", asString(config.orient));
+    // printf("    Process By = %s, ", asString(config.processBy));
+    // printf("    Process Element = %s, ", asString(config.processElement));
+    // printf("    k: %u, ", config.k);
 
 
-    if (config.mt == KCLIQUE)
-         printf("    KC Config = %s\n", asString(config.kcConfig));
+    if (config.mt == KCLIQUE || config.mt == MAXIMAL)
+         printf("    Clique Config = %s\n", asString(config.kcConfig));
 
 }

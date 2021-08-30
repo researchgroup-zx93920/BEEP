@@ -21,6 +21,13 @@ __device__ __forceinline__ void reduce_part(T partMask, uint64& warpCount) {
 		warpCount += __shfl_down_sync(partMask, warpCount, i);
 }
 
+template<typename T, uint CPARTSIZE>
+__device__ __forceinline__ void reduce_partT(T partMask, T& warpCount) {
+	for (int i = CPARTSIZE / 2; i >= 1; i /= 2) 
+		warpCount += __shfl_down_sync(partMask, warpCount, i);
+}
+
+
 
 template <typename T, int BLOCK_DIM_X, typename OUTTYPE=unsigned short>
 __device__ __forceinline__ void block_filter_pivot(T count, T* output, OUTTYPE* gl)

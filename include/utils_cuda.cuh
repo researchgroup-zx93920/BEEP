@@ -162,7 +162,7 @@ struct CUDAContext {
         cudaDeviceProp prop;
         cudaGetDeviceProperties(&prop, 0); /*currently 0th device*/
         max_threads_per_SM = prop.maxThreadsPerMultiProcessor;
-        Log(LogPriorityEnum::info, "Shared MemPerBlock: %zu, PerSM: %zu", prop.sharedMemPerBlock, prop.sharedMemPerMultiprocessor);
+        //Log(LogPriorityEnum::info, "Shared MemPerBlock: %zu, PerSM: %zu", prop.sharedMemPerBlock, prop.sharedMemPerMultiprocessor);
         shared_mem_size_per_block = prop.sharedMemPerBlock;
         shared_mem_size_per_sm = prop.sharedMemPerMultiprocessor;
         num_SMs = prop.multiProcessorCount;
@@ -170,7 +170,7 @@ struct CUDAContext {
 
     uint32_t GetConCBlocks(uint32_t block_size) {
         auto conc_blocks_per_SM = max_threads_per_SM / block_size; /*assume regs are not limited*/
-        Log(LogPriorityEnum::info, "#SMs: %d, con blocks/SM: %d", num_SMs, conc_blocks_per_SM);
+        //Log(LogPriorityEnum::info, "#SMs: %d, con blocks/SM: %d", num_SMs, conc_blocks_per_SM);
         return conc_blocks_per_SM;
     }
 };
