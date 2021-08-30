@@ -13,7 +13,7 @@ __constant__ uint SYMNODE[DEPTH * (DEPTH - 1) / 2];
 __constant__ uint SYMNODE_PTR[DEPTH + 1];
 
 template<typename T>
-__device__ __forceinline__ T get_mask(T idx, T partition) {
+__host__ __device__ __forceinline__ T get_mask(T idx, T partition) {
 	if (idx / 32 > partition) return 0xFFFFFFFF;
 	if (idx / 32 < partition) return 0;
 	return (0xFFFFFFFF >> (32 - (idx - partition * 32)));
@@ -707,6 +707,86 @@ sgm_kernel_central_node_base_binary_persistant(
 	if (threadIdx.x == 0)
 	{
 		atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
+	}
+}
+
+template<typename T>
+void count_and_encode_cpu(
+	const T* A, const T aSz,
+	const T* B, const T bSz,
+	const T j, const T num_divs_local,
+	T* encode
+)
+{
+	for (T i = 0; i < aSz; i++)
+	{
+		const T searchVal = A[i];
+		bool found = false;
+		const T lb = graph::binary_search<T>(B, 0, bSz, searchVal, found);
+		if (found)
+		{
+			//////////////////////////////Device function ///////////////////////
+			T chunk_index = i / 32; // 32 here is the division size of the encode
+			T inChunkIndex = i % 32;
+			encode[j*num_divs_local + chunk_index] |= (1 << inChunkIndex);
+
+			T chunk_index1 = j / 32; // 32 here is the division size of the encode
+			T inChunkIndex1 = j % 32;
+			encode[i*num_divs_local + chunk_index1] |= (1 << inChunkIndex1);
+
+			/////////////////////////////////////////////////////////////////////
+		}
+	}
+}
+
+template<typename T>
+void sgm_cpu_compute_encoding(
+	const graph::COOCSRGraph_d<T> g,
+	graph::GraphQueue<T> current,
+	T* adj_enc, T* orient, unsigned char* offset
+)
+{
+	#pragma omp parallel for
+	for (T i = 0; i < current.count.gdata()[0]; i++)
+	{
+		T src = current.queue.gdata()[i];
+		T srcStart = g.rowPtr[src];
+		T srcLen = g.rowPtr[src + 1] - srcStart;
+
+		T num_divs_local = (srcLen + 32 - 1) / 32;
+
+		offset[src] = i;
+
+		T orient_offset = i * NUMDIVS;
+		T* orient_mask = &orient[orient_offset];
+
+		uint64 encode_offset = (uint64) orient_offset * MAXDEG;
+		T* encode = &adj_enc[encode_offset];
+		
+		for (T j = 0; j < srcLen; j ++)
+		{
+			for (T k = 0; k < num_divs_local; k ++)
+			{
+				encode[j * num_divs_local + k] = 0x00;
+			}
+			//graph::warp_sorted_count_and_encode_full<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&g.colInd[srcStart], srcLen,
+			//	&g.colInd[g.rowPtr[g.colInd[srcStart + j]]], g.rowPtr[g.colInd[srcStart + j] + 1] - g.rowPtr[g.colInd[srcStart + j]],
+			//	j, num_divs_local,
+			//	encode);
+			count_and_encode_cpu(&g.colInd[srcStart], srcLen,
+				&g.colInd[g.rowPtr[g.colInd[srcStart + j]]], g.rowPtr[g.colInd[srcStart + j] + 1] - g.rowPtr[g.colInd[srcStart + j]],
+				j, num_divs_local, encode);
+		}
+
+		// Compute orientation mask (If any level is symmetric to node 0)
+		for (T tid = 0; tid < srcLen; tid ++)
+		{
+			T dst = g.colInd[srcStart + tid];
+			T dstLen = g.rowPtr[dst + 1] - g.rowPtr[dst];
+			T mask = get_mask(srcLen, tid/32);
+			bool keep = (dstLen > srcLen || ((dstLen == srcLen) && src < dst));
+			orient_mask[tid / 32] |= (keep << (tid % 32));
+		}
 	}
 }
 
