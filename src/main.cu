@@ -34,6 +34,7 @@
 #include "../kcore/kcore.cuh"
 #include "../kclique/kclique.cuh"
 #include "../kclique/kclique_local.cuh"
+#include "../kclique/mclique.cuh"
 
 
 #include "../include/Config.h"
@@ -1062,6 +1063,118 @@ int main(int argc, char** argv)
         // (teps: traversed edges per second)
         Log(info, "count time %f s (%f teps)", time, m / time);
         localclique.show(n);
+    }
+
+    if (config.mt == MAXIMAL_CLIQUE)
+    {
+        if (config.orient != None)
+        {
+            Log(error, "Full graph is needed for maximal cliques.\n");
+            return 0;
+        }
+        
+        mohacore.findKcoreIncremental_async(3, 1000, *gd, 0, 0);
+
+        graph::GPUArray<uint> rowInd_half("Half Row Index", config.allocation, m / 2, config.deviceId),
+            colInd_half("Half Col Index", config.allocation, m / 2, config.deviceId),
+            new_rowPtr("New Row Pointer", config.allocation, n + 1, config.deviceId),
+            asc("ASC temp", AllocationTypeEnum::unified, m, config.deviceId);
+        graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, config.deviceId);
+
+        execKernel((init<uint, PeelType>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata(), mohacore.nodePriority.gdata());
+
+        graph::CubLarge<uint> s(config.deviceId);
+        uint newNumEdges;
+        if (m < INT_MAX)
+        {
+            CUBSelect(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m, config.deviceId);
+            newNumEdges = CUBSelect(gd->colInd, colInd_half.gdata(), keep.gdata(), m, config.deviceId);
+        }
+        else
+        {
+            newNumEdges = s.Select2(gd->rowInd,  gd->colInd,  rowInd_half.gdata(), colInd_half.gdata(), keep.gdata(), m);
+        }
+
+        execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), new_rowPtr.gdata());
+        uint total = CUBScanExclusive<uint, uint>(new_rowPtr.gdata(), new_rowPtr.gdata(), n, config.deviceId, 0, config.allocation);
+        new_rowPtr.setSingle(n, total, false);
+        
+        cudaDeviceSynchronize();
+        asc.freeGPU();
+        keep.freeGPU();
+
+        graph::COOCSRGraph<uint> go;
+        graph::COOCSRGraph_d<uint>* god = (graph::COOCSRGraph_d<uint>*)malloc(sizeof(graph::COOCSRGraph_d<uint>));
+
+        go.capacity = m / 2;
+        go.numEdges = m / 2;
+        go.numNodes = n;
+
+        go.rowPtr = &new_rowPtr;
+        go.rowInd = &rowInd_half;
+        go.colInd = &colInd_half;
+
+        god->numNodes = go.numNodes;
+        god->numEdges = go.numEdges;
+        god->capacity = go.capacity;
+        god->rowPtr = new_rowPtr.gdata();
+        god->rowInd = go.rowInd->gdata();
+        god->colInd = go.colInd->gdata();
+
+        graph::SingleGPU_Maximal_Clique<uint> maximalclique(config.deviceId, *god);
+
+        KcliqueConfig kcc = config.kcConfig;
+
+        Timer t;
+        if (config.processBy == ByNode)
+        {
+            if(kcc.Algo == GraphOrient)
+            {
+                Log(error, "Not Implemented for graph orientation method.\n");
+            }
+            else // Pivoting
+            {
+                if(kcc.BinaryEncode)
+                {
+                    switch(kcc.PartSize)
+                    {
+                        case 32:
+                        maximalclique.find_maximal_clique_node_pivot_async_local<32>(*god, *gd);
+                        break;
+                        case 16:
+                        maximalclique.find_maximal_clique_node_pivot_async_local<16>(*god, *gd);
+                        break;
+                        case 8:
+                        maximalclique.find_maximal_clique_node_pivot_async_local<8>(*god, *gd);
+                        break;
+                        case 4:
+                        maximalclique.find_maximal_clique_node_pivot_async_local<4>(*god, *gd);
+                        break;
+                        case 2:
+                        maximalclique.find_maximal_clique_node_pivot_async_local<2>(*god, *gd);
+                        break;
+                        case 1:
+                        maximalclique.find_maximal_clique_node_pivot_async_local<1>(*god, *gd);
+                        break;
+                        default:
+                            Log(error, "WRONG PARTITION SIZE SELECTED\n");
+                    }
+                }
+                else
+                {
+                    Log(error, "Not Implemented for non-binary encoding method.\n");
+                }
+            }
+        }
+        else if (config.processBy == ByEdge)
+        {
+            Log(error, "Not Implemented for processing by edge.\n");
+        }
+        maximalclique.sync();
+        double time = t.elapsed();
+        // (teps: traversed edges per second)
+        Log(info, "count time %f s (%f teps)", time, m / time);
+        maximalclique.show(n);
     }
 
     if (config.mt == KTRUSS)

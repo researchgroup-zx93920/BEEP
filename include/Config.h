@@ -69,6 +69,9 @@ static MAINTASK parseMainTask(const char* s)
 
     if (strcmp(s, "kclique-local") == 0)
         return KCLIQUE_LOCAL;
+    
+    if (strcmp(s, "maximal-clique") == 0)
+        return MAXIMAL_CLIQUE;
 
     if (strcmp(s, "cd") == 0)
         return CROSSDECOMP;
@@ -89,6 +92,7 @@ static const char* asString(MAINTASK mt) {
     case KTRUSS:            return "ktruss";
     case KCLIQUE:            return "kclique";
     case KCLIQUE_LOCAL:            return "kclique-local";
+    case MAXIMAL_CLIQUE:            return "maximal-clique";
     case CROSSDECOMP:   return "cd";
 
     default:
@@ -355,7 +359,7 @@ static void printConfig(Config config)
     printf("    k: %u\n", config.k);
 
 
-    if (config.mt == KCLIQUE || config.mt == KCLIQUE_LOCAL)
+    if (config.mt == KCLIQUE || config.mt == KCLIQUE_LOCAL || config.mt == MAXIMAL_CLIQUE)
          printf("    KC Config = %s\n", asString(config.kcConfig));
 
 }
