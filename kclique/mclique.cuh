@@ -219,7 +219,7 @@ namespace graph
         }
 
         template<const int PSIZE>
-        void find_maximal_clique_node_pivot_async_local(COOCSRGraph_d<T>& god, COOCSRGraph_d<T>& gd,
+        void find_maximal_clique_node_pivot_async_local(COOCSRGraph_d<T>& g_dir, COOCSRGraph_d<T>& g_undir,
             const size_t nodeOffset = 0, const size_t edgeOffset = 0)
         {
             CUDA_RUNTIME(cudaSetDevice(dev_));
@@ -227,7 +227,7 @@ namespace graph
             CUDAContext context;
             T num_SMs = context.num_SMs;
 
-            cpn = GPUArray <uint64> ("clique Counter", gpu, god.numNodes, dev_);
+            cpn = GPUArray <uint64> ("clique Counter", gpu, g_dir.numNodes, dev_);
             GPUArray <T> maxDegree("Max Degree", unified, 1, dev_);
             GPUArray <T> maxUndirectedDegree("Max Undirected Degree", unified, 1, dev_);
 
@@ -239,8 +239,8 @@ namespace graph
             d_bitmap_states.setAll(0, true);
             cpn.setAll(0, true);
 
-            getNodeDegree(god, maxDegree.gdata());
-            getNodeDegree(gd, maxUndirectedDegree.gdata());
+            getNodeDegree(g_dir, maxDegree.gdata());
+            getNodeDegree(g_undir, maxUndirectedDegree.gdata());
 
             const T partitionSize = PSIZE; 
             T factor = (block_size / partitionSize);
@@ -277,14 +277,14 @@ namespace graph
             CUDA_RUNTIME(cudaGetLastError());
             cudaDeviceSynchronize();
 
-            tmpNode = GPUArray<T> ("Temp Node", gpu, gd.numEdges, dev_);
+            tmpNode = GPUArray<T> ("Temp Node", gpu, g_undir.numEdges, dev_);
             tmpNode.setAll(0, true);
             
-            auto grid_block_size = (god.numNodes + block_size - 1) / block_size;
+            auto grid_block_size = (g_dir.numNodes + block_size - 1) / block_size;
             execKernel((mckernel_node_block_warp_binary<T, block_size, partitionSize>), grid_block_size, block_size, dev_, false,
-                gd,
-                god,
-                god.numNodes,
+                g_undir,
+                g_dir,
+                g_dir.numNodes,
                 current_level2.gdata(), cpn.gdata(),
                 d_bitmap_states.gdata(), node_be.gdata(),
 
@@ -296,7 +296,6 @@ namespace graph
             );
 
             std::cout.imbue(std::locale(""));
-            // std::cout << "Nodes = " << g.numNodes << ", Edges = " << g.numEdges << ", Counter = " << counter.gdata()[0] << "\n";
 
             current_level2.freeGPU();
             d_bitmap_states.freeGPU();
