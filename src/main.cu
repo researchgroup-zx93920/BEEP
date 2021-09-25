@@ -1075,53 +1075,67 @@ int main(int argc, char** argv)
         
         mohacore.findKcoreIncremental_async(3, 1000, *gd, 0, 0);
 
-        graph::GPUArray<uint> rowInd_half("Half Row Index", config.allocation, m / 2, config.deviceId),
-            colInd_half("Half Col Index", config.allocation, m / 2, config.deviceId),
-            new_rowPtr("New Row Pointer", config.allocation, n + 1, config.deviceId),
+        graph::GPUArray<uint> split_col("Split Column", config.allocation, m, config.deviceId),
+            tmp_row("Temp Row", config.allocation, m / 2, config.deviceId),
+            tmp_col("Temp Column", config.allocation, m / 2, config.deviceId),
+            split_ptr("Split Pointer", config.allocation, n + 1, config.deviceId),
             asc("ASC temp", AllocationTypeEnum::unified, m, config.deviceId);
+
         graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, config.deviceId);
 
         execKernel((init<uint, PeelType>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata(), mohacore.nodePriority.gdata());
-
+        
         graph::CubLarge<uint> s(config.deviceId);
-        uint newNumEdges;
         if (m < INT_MAX)
         {
-            CUBSelect(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m, config.deviceId);
-            newNumEdges = CUBSelect(gd->colInd, colInd_half.gdata(), keep.gdata(), m, config.deviceId);
+            CUBSelect(gd->rowInd, tmp_row.gdata(), keep.gdata(), m, config.deviceId);
+            CUBSelect(gd->colInd, tmp_col.gdata(), keep.gdata(), m, config.deviceId);
         }
         else
         {
-            newNumEdges = s.Select2(gd->rowInd,  gd->colInd,  rowInd_half.gdata(), colInd_half.gdata(), keep.gdata(), m);
+            s.Select2(gd->rowInd, gd->colInd, tmp_row.gdata(), tmp_col.gdata(), keep.gdata(), m);
         }
 
-        execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), new_rowPtr.gdata());
-        uint total = CUBScanExclusive<uint, uint>(new_rowPtr.gdata(), new_rowPtr.gdata(), n, config.deviceId, 0, config.allocation);
-        new_rowPtr.setSingle(n, total, false);
-        
+        execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), split_ptr.gdata());
+        total = CUBScanExclusive<uint, uint>(split_ptr.gdata(), split_ptr.gdata(), n, config.deviceId, 0, config.allocation);
+        split_ptr.setSingle(n, total, true);
+        execKernel((split_child<uint>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, *gd, tmp_row.gdata(), tmp_col.gdata(), split_col.gdata(), split_ptr.gdata());
+        execKernel((split_inverse<uint>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, keep.gdata(), m);
+
+        if (m < INT_MAX)
+        {
+            CUBSelect(gd->rowInd, tmp_row.gdata(), keep.gdata(), m, config.deviceId);
+            CUBSelect(gd->colInd, tmp_col.gdata(), keep.gdata(), m, config.deviceId);
+        }
+        else
+        {
+            s.Select2(gd->rowInd, gd->colInd, tmp_row.gdata(), tmp_col.gdata(), keep.gdata(), m);
+        }
+
+        execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), split_ptr.gdata());
+        uint total = CUBScanExclusive<uint, uint>(split_ptr.gdata(), split_ptr.gdata(), n, config.deviceId, 0, config.allocation);
+        split_ptr.setSingle(n, total, true);
+        execKernel((split_parent<uint>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, *gd, tmp_row.gdata(), tmp_col.gdata(), split_col.gdata(), split_ptr.gdata());
+        execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), split_ptr.gdata());
+        execKernel((split_acc<uint>), ((n - 1) / 51200) + 1, 512, config.deviceId, false, *gd, split_ptr.gdata());
+
         cudaDeviceSynchronize();
         asc.freeGPU();
         keep.freeGPU();
+        tmp_row.freeGPU();
+        tmp_col.freeGPU();
 
-        graph::COOCSRGraph<uint> go;
-        graph::COOCSRGraph_d<uint>* god = (graph::COOCSRGraph_d<uint>*)malloc(sizeof(graph::COOCSRGraph_d<uint>));
+        graph::COOCSRGraph_d<uint>* gsplit = (graph::COOCSRGraph_d<uint>*)malloc(sizeof(graph::COOCSRGraph_d<uint>));
 
-        go.capacity = m / 2;
-        go.numEdges = m / 2;
-        go.numNodes = n;
+        gsplit->numNodes = n;
+        gsplit->numEdges = m;
+        gsplit->capacity = m;
+        gsplit->rowPtr = gd->rowPtr;
+        gsplit->rowInd = gd->rowInd;
+        gsplit->colInd = split_col.gdata();
+        gsplit->splitPtr = split_ptr.gdata();
 
-        go.rowPtr = &new_rowPtr;
-        go.rowInd = &rowInd_half;
-        go.colInd = &colInd_half;
-
-        god->numNodes = go.numNodes;
-        god->numEdges = go.numEdges;
-        god->capacity = go.capacity;
-        god->rowPtr = new_rowPtr.gdata();
-        god->rowInd = go.rowInd->gdata();
-        god->colInd = go.colInd->gdata();
-
-        graph::SingleGPU_Maximal_Clique<uint> maximalclique(config.deviceId, *god);
+        graph::SingleGPU_Maximal_Clique<uint> maximalclique(config.deviceId, *gsplit);
 
         KcliqueConfig kcc = config.kcConfig;
 
@@ -1139,22 +1153,22 @@ int main(int argc, char** argv)
                     switch(kcc.PartSize)
                     {
                         case 32:
-                        maximalclique.find_maximal_clique_node_pivot_async_local<32>(*god, *gd);
+                        maximalclique.find_maximal_clique_node_pivot_async_local<32>(*gsplit);
                         break;
                         case 16:
-                        maximalclique.find_maximal_clique_node_pivot_async_local<16>(*god, *gd);
+                        maximalclique.find_maximal_clique_node_pivot_async_local<16>(*gsplit);
                         break;
                         case 8:
-                        maximalclique.find_maximal_clique_node_pivot_async_local<8>(*god, *gd);
+                        maximalclique.find_maximal_clique_node_pivot_async_local<8>(*gsplit);
                         break;
                         case 4:
-                        maximalclique.find_maximal_clique_node_pivot_async_local<4>(*god, *gd);
+                        maximalclique.find_maximal_clique_node_pivot_async_local<4>(*gsplit);
                         break;
                         case 2:
-                        maximalclique.find_maximal_clique_node_pivot_async_local<2>(*god, *gd);
+                        maximalclique.find_maximal_clique_node_pivot_async_local<2>(*gsplit);
                         break;
                         case 1:
-                        maximalclique.find_maximal_clique_node_pivot_async_local<1>(*god, *gd);
+                        maximalclique.find_maximal_clique_node_pivot_async_local<1>(*gsplit);
                         break;
                         default:
                             Log(error, "WRONG PARTITION SIZE SELECTED\n");
@@ -1168,7 +1182,43 @@ int main(int argc, char** argv)
         }
         else if (config.processBy == ByEdge)
         {
-            Log(error, "Not Implemented for processing by edge.\n");
+            if(kcc.Algo == GraphOrient)
+            {
+                Log(error, "Not Implemented for graph orientation method.\n");
+            }
+            else // Pivoting
+            {
+                if(kcc.BinaryEncode)
+                {
+                    switch(kcc.PartSize)
+                    {
+                        case 32:
+                        maximalclique.find_maximal_clique_edge_pivot_async_local<32>(*gsplit);
+                        break;
+                        case 16:
+                        maximalclique.find_maximal_clique_edge_pivot_async_local<16>(*gsplit);
+                        break;
+                        case 8:
+                        maximalclique.find_maximal_clique_edge_pivot_async_local<8>(*gsplit);
+                        break;
+                        case 4:
+                        maximalclique.find_maximal_clique_edge_pivot_async_local<4>(*gsplit);
+                        break;
+                        case 2:
+                        maximalclique.find_maximal_clique_edge_pivot_async_local<2>(*gsplit);
+                        break;
+                        case 1:
+                        maximalclique.find_maximal_clique_edge_pivot_async_local<1>(*gsplit);
+                        break;
+                        default:
+                            Log(error, "WRONG PARTITION SIZE SELECTED\n");
+                    }
+                }
+                else
+                {
+                    Log(error, "Not Implemented for non-binary encoding method.\n");
+                }
+            }
         }
         maximalclique.sync();
         double time = t.elapsed();
