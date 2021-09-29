@@ -24,8 +24,8 @@ mckernel_node_block_warp_binary(
     T* x_level, // X for induced
     T* level_count_g,
     T* level_prev_g,
-    T* buffer1, // X for undirected graph
-    T* buffer2
+    T* buffer1_g, // X for undirected graph
+    T* buffer2_g
 )
 {
     //will be removed later
@@ -34,7 +34,7 @@ mckernel_node_block_warp_binary(
     const size_t lx = threadIdx.x % CPARTSIZE;
 
     __shared__ T level_pivot[512];
-    __shared__ T sz1[512], sz2;
+    __shared__ T *buffer1, *buffer2, sz1[512], sz2;
     __shared__ bool path_more_explore, path_eliminated, vote;
     __shared__ T l;
     __shared__ T maxIntersection;
@@ -79,6 +79,10 @@ mckernel_node_block_warp_binary(
             usrcStart = gsplit.rowPtr[src];
             usrcLen = gsplit.splitPtr[src] - usrcStart;
 
+            auto buf_offset = sm_id * CBPSM * (MAXUNDEG) + levelPtr * (MAXUNDEG);
+            buffer1 = &buffer1_g[buf_offset];
+            buffer2 = &buffer2_g[buf_offset];
+
             num_divs_local = (srcLen + 32 - 1) / 32;
             encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
             encode = &adj_enc[encode_offset];
@@ -110,7 +114,7 @@ mckernel_node_block_warp_binary(
 
         for(T j = threadIdx.x; j < usrcLen;j += BLOCK_DIM_X)
         {
-            buffer1[usrcStart + j] = gsplit.colInd[usrcStart + j];
+            buffer1[j] = gsplit.colInd[usrcStart + j];
         }
         __syncthreads();
 
@@ -241,19 +245,19 @@ mckernel_node_block_warp_binary(
             for(T j = threadIdx.x; j < sz1[l - 1];j += BLOCK_DIM_X)
             {
                 bool found = false;
-                T cur = buffer1[usrcStart + j];
+                T cur = buffer1[j];
                 graph::binary_search(gsplit.colInd + cnodeStart, 0u, cnodeLen, cur, found);
                 if(found) {
-                    buffer2[usrcStart + atomicAdd(&sz1[l], 1)] = cur;
+                    buffer2[atomicAdd(&sz1[l], 1)] = cur;
                 }
                 else {
-                    buffer2[usrcStart + sz1[l - 1] - atomicAdd(&sz2, 1) - 1] = cur;
+                    buffer2[sz1[l - 1] - atomicAdd(&sz2, 1) - 1] = cur;
                 }
             }
             __syncthreads();
             for(T j = threadIdx.x; j < sz1[l - 1];j += BLOCK_DIM_X)
             {
-                buffer1[usrcStart + j] = buffer2[usrcStart + j];
+                buffer1[j] = buffer2[j];
             }
                __syncthreads();
 

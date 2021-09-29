@@ -133,13 +133,18 @@ namespace graph
             cudaMemcpyToSymbol(MAXLEVEL, &max_level, sizeof(MAXLEVEL));
             cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
             cudaMemcpyToSymbol(MAXDEG, &(maxDegree.gdata()[0]), sizeof(MAXDEG));
+            cudaMemcpyToSymbol(MAXUNDEG, &(maxUndirectedDegree.gdata()[0]), sizeof(MAXDEG));
             cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM), sizeof(CBPSM));
 
             CUDA_RUNTIME(cudaGetLastError());
             cudaDeviceSynchronize();
 
-            tmpNode = GPUArray<T> ("Temp Node", gpu, gsplit.numEdges, dev_);
-            auto NodeBuffer = GPUArray<T> ("Buffer", gpu, gsplit.numEdges, dev_);
+            // tmpNode = GPUArray<T> ("Temp Node", gpu, gsplit.numEdges, dev_);
+            // auto NodeBuffer = GPUArray<T> ("Buffer", gpu, gsplit.numEdges, dev_);
+            // tmpNode.setAll(0, true);
+
+            tmpNode = GPUArray<T> ("Temp Node", gpu, maxUndirectedDegree.gdata()[0] * num_SMs * conc_blocks_per_SM, dev_);
+            auto NodeBuffer = GPUArray<T> ("Buffer", gpu, maxUndirectedDegree.gdata()[0] * num_SMs * conc_blocks_per_SM, dev_);
             tmpNode.setAll(0, true);
             
             auto grid_block_size = (gsplit.numNodes + block_size - 1) / block_size;
