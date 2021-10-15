@@ -17,51 +17,51 @@
 
 template<typename T, uint CPARTSIZE>
 __device__ __forceinline__ void reduce_part(T partMask, uint64& warpCount) {
-	for (int i = CPARTSIZE / 2; i >= 1; i /= 2) 
-		warpCount += __shfl_down_sync(partMask, warpCount, i);
+    for (int i = CPARTSIZE / 2; i >= 1; i /= 2) 
+        warpCount += __shfl_down_sync(partMask, warpCount, i);
 }
 
 
 template <typename T, int BLOCK_DIM_X, typename OUTTYPE=unsigned short>
 __device__ __forceinline__ void block_filter_pivot(T count, T* output, OUTTYPE* gl)
 {
-	typedef cub::BlockScan<T, BLOCK_DIM_X> BlockScan;
-	__shared__ typename BlockScan::TempStorage temp_storage;
-	auto tid = threadIdx.x;
-	T srcLenBlocks = (count + BLOCK_DIM_X - 1) / BLOCK_DIM_X;
-	T threadData = 0;
-	T aggreagtedData = 0;
-	T total = 0;
+    typedef cub::BlockScan<T, BLOCK_DIM_X> BlockScan;
+    __shared__ typename BlockScan::TempStorage temp_storage;
+    auto tid = threadIdx.x;
+    T srcLenBlocks = (count + BLOCK_DIM_X - 1) / BLOCK_DIM_X;
+    T threadData = 0;
+    T aggreagtedData = 0;
+    T total = 0;
 
-	for (T k = 0; k < srcLenBlocks; k++)
-	{
-		T index = k * BLOCK_DIM_X + tid;
+    for (T k = 0; k < srcLenBlocks; k++)
+    {
+        T index = k * BLOCK_DIM_X + tid;
         T dataread = 0xFFFFFFFF;
         if(index < count)
             dataread = output[index];
-		threadData = 0;
-		aggreagtedData = 0;
+        threadData = 0;
+        aggreagtedData = 0;
 
-		if (index < count && dataread != 0xFFFFFFFF)
-		{
-			threadData = 1;
-		}
+        if (index < count && dataread != 0xFFFFFFFF)
+        {
+            threadData = 1;
+        }
 
-		__syncthreads();
-		BlockScan(temp_storage).ExclusiveSum(threadData, threadData, aggreagtedData);
-		__syncthreads();
+        __syncthreads();
+        BlockScan(temp_storage).ExclusiveSum(threadData, threadData, aggreagtedData);
+        __syncthreads();
 
 
-		if (index < count && dataread != 0xFFFFFFFF)
-			output[threadData + total] = dataread;
+        if (index < count && dataread != 0xFFFFFFFF)
+            output[threadData + total] = dataread;
 
-		total += aggreagtedData;
-		__syncthreads();
-	}
+        total += aggreagtedData;
+        __syncthreads();
+    }
 
-	if(threadIdx.x == 0)
-		*gl = total;
-		
+    if(threadIdx.x == 0)
+        *gl = total;
+        
 }
 
 
@@ -1831,6 +1831,44 @@ namespace graph
 
     }
 
+    template <size_t WARPS_PER_BLOCK, typename T, bool reduce = true, uint CPARTSIZE = 32>
+    __device__ __forceinline__ uint64 warp_sorted_count_and_encode_full_mclique(const T* const A, //!< [in] array A
+        const size_t aSz, //!< [in] the number of elements in A
+        T* B, //!< [in] array B
+        T bSz,  //!< [in] the number of elements in B
+
+        T j,
+        T num_divs_local,
+        T* encode,
+        T base
+    )
+    {
+        const int warpIdx = threadIdx.x / CPARTSIZE; // which warp in thread block
+        const int laneIdx = threadIdx.x % CPARTSIZE; // which thread in warp
+        // cover entirety of A with warp
+        for (T i = laneIdx; i < aSz; i += CPARTSIZE)
+        {
+            const T searchVal = A[i];
+            bool found = false;
+            const T lb = graph::binary_search<T>(B, 0, bSz, searchVal, found);
+            if (found)
+            {
+                //////////////////////////////Device function ///////////////////////
+                T chunk_index = i / 32; // 32 here is the division size of the encode
+                T inChunkIndex = i % 32;
+                atomicOr(&encode[(j >= base ? j - base : j + aSz)*num_divs_local + chunk_index], 1 << inChunkIndex);
+
+                if (j >= base)
+                {
+                    T chunk_index1 = (j - base) / 32; // 32 here is the division size of the encode
+                    T inChunkIndex1 = (j - base) % 32;
+                    atomicOr(&encode[i*num_divs_local + chunk_index1], 1 << inChunkIndex1);
+                }
+                /////////////////////////////////////////////////////////////////////
+            }
+        }
+        return 0;
+    }
 
     template <size_t WARPS_PER_BLOCK, typename T, bool reduce = true, uint CPARTSIZE = 32>
     __device__ __forceinline__ uint64 warp_sorted_count_and_subgraph_full(const T* const A, //!< [in] array A
