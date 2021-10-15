@@ -10,6 +10,6 @@ Untar into ${MEWCP_HOME}/nauty
 
 cd ${MEWCP_HOME}/nauty
 
-./configure
+./configure     (add permissions with chmod if needed) 
 
 make
