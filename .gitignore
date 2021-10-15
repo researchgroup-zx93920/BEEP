@@ -1,0 +1,7 @@
+cub/**
+nauty/**
+build/**
+build/exe/src/main.cu.exe
+*.exe
+*.o
+build/exe/src/main.cu.exe
