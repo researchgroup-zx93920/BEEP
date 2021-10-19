@@ -15,6 +15,7 @@ struct KcliqueConfig
     KCAlgoEnum Algo;
     int PartSize;
     bool BinaryEncode;
+    bool EncodeHalf;
 };
 
 struct Config {
@@ -231,6 +232,7 @@ static KcliqueConfig parseKcConfig(const char* s)
     kc.Algo = KCAlgoEnum::GraphOrient;
     kc.PartSize = 8;
     kc.BinaryEncode = true;
+    kc.EncodeHalf = false;
 
     if(strlen(s) > 2)
     {
@@ -250,6 +252,8 @@ static KcliqueConfig parseKcConfig(const char* s)
 
         if(s[next] == 'n')
             kc.BinaryEncode = false;
+        else if(s[next] == 'h')
+            kc.EncodeHalf = true;
     }
 
     return kc;
@@ -335,7 +339,7 @@ static Config parseArgs(int argc, char** argv) {
         case 's': config.sortEdges = true;                                  break;
         case 'p': config.processBy = parseProcessBy(optarg);                break;
         case 'e': config.processElement = parseElement(optarg);             break;
-        case 'q':  config.kcConfig = parseKcConfig(optarg);                 break;
+        case 'q': config.kcConfig = parseKcConfig(optarg);                  break;
         case 'h': usage(); exit(0);                                         break;
         default: fprintf(stderr, "\nUnrecognized option!\n");
             usage(); exit(0);

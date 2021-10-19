@@ -463,6 +463,7 @@ namespace graph
 
 			graph::GraphQueue<T, bool> next_q;
 			next_q.Create(gpu, g.numNodes, dev_);
+			next_q.mark.setAll(false, true);
 
 			GPUArray<T> identity_arr_asc;
 			AscendingGpu(g.numNodes, identity_arr_asc);

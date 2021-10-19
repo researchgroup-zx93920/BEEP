@@ -1148,27 +1148,27 @@ int main(int argc, char** argv)
             }
             else // Pivoting
             {
-                if(kcc.BinaryEncode)
+                if(kcc.EncodeHalf)
                 {
                     switch(kcc.PartSize)
                     {
                         case 32:
-                        maximalclique.find_maximal_clique_node_pivot_async_local<32>(*gsplit);
+                        maximalclique.find_maximal_clique_node_pivot_encode_half<32>(*gsplit);
                         break;
                         case 16:
-                        maximalclique.find_maximal_clique_node_pivot_async_local<16>(*gsplit);
+                        maximalclique.find_maximal_clique_node_pivot_encode_half<16>(*gsplit);
                         break;
                         case 8:
-                        maximalclique.find_maximal_clique_node_pivot_async_local<8>(*gsplit);
+                        maximalclique.find_maximal_clique_node_pivot_encode_half<8>(*gsplit);
                         break;
                         case 4:
-                        maximalclique.find_maximal_clique_node_pivot_async_local<4>(*gsplit);
+                        maximalclique.find_maximal_clique_node_pivot_encode_half<4>(*gsplit);
                         break;
                         case 2:
-                        maximalclique.find_maximal_clique_node_pivot_async_local<2>(*gsplit);
+                        maximalclique.find_maximal_clique_node_pivot_encode_half<2>(*gsplit);
                         break;
                         case 1:
-                        maximalclique.find_maximal_clique_node_pivot_async_local<1>(*gsplit);
+                        maximalclique.find_maximal_clique_node_pivot_encode_half<1>(*gsplit);
                         break;
                         default:
                             Log(error, "WRONG PARTITION SIZE SELECTED\n");
@@ -1176,7 +1176,29 @@ int main(int argc, char** argv)
                 }
                 else
                 {
-                    Log(error, "Not Implemented for non-binary encoding method.\n");
+                    switch(kcc.PartSize)
+                    {
+                        case 32:
+                        maximalclique.find_maximal_clique_node_pivot_encode_induced<32>(*gsplit);
+                        break;
+                        case 16:
+                        maximalclique.find_maximal_clique_node_pivot_encode_induced<16>(*gsplit);
+                        break;
+                        case 8:
+                        maximalclique.find_maximal_clique_node_pivot_encode_induced<8>(*gsplit);
+                        break;
+                        case 4:
+                        maximalclique.find_maximal_clique_node_pivot_encode_induced<4>(*gsplit);
+                        break;
+                        case 2:
+                        maximalclique.find_maximal_clique_node_pivot_encode_induced<2>(*gsplit);
+                        break;
+                        case 1:
+                        maximalclique.find_maximal_clique_node_pivot_encode_induced<1>(*gsplit);
+                        break;
+                        default:
+                            Log(error, "WRONG PARTITION SIZE SELECTED\n");
+                    }
                 }
             }
         }
@@ -1188,27 +1210,27 @@ int main(int argc, char** argv)
             }
             else // Pivoting
             {
-                if(kcc.BinaryEncode)
+                if(kcc.EncodeHalf)
                 {
                     switch(kcc.PartSize)
                     {
                         case 32:
-                        maximalclique.find_maximal_clique_edge_pivot_async_local<32>(*gsplit);
+                        maximalclique.find_maximal_clique_edge_pivot_encode_half<32>(*gsplit);
                         break;
                         case 16:
-                        maximalclique.find_maximal_clique_edge_pivot_async_local<16>(*gsplit);
+                        maximalclique.find_maximal_clique_edge_pivot_encode_half<16>(*gsplit);
                         break;
                         case 8:
-                        maximalclique.find_maximal_clique_edge_pivot_async_local<8>(*gsplit);
+                        maximalclique.find_maximal_clique_edge_pivot_encode_half<8>(*gsplit);
                         break;
                         case 4:
-                        maximalclique.find_maximal_clique_edge_pivot_async_local<4>(*gsplit);
+                        maximalclique.find_maximal_clique_edge_pivot_encode_half<4>(*gsplit);
                         break;
                         case 2:
-                        maximalclique.find_maximal_clique_edge_pivot_async_local<2>(*gsplit);
+                        maximalclique.find_maximal_clique_edge_pivot_encode_half<2>(*gsplit);
                         break;
                         case 1:
-                        maximalclique.find_maximal_clique_edge_pivot_async_local<1>(*gsplit);
+                        maximalclique.find_maximal_clique_edge_pivot_encode_half<1>(*gsplit);
                         break;
                         default:
                             Log(error, "WRONG PARTITION SIZE SELECTED\n");
@@ -1216,7 +1238,29 @@ int main(int argc, char** argv)
                 }
                 else
                 {
-                    Log(error, "Not Implemented for non-binary encoding method.\n");
+                    switch(kcc.PartSize)
+                    {
+                        case 32:
+                        maximalclique.find_maximal_clique_edge_pivot_encode_induced<32>(*gsplit);
+                        break;
+                        case 16:
+                        maximalclique.find_maximal_clique_edge_pivot_encode_induced<16>(*gsplit);
+                        break;
+                        case 8:
+                        maximalclique.find_maximal_clique_edge_pivot_encode_induced<8>(*gsplit);
+                        break;
+                        case 4:
+                        maximalclique.find_maximal_clique_edge_pivot_encode_induced<4>(*gsplit);
+                        break;
+                        case 2:
+                        maximalclique.find_maximal_clique_edge_pivot_encode_induced<2>(*gsplit);
+                        break;
+                        case 1:
+                        maximalclique.find_maximal_clique_edge_pivot_encode_induced<1>(*gsplit);
+                        break;
+                        default:
+                            Log(error, "WRONG PARTITION SIZE SELECTED\n");
+                    }
                 }
             }
         }
