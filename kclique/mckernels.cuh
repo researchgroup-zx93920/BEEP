@@ -87,12 +87,12 @@ mckernel_node_block_warp_binary_encode_induced(
             encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
             encode = &adj_enc[encode_offset];
 
-            lo = sm_id * CBPSM * (NUMDIVS * MAXDEG) + levelPtr * (NUMDIVS * MAXDEG);
+            lo = sm_id * CBPSM * (NUMDIVS * (MAXDEG + 1)) + levelPtr * (NUMDIVS * (MAXDEG + 1)); // We will touch one more level in node centric
             cl = &current_level[lo]; 
             pl = &possible[lo]; 
             xl = &x_level[lo]; // X
 
-            level_item_offset = sm_id * CBPSM * (MAXDEG) + levelPtr * (MAXDEG);
+            level_item_offset = sm_id * CBPSM * (MAXDEG + 1) + levelPtr * (MAXDEG + 1); // We will touch one more level in node centric
             level_count = &level_count_g[level_item_offset];
             level_prev_index = &level_prev_g[level_item_offset];
 
@@ -1349,12 +1349,12 @@ mckernel_node_block_warp_binary_encode_half(
             encode_offset = sm_id * CBPSM * (MAXUNDEG * NUMDIVS) + levelPtr * (MAXUNDEG * NUMDIVS);
             encode = &adj_enc[encode_offset];
 
-            lo = sm_id * CBPSM * (NUMDIVS * MAXDEG) + levelPtr * (NUMDIVS * MAXDEG);
+            lo = sm_id * CBPSM * (NUMDIVS * (MAXDEG + 1)) + levelPtr * (NUMDIVS * (MAXDEG + 1)); // We will touch one more level in node centric
             cl = &current_level[lo]; 
             pl = &possible[lo]; 
             xl = &x_level[lo]; // X
 
-            level_item_offset = sm_id * CBPSM * (MAXDEG) + levelPtr * (MAXDEG);
+            level_item_offset = sm_id * CBPSM * (MAXDEG + 1) + levelPtr * (MAXDEG + 1); // We will touch one more level in node centric
             level_count = &level_count_g[level_item_offset];
             level_prev_index = &level_prev_g[level_item_offset];
 
