@@ -394,6 +394,7 @@ mckernel_node_block_warp_binary_encode_induced(
                     warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
                 }
                 reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+                __syncthreads(); // Need this for degeneracy > 1024
 
                 if(threadIdx.x == 0)
                 {
@@ -837,6 +838,7 @@ mckernel_edge_block_warp_binary_encode_induced(
                     warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
                 }
                 reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+                __syncthreads(); // Need this for degeneracy > 1024
 
                 if(threadIdx.x == 0)
                 {
@@ -1245,6 +1247,7 @@ mckernel_edge_block_warp_binary_encode_induced(
 //                     warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
 //                 }
 //                 reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+//                 __syncthreads(); // Need this for degeneracy > 1024
 
 //                 if(threadIdx.x == 0)
 //                 {
@@ -1716,6 +1719,7 @@ mckernel_node_block_warp_binary_encode_half(
                     warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
                 }
                 reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+                __syncthreads(); // Need this for degeneracy > 1024
 
                 if(threadIdx.x == 0)
                 {
@@ -2165,6 +2169,7 @@ mckernel_node_block_warp_binary_encode_half(
 //                     warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
 //                 }
 //                 reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+//                 __syncthreads(); // Need this for degeneracy > 1024
 
 //                 if(threadIdx.x == 0)
 //                 {
@@ -2677,6 +2682,7 @@ mckernel_edge_block_warp_binary_encode_half(
                     warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
                 }
                 reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+                __syncthreads(); // Need this for degeneracy > 1024
 
                 if(threadIdx.x == 0)
                 {

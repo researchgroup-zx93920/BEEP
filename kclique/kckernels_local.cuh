@@ -3670,6 +3670,7 @@ kckernel_node_block_warp_binary_pivot_count_local_base(
                             warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
                         }
                         reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+                        __syncthreads(); // Need this for degeneracy > 1024
 
                         if(threadIdx.x == 0)
                         {
@@ -4036,6 +4037,7 @@ kckernel_node_block_warp_binary_pivot_count_local_globalmem_direct_loop(
                             warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
                         }
                         reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+                        __syncthreads(); // Need this for degeneracy > 1024
 
                         if(threadIdx.x == 0)
                         {
@@ -4415,6 +4417,7 @@ kckernel_node_block_warp_binary_pivot_count_local_sharedmem_direct_loop(
                             warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
                         }
                         reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+                        __syncthreads(); // Need this for degeneracy > 1024
 
                         if(threadIdx.x == 0)
                         {
@@ -4818,6 +4821,7 @@ kckernel_node_block_warp_binary_pivot_count_local_globalmem_lazy_loop(
                             warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
                         }
                         reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+                        __syncthreads(); // Need this for degeneracy > 1024
 
                         if(threadIdx.x == 0)
                         {
@@ -5227,6 +5231,7 @@ kckernel_node_block_warp_binary_pivot_count_local_sharedmem_lazy_loop(
                             warpCount += __popc(pl[(l - 1)*num_divs_local + j]);
                         }
                         reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+                        __syncthreads(); // Need this for degeneracy > 1024
 
                         if(threadIdx.x == 0)
                         {
@@ -5604,6 +5609,7 @@ kckernel_edge_block_warp_binary_pivot_count_local_base(
                             warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
                         }
                         reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+                        __syncthreads(); // Need this for degeneracy > 1024
 
                         if(threadIdx.x == 0)
                         {
@@ -6001,6 +6007,7 @@ kckernel_edge_block_warp_binary_pivot_count_local_globalmem_direct_loop(
                             warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
                         }
                         reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+                        __syncthreads(); // Need this for degeneracy > 1024
 
                         if(threadIdx.x == 0)
                         {
@@ -6409,6 +6416,7 @@ kckernel_edge_block_warp_binary_pivot_count_local_sharedmem_direct_loop(
                             warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
                         }
                         reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+                        __syncthreads(); // Need this for degeneracy > 1024
 
                         if(threadIdx.x == 0)
                         {
@@ -6840,6 +6848,7 @@ kckernel_edge_block_warp_binary_pivot_count_local_globalmem_lazy_loop(
                             warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
                         }
                         reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+                        __syncthreads(); // Need this for degeneracy > 1024
 
                         if(threadIdx.x == 0)
                         {
@@ -7277,6 +7286,7 @@ kckernel_edge_block_warp_binary_pivot_count_local_sharedmem_lazy_loop(
                             warpCount += __popc(pl[(l - 2)*num_divs_local + j]);
                         }
                         reduce_part<T, CPARTSIZE>(partMask[wx], warpCount);
+                        __syncthreads(); // Need this for degeneracy > 1024
 
                         if(threadIdx.x == 0)
                         {
