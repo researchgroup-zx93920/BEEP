@@ -110,6 +110,8 @@ int main(int argc, char** argv)
     //HERE is the normal program !!
         //1) Read File to EdgeList
 
+    Timer read_graph_timer;
+
     const char* matr = config.srcGraph;
     graph::EdgeListFile f(matr);
     std::vector<EdgeTy<uint>> edges;
@@ -162,6 +164,8 @@ int main(int argc, char** argv)
     g.rowPtr->cdata() = rp; g.rowPtr->setAlloc(cpuonly);
     g.rowInd->cdata() = ri; g.rowInd->setAlloc(cpuonly);
     g.colInd->cdata() = ci; g.colInd->setAlloc(cpuonly);
+
+    Log(info, "Read graph time: %f s", read_graph_timer.elapsed());
 
     ///Now we need to orient the graph
     Timer total_timer;
@@ -267,7 +271,11 @@ int main(int argc, char** argv)
     // cudaFreeHost(ci);
 
     double time_init = t.elapsed();
-    Log(info, "Preprocess time: %f s", time_init);
+    if (config.orient == Degree || config.orient == Degeneracy)
+    {
+        Log(info, "Preprocess time: %f s", time_init);
+    }
+
 
     //Just need to verify some new storage format
     //graph::GPUArray<uint> countCont("Half Row Index", AllocationTypeEnum::unified, m, 0);
@@ -1073,7 +1081,13 @@ int main(int argc, char** argv)
             return 0;
         }
         
+        Timer degeneracy_time;
+
         mohacore.findKcoreIncremental_async(3, 1000, *gd, 0, 0);
+
+        Log(info, "Degeneracy ordering time: %f s", degeneracy_time.elapsed());
+
+        Timer csr_recreation_time;
 
         graph::GPUArray<uint> split_col("Split Column", config.allocation, m, config.deviceId),
             tmp_row("Temp Row", config.allocation, m / 2, config.deviceId),
@@ -1134,6 +1148,8 @@ int main(int argc, char** argv)
         gsplit->rowInd = gd->rowInd;
         gsplit->colInd = split_col.gdata();
         gsplit->splitPtr = split_ptr.gdata();
+
+        Log(info, "CSR Recreation time: %f s", csr_recreation_time.elapsed());
 
         graph::SingleGPU_Maximal_Clique<uint> maximalclique(config.deviceId, *gsplit);
 

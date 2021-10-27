@@ -107,7 +107,7 @@ namespace graph
             T factor = (block_size / partitionSize);
 
             const uint dv = 32;
-            const uint max_level = maxDegree.gdata()[0];
+            const uint max_level = maxDegree.gdata()[0] + 1; // We will touch one more level in node centric
             uint num_divs = (maxDegree.gdata()[0] + dv - 1) / dv;
             
             const uint64 encode_size = num_SMs * conc_blocks_per_SM * maxDegree.gdata()[0] * num_divs; //per block
@@ -201,7 +201,7 @@ namespace graph
             T factor = (block_size / partitionSize);
 
             const uint dv = 32;
-            const uint max_level = maxDegree.gdata()[0];
+            const uint max_level = maxDegree.gdata()[0] + 1; // We will touch one more level in node centric
             uint num_divs = (maxDegree.gdata()[0] + dv - 1) / dv;
             
             const uint64 encode_size = num_SMs * conc_blocks_per_SM * maxUndirectedDegree.gdata()[0] * num_divs; //per block
