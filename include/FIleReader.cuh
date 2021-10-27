@@ -486,7 +486,7 @@ namespace graph
                 }
                 else
                 {
-                    if (strlen(line.c_str()) >= 2 && line[1] == '%') {
+                    if (strlen(line.c_str()) >= 2 && line[0] == '%') {
                         symmetric = (strstr(line.c_str(), "symmetric") != NULL);
                         skew = (strstr(line.c_str(), "skew") != NULL);
                         array = (strstr(line.c_str(), "array") != NULL);
@@ -494,6 +494,7 @@ namespace graph
                     }
                 }
             }
+            printf("%s, %s\n", symmetric?"sym":"", pattern?"pattern":"" );
 
             long long ll_nodes_x, ll_nodes_y, ll_edges;
             int items_scanned = sscanf(line.c_str(), "%lld %lld %lld", &ll_nodes_x, &ll_nodes_y, &ll_edges);
@@ -822,32 +823,44 @@ namespace graph
             std::vector<EdgeTy<T>> fileEdges;
             int numread = 0;
             long long unsigned a, b, weight;
-            do
+
+            char line[100];
+            while ((fscanf(fp_, "%[^\n]%*c", line))!= EOF)
             {
-                if (numCol == 3)
-                    numread = fscanf(fp_, "%llu %llu %llu", &a, &b, &weight);
-                else if (numCol == 2)
-                    numread = fscanf(fp_, "%llu %llu", &a, &b);
+               
 
-                if (numread == numCol)
-                {
-                    long long unsigned src, dst;
-
-                    if (srcIndex == 0)
-                    {
-                        src = a;
-                        dst = b;
-                    }
-                    else
-                    {
-                        src = b;
-                        dst = a;
-                    }
-                    fileEdges.push_back(std::make_pair(src, dst));
-                    if (makeFull)
-                        fileEdges.push_back(std::make_pair(dst, src));
+                if(line[0] == '%')
+                {    
+                    numread = numCol;
+                    printf("%s\n", line);
                 }
-            } while (numread == numCol);
+                else
+                {
+                    if (numCol == 3)
+                        numread = sscanf(line, "%llu %llu %llu", &a, &b, &weight);
+                    else if (numCol == 2)
+                        numread =  sscanf(line, "%llu %llu", &a, &b);
+
+                    if (numread == numCol && a != b)
+                    {
+                        long long unsigned src, dst;
+
+                        if (srcIndex == 0)
+                        {
+                            src = a;
+                            dst = b;
+                        }
+                        else
+                        {
+                            src = b;
+                            dst = a;
+                        }
+                        fileEdges.push_back(std::make_pair(src, dst));
+                        if (makeFull)
+                            fileEdges.push_back(std::make_pair(dst, src));
+                    }
+                }
+            } //while (numread == numCol);
 
             std::sort(fileEdges.begin(), fileEdges.end(), [](const EdgeTy<T>& a, const EdgeTy<T>& b) -> bool
                 {
@@ -856,7 +869,7 @@ namespace graph
 
 
 
-            int n = fileEdges.size();
+            size_t n = fileEdges.size();
             FILE* writer = fopen(outputPath.c_str(), "wb");
 
             if (writer == nullptr) {
@@ -867,7 +880,7 @@ namespace graph
             const T shard = 100000;
             unsigned long long* l;
             l = (unsigned long long*)malloc(3 * shard * sizeof(unsigned long long));
-            printf("Done allocating total memory ...\n");
+            printf("Done allocating total memory n=%lu ...\n", n);
 
             unsigned long long blocks = (n + shard - 1) / shard;
             for (unsigned long long i = 0; i < blocks; i++)
