@@ -303,7 +303,7 @@ namespace graph
             }
             printf("\n");
         }
-        exit(-1);
+        // exit(-1);
     }
 
     template<typename T>
