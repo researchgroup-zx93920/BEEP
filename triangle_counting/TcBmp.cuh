@@ -8,7 +8,7 @@
 #include "../include/utils_cuda.cuh"
 #include "../include/cub_wrappers.cuh"
 
-#include <immintrin.h>
+// #include <immintrin.h>
 #include <cuda_runtime.h>
 #include <cuda_runtime.h>
 #include "../include/CGArray.cuh"
@@ -427,8 +427,8 @@ uint32_t BranchFreeBinarySearch(T* a, uint32_t offset_beg, uint32_t offset_end, 
     const T* base = a + offset_beg;
     while (n > 1) {
         I half = n / 2;
-        _mm_prefetch((char*)(base + half / 2), _MM_HINT_T0);
-        _mm_prefetch((char*)(base + half + half / 2), _MM_HINT_T0);
+        // _mm_prefetch((char*)(base + half / 2), _MM_HINT_T0);
+        // _mm_prefetch((char*)(base + half + half / 2), _MM_HINT_T0);
         base = (base[half] < x) ? base + half : base;
         n -= half;
     }
@@ -440,8 +440,8 @@ template<typename T>
 uint32_t BinarySearchForGallopingSearch(const T* array, uint32_t offset_beg, uint32_t offset_end, T val) {
     while (offset_end - offset_beg >= 32) {
         auto mid = static_cast<uint32_t>((static_cast<unsigned long>(offset_beg) + offset_end) / 2);
-        _mm_prefetch((char*)&array[(static_cast<unsigned long>(mid + 1) + offset_end) / 2], _MM_HINT_T0);
-        _mm_prefetch((char*)&array[(static_cast<unsigned long>(offset_beg) + mid) / 2], _MM_HINT_T0);
+        // _mm_prefetch((char*)&array[(static_cast<unsigned long>(mid + 1) + offset_end) / 2], _MM_HINT_T0);
+        // _mm_prefetch((char*)&array[(static_cast<unsigned long>(offset_beg) + mid) / 2], _MM_HINT_T0);
         if (array[mid] == val) {
             return mid;
         }
