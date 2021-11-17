@@ -862,12 +862,15 @@ namespace graph
                 }
             } //while (numread == numCol);
 
+
+
             std::sort(fileEdges.begin(), fileEdges.end(), [](const EdgeTy<T>& a, const EdgeTy<T>& b) -> bool
-                {
-                    return a.first < b.first || (a.first == b.first && a.second < b.second);
-                });
+            {
+                return a.first < b.first || (a.first == b.first && a.second < b.second);
+            });
 
 
+            fileEdges.resize(std::unique(fileEdges.begin(), fileEdges.end()) - fileEdges.begin());
 
             size_t n = fileEdges.size();
             FILE* writer = fopen(outputPath.c_str(), "wb");
