@@ -120,10 +120,9 @@ namespace graph
             GPUArray<T> possible("Possible", gpu, level_size, dev_);
             GPUArray<T> x_level("X", gpu, level_size, dev_);
             
-            GPUArray<T> level_count("Level Count", gpu, level_item_size, dev_);
             GPUArray<T> level_prev("Level Prev", gpu, level_item_size, dev_);
 
-            printf("Level Size = %llu, Encode Size = %llu\n", 3 *level_size + 2 * level_item_size, encode_size);
+            printf("Level Size = %llu, Encode Size = %llu\n", 3 *level_size + 1 * level_item_size, encode_size);
 
             current_level2.setAll(0, true);
             node_be.setAll(0, true);
@@ -152,7 +151,6 @@ namespace graph
 
                 possible.gdata(),
                 x_level.gdata(),
-                level_count.gdata(),
                 level_prev.gdata(),
                 tmpNode.gdata(),
                 NodeBuffer.gdata()
@@ -166,7 +164,6 @@ namespace graph
             node_be.freeGPU();
             possible.freeGPU();
             x_level.freeGPU();
-            level_count.freeGPU();
             level_prev.freeGPU();
             NodeBuffer.freeGPU();
             cpn.copytocpu(0);
@@ -214,10 +211,9 @@ namespace graph
             GPUArray<T> possible("Possible", gpu, level_size, dev_);
             GPUArray<T> x_level("X", gpu, level_size, dev_);
             
-            GPUArray<T> level_count("Level Count", gpu, level_item_size, dev_);
             GPUArray<T> level_prev("Level Prev", gpu, level_item_size, dev_);
 
-            printf("Level Size = %llu, Encode Size = %llu\n", 3 *level_size + 2 * level_item_size, encode_size);
+            printf("Level Size = %llu, Encode Size = %llu\n", 3 *level_size + 1 * level_item_size, encode_size);
 
             current_level2.setAll(0, true);
             node_be.setAll(0, true);
@@ -246,7 +242,6 @@ namespace graph
 
                 possible.gdata(),
                 x_level.gdata(),
-                level_count.gdata(),
                 level_prev.gdata(),
                 tmpNode.gdata(),
                 NodeBuffer.gdata()
@@ -260,7 +255,6 @@ namespace graph
             node_be.freeGPU();
             possible.freeGPU();
             x_level.freeGPU();
-            level_count.freeGPU();
             level_prev.freeGPU();
             NodeBuffer.freeGPU();
             cpn.copytocpu(0);
@@ -316,12 +310,11 @@ namespace graph
             GPUArray<T> possible("Possible", gpu, level_size, dev_);
             GPUArray<T> x_level("X", gpu, level_size, dev_);
             
-            GPUArray<T> level_count("Level Count", gpu, level_item_size, dev_);
             GPUArray<T> level_prev("Level Prev", gpu, level_item_size, dev_);
             GPUArray<T> tri_list("Triangle list", gpu, tri_size, dev_);
 
 
-            printf("Level Size = %llu, Encode Size = %llu\n", 3 *level_size + 2 * level_item_size, encode_size);
+            printf("Level Size = %llu, Encode Size = %llu\n", 3 *level_size + 1 * level_item_size, encode_size);
 
             current_level2.setAll(0, true);
             node_be.setAll(0, true);
@@ -352,7 +345,6 @@ namespace graph
 
                 possible.gdata(),
                 x_level.gdata(),
-                level_count.gdata(),
                 level_prev.gdata(),
                 tmpNode.gdata(),
                 NodeBuffer.gdata(),
@@ -367,7 +359,6 @@ namespace graph
             node_be.freeGPU();
             possible.freeGPU();
             x_level.freeGPU();
-            level_count.freeGPU();
             level_prev.freeGPU();
             NodeBuffer.freeGPU();
             cpn.copytocpu(0);
@@ -417,12 +408,11 @@ namespace graph
             GPUArray<T> possible("Possible", gpu, level_size, dev_);
             GPUArray<T> x_level("X", gpu, level_size, dev_);
             
-            GPUArray<T> level_count("Level Count", gpu, level_item_size, dev_);
             GPUArray<T> level_prev("Level Prev", gpu, level_item_size, dev_);
             GPUArray<T> tri_list("Triangle list", gpu, tri_size, dev_);
 
 
-            printf("Level Size = %llu, Encode Size = %llu\n", 3 *level_size + 2 * level_item_size, encode_size);
+            printf("Level Size = %llu, Encode Size = %llu\n", 3 *level_size + 1 * level_item_size, encode_size);
 
             current_level2.setAll(0, true);
             node_be.setAll(0, true);
@@ -453,7 +443,6 @@ namespace graph
 
                 possible.gdata(),
                 x_level.gdata(),
-                level_count.gdata(),
                 level_prev.gdata(),
                 tmpNode.gdata(),
                 NodeBuffer.gdata(),
@@ -468,7 +457,6 @@ namespace graph
             node_be.freeGPU();
             possible.freeGPU();
             x_level.freeGPU();
-            level_count.freeGPU();
             level_prev.freeGPU();
             NodeBuffer.freeGPU();
             cpn.copytocpu(0);
