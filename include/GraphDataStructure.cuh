@@ -24,6 +24,7 @@ namespace graph
         T* rowPtr;
         T* rowInd;
         T* colInd;
+        T* splitPtr;     
     };
 
     template<typename T>

@@ -15,6 +15,7 @@ struct KcliqueConfig
     KCAlgoEnum Algo;
     int PartSize;
     bool BinaryEncode;
+    bool EncodeHalf;
 };
 
 struct Config {
@@ -67,9 +68,17 @@ static MAINTASK parseMainTask(const char* s)
     if (strcmp(s, "kclique") == 0)
         return KCLIQUE;
 
+<<<<<<< HEAD
     
     if (strcmp(s, "maximal") == 0)
         return MAXIMAL;
+=======
+    if (strcmp(s, "kclique-local") == 0)
+        return KCLIQUE_LOCAL;
+    
+    if (strcmp(s, "maximal-clique") == 0)
+        return MAXIMAL_CLIQUE;
+>>>>>>> kclique_local_count
 
     if (strcmp(s, "cd") == 0)
         return CROSSDECOMP;
@@ -89,6 +98,8 @@ static const char* asString(MAINTASK mt) {
     case KCORE:            return "kcore";
     case KTRUSS:            return "ktruss";
     case KCLIQUE:            return "kclique";
+    case KCLIQUE_LOCAL:            return "kclique-local";
+    case MAXIMAL_CLIQUE:            return "maximal-clique";
     case CROSSDECOMP:   return "cd";
 
     default:
@@ -227,6 +238,7 @@ static KcliqueConfig parseKcConfig(const char* s)
     kc.Algo = KCAlgoEnum::GraphOrient;
     kc.PartSize = 8;
     kc.BinaryEncode = true;
+    kc.EncodeHalf = false;
 
     if(strlen(s) > 2)
     {
@@ -246,6 +258,8 @@ static KcliqueConfig parseKcConfig(const char* s)
 
         if(s[next] == 'n')
             kc.BinaryEncode = false;
+        else if(s[next] == 'h')
+            kc.EncodeHalf = true;
     }
 
     return kc;
@@ -277,13 +291,15 @@ static void usage() {
         "\nOptions:"
         "\n    -g <Src graph FileName>       Name of file with input graph (default = )"
         "\n    -r <Dst graph FileName>       Name of file with dst graph only for conversion (default = )"
-        "\n    -w   <is small graph>         Use global memory to allocate the undirected graph, otherwise zerocopy memory"
+        "\n    -w <is small graph>         Use global memory to allocate the undirected graph, otherwise zerocopy memory"
         "\n    -d <Device Id>                      GPU Device Id (default = 0)"
         "\n    -m <MainTask>     Name of the task to perform (default = TC)"
         "\n    -x                   Print Graph Stats         "
         "\n    -o <orientGraph>       How to orient undirected to directed graph (default = full)"
         "\n    -a <allocation>        Data allocation on GPU (default = unified)"
-        "\n    -s <allocation>        Sort Read Edges by src then dst (default = false)"
+        "\n    -v <verbosity>        Verbosity"
+        "\n    -k <k>        k"
+        "\n    -s <sort>        Sort Read Edges by src then dst (default = false)"
         "\n    -p <processBy>        Process by node or edge (default = node)"
         "\n    -e <process element>         Granulaity of element processor (default = t) <t: Thread, w: warp, b: block, g: grid>"
         "\n    -q <kclique specs>           Specify KC Specs: (o4b --> graph orient, Partition Size = 4, binary encoeding)  (p4n --> pivoting, Partition Size = 4, NO binary encoding) default: o8b"
@@ -329,7 +345,7 @@ static Config parseArgs(int argc, char** argv) {
         case 's': config.sortEdges = true;                                  break;
         case 'p': config.processBy = parseProcessBy(optarg);                break;
         case 'e': config.processElement = parseElement(optarg);             break;
-        case 'q':  config.kcConfig = parseKcConfig(optarg);                 break;
+        case 'q': config.kcConfig = parseKcConfig(optarg);                  break;
         case 'h': usage(); exit(0);                                         break;
         default: fprintf(stderr, "\nUnrecognized option!\n");
             usage(); exit(0);
@@ -341,6 +357,7 @@ static Config parseArgs(int argc, char** argv) {
 
 static void printConfig(Config config)
 {
+<<<<<<< HEAD
     // printf("    Graph: %s\n", config.srcGraph);
     // //printf("    DST Graph: %s\n", config.dstGraph);
     // printf("    Device Id = %u, ", config.deviceId);
@@ -355,5 +372,21 @@ static void printConfig(Config config)
 
     if (config.mt == KCLIQUE || config.mt == MAXIMAL)
          printf("    Clique Config = %s\n", asString(config.kcConfig));
+=======
+    printf("    Graph: %s\n", config.srcGraph);
+    printf("    DST Graph: %s\n", config.dstGraph);
+    printf("    Device Id = %u\n", config.deviceId);
+    printf("    Allocation = %s\n", asString(config.allocation));
+    printf("    Small Graph = %s\n", config.isSmall? "Small Graph Allocation" : "Large Graph Allocation");
+    printf("    Main Task = %s\n", asString(config.mt));
+    printf("    Graph Orientation = %s\n", asString(config.orient));
+    printf("    Process By = %s\n", asString(config.processBy));
+    printf("    Process Element = %s\n", asString(config.processElement));
+    printf("    k: %u\n", config.k);
+
+
+    if (config.mt == KCLIQUE || config.mt == KCLIQUE_LOCAL || config.mt == MAXIMAL_CLIQUE)
+         printf("    KC Config = %s\n", asString(config.kcConfig));
+>>>>>>> kclique_local_count
 
 }

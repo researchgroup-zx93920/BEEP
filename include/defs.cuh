@@ -47,7 +47,13 @@ enum MAINTASK {
     KCORE,
     KTRUSS,
     KCLIQUE,
+<<<<<<< HEAD
     CROSSDECOMP,
     MAXIMAL
+=======
+    KCLIQUE_LOCAL,
+    MAXIMAL_CLIQUE,
+    CROSSDECOMP
+>>>>>>> kclique_local_count
 
 };
