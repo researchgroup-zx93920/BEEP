@@ -83,33 +83,6 @@ int main(int argc, char** argv)
     }
 
 
-
-
-    //test Scan
-    /*const int size = 256;
-
-    graph::CubLarge<uint> s;
-    graph::GPUArray<uint>
-        asc("ASC temp", AllocationTypeEnum::unified, size, 0);
-    graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, size, 0);
-    keep.setAll(true, true);
-
-    keep.gdata()[1] = false;
-    keep.gdata()[2] = false;
-    keep.gdata()[3] = false;
-
-    keep.gdata()[128] = false;
-    keep.gdata()[255] = false;
-
-
-    execKernel((initAsc<uint, PeelType>), (size + 512 - 1) / 512, 512, false, asc.gdata(), size);
-
-    uint t = s.Select(asc.gdata(), keep.gdata(), asc.gdata(), size);*/
-
-
-    //HERE is the normal program !!
-        //1) Read File to EdgeList
-
     Timer read_graph_timer;
 
     const char* matr = config.srcGraph;
@@ -131,8 +104,6 @@ int main(int argc, char** argv)
         f.sort_edges(edges);
     }
 
-
-    //Importatnt
     graph::CSRCOO<uint> csrcoo;
     if (config.orient == Upper)
         csrcoo = graph::CSRCOO<uint>::from_edgelist(edges, lowerTriangular);
@@ -150,13 +121,16 @@ int main(int argc, char** argv)
     g.numEdges = m;
     g.numNodes = n;
 
+    //No Allocation
     g.rowPtr = new graph::GPUArray<uint>("Row pointer", AllocationTypeEnum::noalloc, n+1, config.deviceId, true );
     g.rowInd = new graph::GPUArray<uint>("Src Index", AllocationTypeEnum::noalloc,  m, config.deviceId, true );
     g.colInd = new graph::GPUArray<uint>("Dst Index", AllocationTypeEnum::noalloc,  m, config.deviceId, true);
+
     uint *rp, *ri, *ci;
     cudaMallocHost((void**)&rp, (n+1)*sizeof(uint));
     cudaMallocHost((void**)&ri, (m)*sizeof(uint));
     cudaMallocHost((void**)&ci, (m)*sizeof(uint));
+
     CUDA_RUNTIME(cudaMemcpy(rp, csrcoo.row_ptr(), (n+1)*sizeof(uint), cudaMemcpyKind::cudaMemcpyHostToHost));
     CUDA_RUNTIME(cudaMemcpy(ri, csrcoo.row_ind(), (m)*sizeof(uint) , cudaMemcpyKind::cudaMemcpyHostToHost));
     CUDA_RUNTIME(cudaMemcpy(ci, csrcoo.col_ind(), (m)*sizeof(uint), cudaMemcpyKind::cudaMemcpyHostToHost));
@@ -222,19 +196,13 @@ int main(int argc, char** argv)
         uint newNumEdges;
         if (m < INT_MAX)
         {
-            //CUBSelect(asc.gdata(), asc.gdata(), keep.gdata(), m, config.deviceId);
             CUBSelect(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m, config.deviceId);
             newNumEdges = CUBSelect(gd->colInd, colInd_half.gdata(), keep.gdata(), m, config.deviceId);
         }
         else
         {
-            //s.Select(asc.gdata(), asc.gdata(), keep.gdata(), m);
-            // s.Select(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m);
-            // newNumEdges = s.Select(gd->colInd, colInd_half.gdata(), keep.gdata(), m);
-
             newNumEdges = s.Select2(gd->rowInd,  gd->colInd,  rowInd_half.gdata(), colInd_half.gdata(), keep.gdata(), m);
         }
-
 
         execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), new_rowPtr.gdata());
         uint total = CUBScanExclusive<uint, uint>(new_rowPtr.gdata(), new_rowPtr.gdata(), n, config.deviceId, 0, config.allocation);
@@ -254,7 +222,10 @@ int main(int argc, char** argv)
         g.rowPtr = &new_rowPtr;
         g.rowInd = &rowInd_half;
         g.colInd = &colInd_half;
-        //to_csrcoo_device(g, gd, config.deviceId, config.allocation); //got to device !!
+
+        // cudaFreeHost(rp);
+        // cudaFreeHost(ri);
+        // cudaFreeHost(ci);
 
         gd->numNodes = g.numNodes;
         gd->numEdges = g.numEdges;
@@ -262,13 +233,7 @@ int main(int argc, char** argv)
         gd->rowPtr = new_rowPtr.gdata();
         gd->rowInd = g.rowInd->gdata();
         gd->colInd = g.colInd->gdata();
-
-
     }
-
-    // cudaFreeHost(rp);
-    // cudaFreeHost(ri);
-    // cudaFreeHost(ci);
 
     double time_init = t.elapsed();
     if (config.orient == Degree || config.orient == Degeneracy)
@@ -277,172 +242,10 @@ int main(int argc, char** argv)
     }
 
 
-    //Just need to verify some new storage format
-    //graph::GPUArray<uint> countCont("Half Row Index", AllocationTypeEnum::unified, m, 0);
-    //for (int i = 0; i < g.numNodes; i++)
-    //{
-    //	uint s = g.rowPtr->cdata()[i];
-    //	uint e = g.rowPtr->cdata()[i + 1];
-    //	for (int j = s; j < e; j++)
-    //	{
-    //		uint v = g.colInd->cdata()[j];
 
-    //		uint s2 = g.rowPtr->cdata()[v];
-    //		uint e2 = g.rowPtr->cdata()[v + 1];
-
-    //		if (e2 - s2 < e - s)
-    //			printf("What !!!!\n");
-
-    //	}
-    //}
-
-
-
-    /*double time = t.elapsed();
-    Log(info, "count time %f s", time);
-    Log(info, "MOHA %d kcore (%f teps)", mohacore.count(), m / time);*/
-
-    uint dv = 32;
-    typedef unsigned int ttt;
     if (config.printStats) {
         MatrixStats(m, n, n, g.rowPtr->cdata(), g.colInd->cdata());
         PrintMtarixStruct(m, n, n, g.rowPtr->cdata(), g.colInd->cdata());
-
-
-        ////////////////// intersection !!
-        printf("Now # of bytes we need to make this matrix binary encoded !!\n");
-
-        uint64 sum = 0;
-        uint64 sumc = 0;
-        for (uint i = 0; i < n; i++)
-        {
-            uint s = g.rowPtr->cdata()[i];
-            uint d = g.rowPtr->cdata()[i + 1];
-            uint deg = d - s;
-
-            // if(i >=37 && i<44)
-            // {
-            // 	printf("For %u, %u, %u, %u\n", i, d-s, g.colInd->cdata()[s], g.colInd->cdata()[s + 1]);
-            // }
-
-
-            //if (deg > 128)
-            {
-                uint64 v = deg * (deg + dv - 1) / dv;
-                sum += v;
-
-                //now the compressed one :D
-                uint64 nelem8 = deg / dv;
-                uint64 rem = deg - nelem8 * dv;
-
-                sumc += dv * nelem8 * (1 + nelem8) / 2;
-                sumc += rem * (1 + nelem8);
-            }
-        }
-
-        printf("n = %u, m = %u, elements = %llu\n", n, m, sum);
-        printf("n = %u, m = %u, elements = %llu\n", n, m, sumc);
-
-        uint src = 3541; // index id
-        uint s = g.rowPtr->cdata()[src];
-        uint d = g.rowPtr->cdata()[src + 1];
-        uint degree = d - s;
-        while (degree < 50)
-        {
-            src++;
-            s = g.rowPtr->cdata()[src];
-            d = g.rowPtr->cdata()[src + 1];
-            degree = d - s;
-        }
-
-        uint divisions = (degree + dv - 1) / dv;
-        graph::GPUArray<ttt> node_be("BE", unified, divisions * degree, 0);
-        node_be.setAll(0, true);
-        for (uint i = 0; i < degree; i++)
-        {
-            uint dst = g.colInd->cdata()[i + s];
-            uint dstStart = g.rowPtr->cdata()[dst];
-            uint dstEnd = g.rowPtr->cdata()[dst + 1];
-            uint dstDegree = dstEnd - dstStart;
-
-            //Intersect Src, Dst
-            uint s1 = 0, s2 = 0;
-            bool loadA = true, loadB = true;
-            uint a, b;
-            uint rsi = 0;
-            uint offset = 0;
-            while (s1 < degree && s2 < dstDegree)
-            {
-
-                if (loadA) {
-                    a = g.colInd->cdata()[s1 + s];
-                    loadA = false;
-                }
-                if (loadB) {
-                    b = g.colInd->cdata()[s2 + dstStart];
-                    loadB = false;
-                }
-
-                if (a == b) {
-                    uint startIndex = i * divisions;
-                    uint divIndex = s1 / dv;
-                    uint inDivIndex = s1 % dv;
-                    node_be.cdata()[startIndex + divIndex] |= (1 << inDivIndex);
-
-
-                    //i and s1
-                    //if (i > 0)
-                    //{
-                    //	if (i > s1)
-                    //	{
-                    //		uint ss = i / dv;
-                    //		uint sum = dv * ss * (ss + 1) / 2;
-                    //		uint sr = i % dv;
-                    //		uint sumr = sr * ((i + dv - 1) / dv) - 1;
-
-                    //		rsi = sum + sumr;
-                    //		offset = s1 / dv;
-                    //		uint numBytes = (i + dv - 1) / dv;
-                    //		uint byteIndex = s1 % dv;
-
-                    //		//Encode
-                    //		node_be.cdata()[rsi + offset] |= (1 << byteIndex);
-
-
-                    //	}
-                    //	else
-                    //	{
-                    //		uint ss = s1 / dv;
-                    //		uint sum = dv * ss * (ss + 1) / 2;
-                    //		uint sr = s1 % dv;
-                    //		uint sumr = sr * ((s1 + dv - 1) / dv) - 1;
-
-                    //		rsi = sum + sumr;
-                    //		offset = i / dv;
-                    //		uint numBytes = (s1 + dv - 1) / dv;
-                    //		uint byteIndex = i % dv;
-                    //		node_be.cdata()[rsi + offset] |= (1 << byteIndex);
-                    //	}
-
-
-                    ++s1;
-                    ++s2;
-                    loadA = true;
-                    loadB = true;
-                }
-                else if (a < b) {
-                    ++s1;
-                    loadA = true;
-                }
-                else {
-                    ++s2;
-                    loadB = true;
-                }
-            }
-
-        }
-
-
     }
 
 
@@ -1375,138 +1178,6 @@ int main(int argc, char** argv)
 
 
     }
-
-#pragma region MyRegion
-    ////Hashing tests
-////More tests on GPUArray
-//graph::GPUArray<uint> A("Test A: In", AllocationTypeEnum::cpuonly);
-//graph::GPUArray<uint> B("Test B: In", AllocationTypeEnum::cpuonly);
-
-
-
-//const uint inputSize = pow<int,int>(2, 18) - 1;
-//
-//
-//A.cdata() = new uint[inputSize];
-//B.cdata() = new uint[inputSize];
-
-//const int dimBlock = 512;
-//const int dimGrid = (inputSize + (dimBlock)-1) / (dimBlock);
-
-//srand(220);
-
-//A.cdata()[0] = 1;
-//B.cdata()[0] = 1;
-//for (uint i = 1; i < inputSize; i++)
-//{
-//	A.cdata()[i] = A.cdata()[i - 1] + (rand() % 13) + 1;
-//	B.cdata()[i] = B.cdata()[i - 1] + (rand() % 13) + 1;
-//}
-
-//graph::Hashing::goldenSerialIntersectionCPU<uint>(A, B, inputSize);
-
-//A.switch_to_gpu(0, inputSize);
-//B.switch_to_gpu(0, inputSize);
-
-//graph::Hashing::goldenBinaryGPU<uint>(A, B, inputSize);
-
-////1-level hash with binary search for stash
-//graph::Hashing::test1levelHashing<uint>(A, B, inputSize, 4);
-
-////Non-stash hashing
-//graph::Hashing::testHashNosStash<uint>(A, B, inputSize, 5);
-
-
-////Store binary tree traversal: Now assume full binary tree
-//vector<uint> treeSizes;
-//
-//int maxInputSize;
-//int levels = 1;
-//for (int i = 1; i < 19; i++)
-//{
-//	int v = pow<int, int>(2, i) - 1;
-
-//	if (inputSize >= v)
-//	{
-//		maxInputSize = v;
-//		levels = i;
-//	}
-//	else
-//		break;
-//}
-
-//graph::GPUArray<Node> BT("Binary Traverasl", gpu, maxInputSize, 0);
-//graph::GPUArray<uint> BTV("Binary Traverasl", gpu, maxInputSize, 0);
-//
-//int cl = 0;
-//int totalElements = 1;
-
-//int element0 = maxInputSize / 2;
-//BT.cdata()[0].i = element0;
-//BTV.cdata()[0] = B.cdata()[element0];
-//BT.cdata()[0].l = 0;
-//BT.cdata()[0].r = maxInputSize;
-
-//while (totalElements < maxInputSize)
-//{
-//	int num_elem_lev = pow<int, int>(2, cl);
-//	int levelStartIndex = pow<int, int>(2, cl) - 1;
-//	for (int i = levelStartIndex; i < num_elem_lev + levelStartIndex; i++)
-//	{
-//		Node parent = BT.cdata()[i];
-//
-//		//left
-//		int leftIndex = 2 * i + 1; //New Index
-//		int leftVal = (parent.l + parent.i) / 2; //PrevIndex
-
-//		BT.cdata()[leftIndex].i = leftVal;
-//		BT.cdata()[leftIndex].l = parent.l;
-//		BT.cdata()[leftIndex].r = parent.i;
-//		BTV.cdata()[leftIndex] = B.cdata()[leftVal];
-//		BT.cdata()[leftIndex].p = i;
-
-
-//		//right
-//		int rightIndex = 2 * i + 2; //New Index
-//		int rightVal = (parent.i + 1 + parent.r) / 2; //PrevIndex
-
-//		BT.cdata()[rightIndex].i = rightVal;
-//		BT.cdata()[rightIndex].l = parent.i + 1;
-//		BT.cdata()[rightIndex].r = parent.r;
-//		BTV.cdata()[rightIndex] = B.cdata()[rightVal];
-//		BT.cdata()[rightIndex].p = i;
-
-//		totalElements += 2;
-//	}
-//	cl++;
-//}
-
-//BTV.switch_to_gpu(0);
-
-//const auto startBST = stime();
-//graph::GPUArray<uint> countBST("Test Binary Search Tree search: Out", AllocationTypeEnum::unified, 1, 0);
-//graph::binary_search_bst_g<uint, 32> << <1, 32 >> > (countBST.gdata(), A.gdata(), inputSize, BTV.gdata(), inputSize);
-//cudaDeviceSynchronize();
-//double elapsedBST = elapsedSec(startBST);
-//printf("BST Elapsed time = %f, Count = %u \n", elapsedBST, countBST.cdata()[0]);
-
-//BTV.freeCPU();
-//BTV.freeGPU();
-
-//BT.freeCPU();
-//BT.freeGPU();
-
-
-////For weighted edges
-////std::vector<WEdgeTy<uint, wtype>> wedges;
-////std::vector<WEdgeTy<uint,wtype>> wfileEdges;
-////while (f.get_weighted_edges(wfileEdges, 10)) {
-////	wedges.insert(wedges.end(), wfileEdges.begin(), wfileEdges.end());
-////}
-
-#pragma endregion
-
-
 
 
 
