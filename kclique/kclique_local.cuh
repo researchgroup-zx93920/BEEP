@@ -76,7 +76,6 @@ namespace graph
             // Log(LogPriorityEnum::info, "Level: %d, curr: %d/%d", level, current.count.gdata()[0], bucket.count.gdata()[0]);
         }
 
-
         // Same Function for any comutation
         void bucket_edge_scan(
             GPUArray<T> nodeDegree, T node_num, T level, T span,
@@ -97,8 +96,6 @@ namespace graph
             if (level == bucket_level_end_)
             {
                 // Clear the bucket_removed_indicator
-
-
                 long grid_size = (node_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
                 execKernel(filter_window, grid_size, BLOCK_SIZE, dev_, false,
                     nodeDegree.gdata(), node_num, bucket.mark.gdata(), level, bucket_level_end_ + KCL_EDGE_LEVEL_SKIP_SIZE);
@@ -274,7 +271,7 @@ namespace graph
             d_bitmap_states.setAll(0, true);
             cpn.setAll(0, true);
             
-            execKernel((get_max_degree<T, 128>), (g.numEdges + 128 - 1) / 128, 128, dev_, false, g, edgePtr.gdata(), maxDegree.gdata());
+            execKernel((getEdgeDegree_kernel<T, 128>), (g.numEdges + 128 - 1) / 128, 128, dev_, false, g, edgePtr.gdata(), maxDegree.gdata());
 
             bucket_edge_scan(edgePtr, g.numEdges, 0, kcount - 2, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
             todo -= current_q.count.gdata()[0];
@@ -510,7 +507,7 @@ namespace graph
 
             counter.setSingle(0, 0, true);
             maxDegree.setSingle(0, 0, true);
-            execKernel((get_max_degree<T, 128>), (g.numEdges + 128 - 1) / 128, 128, dev_, false, g, edgePtr.gdata(), maxDegree.gdata());
+            execKernel((getEdgeDegree_kernel<T, 128>), (g.numEdges + 128 - 1) / 128, 128, dev_, false, g, edgePtr.gdata(), maxDegree.gdata());
             d_bitmap_states.setAll(0, true);
             cpn.setAll(0, true);
 
@@ -625,7 +622,7 @@ namespace graph
         {
             std::cout << "Local clique counter for the first " << n << " Nodes:\n";
             auto cdata = cpn.cdata();
-            for (T i = 0; i < n; i ++)
+            for (T i = 0; i < 50; i ++)
             {
                 std::cout << i << '\t' << cdata[i] << '\n';
             }

@@ -1177,6 +1177,13 @@ kckernel_node_block_warp_binary_count_local_sharedmem_lazy_loop(
             src = current.queue[i];
             srcStart = g.rowPtr[src];
             srcLen = g.rowPtr[src + 1] - srcStart;
+
+            num_divs_local = (srcLen + 32 - 1) / 32;
+            encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
+            encode = &adj_enc[encode_offset];
+
+            //Local Specific
+            root_count = 0;
         }
         __syncthreads();
 
@@ -1185,24 +1192,11 @@ kckernel_node_block_warp_binary_count_local_sharedmem_lazy_loop(
         {
             local_clique_count[idx] = 0;
         }
-        if (threadIdx.x == 0)
-        {
-            root_count = 0;
-        }
-        __syncthreads();
-
-        if (threadIdx.x == 0)
-            num_divs_local = (srcLen + 32 - 1) / 32;
-        else if (threadIdx.x == 1)
-        {
-            encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
-            encode = &adj_enc[encode_offset];
-        }
-        __syncthreads();
 
         // Encode
         T partMask = (1 << CPARTSIZE) - 1;
         partMask = partMask << ((wx%(32/CPARTSIZE)) * CPARTSIZE);
+
         for (T j = wx; j < srcLen; j += numPartitions)
         {
             for (T k = lx; k < num_divs_local; k += CPARTSIZE)
@@ -1250,6 +1244,7 @@ kckernel_node_block_warp_binary_count_local_sharedmem_lazy_loop(
             }
             __syncwarp(partMask);
 
+            //Local count: increment where ever you find bit value = 1
             if (l[wx] == KCCOUNT)
             {
                 for (T k = lx; k < num_divs_local; k += CPARTSIZE)
@@ -1644,6 +1639,13 @@ kckernel_node_block_warp_binary_count_local_sharedmem_direct_loop(
             src = current.queue[i];
             srcStart = g.rowPtr[src];
             srcLen = g.rowPtr[src + 1] - srcStart;
+
+            num_divs_local = (srcLen + 32 - 1) / 32;
+            encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
+            encode = &adj_enc[encode_offset];
+
+            //Local Specific
+            root_count = 0;
         }
         __syncthreads();
 
@@ -1652,20 +1654,6 @@ kckernel_node_block_warp_binary_count_local_sharedmem_direct_loop(
         {
             local_clique_count[idx] = 0;
         }
-        if (threadIdx.x == 0)
-        {
-            root_count = 0;
-        }
-        __syncthreads();
-
-        if (threadIdx.x == 0)
-            num_divs_local = (srcLen + 32 - 1) / 32;
-        else if (threadIdx.x == 1)
-        {
-            encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
-            encode = &adj_enc[encode_offset];
-        }
-        __syncthreads();
 
         // Encode
         T partMask = (1 << CPARTSIZE) - 1;

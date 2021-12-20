@@ -65,20 +65,15 @@ static MAINTASK parseMainTask(const char* s)
     if (strcmp(s, "ktruss") == 0)
         return KTRUSS;
 
-    if (strcmp(s, "kclique") == 0)
+    if (strcmp(s, "kc") == 0)
         return KCLIQUE;
 
-<<<<<<< HEAD
-    
-    if (strcmp(s, "maximal") == 0)
-        return MAXIMAL;
-=======
-    if (strcmp(s, "kclique-local") == 0)
+
+    if (strcmp(s, "lkc") == 0)
         return KCLIQUE_LOCAL;
     
-    if (strcmp(s, "maximal-clique") == 0)
+    if (strcmp(s, "mc") == 0)
         return MAXIMAL_CLIQUE;
->>>>>>> kclique_local_count
 
     if (strcmp(s, "cd") == 0)
         return CROSSDECOMP;
@@ -97,9 +92,9 @@ static const char* asString(MAINTASK mt) {
     case TC:                return "tc";
     case KCORE:            return "kcore";
     case KTRUSS:            return "ktruss";
-    case KCLIQUE:            return "kclique";
-    case KCLIQUE_LOCAL:            return "kclique-local";
-    case MAXIMAL_CLIQUE:            return "maximal-clique";
+    case KCLIQUE:            return "kc -> kclique";
+    case KCLIQUE_LOCAL:            return "lkc -> kclique-local";
+    case MAXIMAL_CLIQUE:            return "mc -> maximal-clique";
     case CROSSDECOMP:   return "cd";
 
     default:
@@ -357,22 +352,6 @@ static Config parseArgs(int argc, char** argv) {
 
 static void printConfig(Config config)
 {
-<<<<<<< HEAD
-    // printf("    Graph: %s\n", config.srcGraph);
-    // //printf("    DST Graph: %s\n", config.dstGraph);
-    // printf("    Device Id = %u, ", config.deviceId);
-    // printf("    Allocation = %s, ", asString(config.allocation));
-    // printf("    Small Graph = %s, ", config.isSmall? "Small Graph Allocation" : "Large Graph Allocation");
-    // printf("    Main Task = %s, ", asString(config.mt));
-    // printf("    Graph Orientation = %s, ", asString(config.orient));
-    // printf("    Process By = %s, ", asString(config.processBy));
-    // printf("    Process Element = %s, ", asString(config.processElement));
-    // printf("    k: %u, ", config.k);
-
-
-    if (config.mt == KCLIQUE || config.mt == MAXIMAL)
-         printf("    Clique Config = %s\n", asString(config.kcConfig));
-=======
     printf("    Graph: %s\n", config.srcGraph);
     printf("    DST Graph: %s\n", config.dstGraph);
     printf("    Device Id = %u\n", config.deviceId);
@@ -387,6 +366,6 @@ static void printConfig(Config config)
 
     if (config.mt == KCLIQUE || config.mt == KCLIQUE_LOCAL || config.mt == MAXIMAL_CLIQUE)
          printf("    KC Config = %s\n", asString(config.kcConfig));
->>>>>>> kclique_local_count
+
 
 }
