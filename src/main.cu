@@ -1,12 +1,12 @@
 
 #include <cuda_runtime.h>
 #include <iostream>
-#include<string>
+#include <string>
 #include <fstream>
 #include <map>
 
 #include "omp.h"
-#include<vector>
+#include <vector>
 
 #include "../include/Logger.cuh"
 #include "../include/FIleReader.cuh"
@@ -34,7 +34,6 @@
 #include "../kcore/kcore.cuh"
 #include "../kclique/kclique.cuh"
 
-
 #include "../include/Config.h"
 #include "../include/ScanLarge.cuh"
 
@@ -43,7 +42,7 @@
 using namespace std;
 //#define TriListConstruct
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
 
 	//CUDA_RUNTIME(cudaDeviceReset());
@@ -56,33 +55,35 @@ int main(int argc, char** argv)
 	graph::MtB_Writer mwriter;
 	auto fileSrc = config.srcGraph;
 	auto fileDst = config.dstGraph;
-	if (config.mt == CONV_MTX_BEL) {
+	if (config.mt == CONV_MTX_BEL)
+	{
 		mwriter.write_market_bel<uint, int>(fileSrc, fileDst, false);
 		return;
 	}
 
-	if (config.mt == CONV_TSV_BEL) {
+	if (config.mt == CONV_TSV_BEL)
+	{
 		mwriter.write_tsv_bel<uint64, uint64>(fileSrc, fileDst);
 		return;
 	}
 
-	if (config.mt == CONV_TSV_MTX) {
+	if (config.mt == CONV_TSV_MTX)
+	{
 		mwriter.write_tsv_market<uint, int>(fileSrc, fileDst);
 		return;
 	}
 
-	if (config.mt == CONV_BEL_MTX) {
+	if (config.mt == CONV_BEL_MTX)
+	{
 		mwriter.write_bel_market<uint, int>(fileSrc, fileDst);
 		return;
 	}
 
-	if (config.mt == CONV_TXT_BEL) {
+	if (config.mt == CONV_TXT_BEL)
+	{
 		mwriter.write_txt_bel<uint, uint>(fileSrc, fileDst, true, 2, 0);
 		return;
 	}
-
-
-
 
 	//test Scan
 	/*const int size = 256;
@@ -105,18 +106,19 @@ int main(int argc, char** argv)
 
 	uint t = s.Select(asc.gdata(), keep.gdata(), asc.gdata(), size);*/
 
-
 	//HERE is the normal program !!
-		//1) Read File to EdgeList
+	//1) Read File to EdgeList
 
-	const char* matr = config.srcGraph;
+	const char *matr = config.srcGraph;
 	graph::EdgeListFile f(matr);
 	std::vector<EdgeTy<uint>> edges;
 	std::vector<EdgeTy<uint>> fileEdges;
-	auto lowerTriangular = [](const Edge& e) { return e.first > e.second; };
-	auto upperTriangular = [](const Edge& e) { return e.first < e.second; };
-	auto full = [](const Edge& e) { return false; };
-
+	auto lowerTriangular = [](const Edge &e)
+	{ return e.first > e.second; };
+	auto upperTriangular = [](const Edge &e)
+	{ return e.first < e.second; };
+	auto full = [](const Edge &e)
+	{ return false; };
 
 	while (f.get_edges(fileEdges, 100))
 	{
@@ -127,7 +129,6 @@ int main(int argc, char** argv)
 	{
 		f.sort_edges(edges);
 	}
-
 
 	//Importatnt
 	graph::CSRCOO<uint> csrcoo;
@@ -140,7 +141,6 @@ int main(int argc, char** argv)
 
 	uint n = csrcoo.num_rows();
 	uint m = csrcoo.nnz();
-
 
 	graph::COOCSRGraph<uint> g;
 	g.capacity = m;
@@ -163,23 +163,20 @@ int main(int argc, char** argv)
 	// g.rowInd->cdata() = ri;
 	// g.colInd->cdata() = ci;
 
-
-
-	g.rowPtr = new graph::GPUArray<uint>("Row pointer", AllocationTypeEnum::gpu, n+1, config.deviceId, true );
-	g.rowInd = new graph::GPUArray<uint>("Src Index", AllocationTypeEnum::gpu,  m, config.deviceId, true );
-	g.colInd = new graph::GPUArray<uint>("Dst Index", AllocationTypeEnum::gpu,  m, config.deviceId, true);
+	g.rowPtr = new graph::GPUArray<uint>("Row pointer", AllocationTypeEnum::gpu, n + 1, config.deviceId, true);
+	g.rowInd = new graph::GPUArray<uint>("Src Index", AllocationTypeEnum::gpu, m, config.deviceId, true);
+	g.colInd = new graph::GPUArray<uint>("Dst Index", AllocationTypeEnum::gpu, m, config.deviceId, true);
 	uint *rp, *ri, *ci;
-	cudaMallocHost((void**)&rp, (n+1)*sizeof(uint));
-	cudaMallocHost((void**)&ri, (m)*sizeof(uint));
-	cudaMallocHost((void**)&ci, (m)*sizeof(uint));
-	CUDA_RUNTIME(cudaMemcpy(rp, csrcoo.row_ptr(), (n+1)*sizeof(uint), cudaMemcpyKind::cudaMemcpyHostToHost));
-	CUDA_RUNTIME(cudaMemcpy(ri, csrcoo.row_ind(), (m)*sizeof(uint) , cudaMemcpyKind::cudaMemcpyHostToHost));
-	CUDA_RUNTIME(cudaMemcpy(ci, csrcoo.col_ind(), (m)*sizeof(uint), cudaMemcpyKind::cudaMemcpyHostToHost));
+	cudaMallocHost((void **)&rp, (n + 1) * sizeof(uint));
+	cudaMallocHost((void **)&ri, (m) * sizeof(uint));
+	cudaMallocHost((void **)&ci, (m) * sizeof(uint));
+	CUDA_RUNTIME(cudaMemcpy(rp, csrcoo.row_ptr(), (n + 1) * sizeof(uint), cudaMemcpyKind::cudaMemcpyHostToHost));
+	CUDA_RUNTIME(cudaMemcpy(ri, csrcoo.row_ind(), (m) * sizeof(uint), cudaMemcpyKind::cudaMemcpyHostToHost));
+	CUDA_RUNTIME(cudaMemcpy(ci, csrcoo.col_ind(), (m) * sizeof(uint), cudaMemcpyKind::cudaMemcpyHostToHost));
 
 	g.rowPtr->cdata() = rp;
 	g.rowInd->cdata() = ri;
 	g.colInd->cdata() = ci;
-
 
 	// g.rowPtr->cdata() = csrcoo.row_ptr();
 	// g.rowInd->cdata() = csrcoo.row_ind();
@@ -188,12 +185,11 @@ int main(int argc, char** argv)
 	///Now we need to orient the graph
 	Timer total_timer;
 
-	graph::COOCSRGraph_d<uint>* gd;
+	graph::COOCSRGraph_d<uint> *gd;
 	to_csrcoo_device(g, gd, config.deviceId, config.allocation); //got to device !!
 
 	double total = total_timer.elapsed();
 	Log(info, "Transfer Time: %f s", total);
-
 
 	Timer t;
 	graph::SingleGPU_Kcore<uint, PeelType> mohacore(config.deviceId);
@@ -233,9 +229,8 @@ int main(int argc, char** argv)
 			// s.Select(gd->rowInd, rowInd_half.gdata(), keep.gdata(), m);
 			// newNumEdges = s.Select(gd->colInd, colInd_half.gdata(), keep.gdata(), m);
 
-			newNumEdges = s.Select2(gd->rowInd,  gd->colInd,  rowInd_half.gdata(), colInd_half.gdata(), keep.gdata(), m);
+			newNumEdges = s.Select2(gd->rowInd, gd->colInd, rowInd_half.gdata(), colInd_half.gdata(), keep.gdata(), m);
 		}
-
 
 		execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), new_rowPtr.gdata());
 		uint total = CUBScanExclusive<uint, uint>(new_rowPtr.gdata(), new_rowPtr.gdata(), n, config.deviceId, 0, config.allocation);
@@ -256,8 +251,6 @@ int main(int argc, char** argv)
 		g.rowInd = &rowInd_half;
 		g.colInd = &colInd_half;
 		to_csrcoo_device(g, gd, config.deviceId, config.allocation); //got to device !!
-
-
 	}
 
 	// cudaFreeHost(rp);
@@ -286,18 +279,16 @@ int main(int argc, char** argv)
 	//	}
 	//}
 
-
-
 	/*double time = t.elapsed();
 	Log(info, "count time %f s", time);
 	Log(info, "MOHA %d kcore (%f teps)", mohacore.count(), m / time);*/
 
 	uint dv = 32;
 	typedef unsigned int ttt;
-	if (config.printStats) {
+	if (config.printStats)
+	{
 		MatrixStats(m, n, n, g.rowPtr->cdata(), g.colInd->cdata());
 		PrintMtarixStruct(m, n, n, g.rowPtr->cdata(), g.colInd->cdata());
-
 
 		////////////////// intersection !!
 		printf("Now # of bytes we need to make this matrix binary encoded !!\n");
@@ -314,7 +305,6 @@ int main(int argc, char** argv)
 			// {
 			// 	printf("For %u, %u, %u, %u\n", i, d-s, g.colInd->cdata()[s], g.colInd->cdata()[s + 1]);
 			// }
-
 
 			//if (deg > 128)
 			{
@@ -364,21 +354,23 @@ int main(int argc, char** argv)
 			while (s1 < degree && s2 < dstDegree)
 			{
 
-				if (loadA) {
+				if (loadA)
+				{
 					a = g.colInd->cdata()[s1 + s];
 					loadA = false;
 				}
-				if (loadB) {
+				if (loadB)
+				{
 					b = g.colInd->cdata()[s2 + dstStart];
 					loadB = false;
 				}
 
-				if (a == b) {
+				if (a == b)
+				{
 					uint startIndex = i * divisions;
 					uint divIndex = s1 / dv;
 					uint inDivIndex = s1 % dv;
 					node_be.cdata()[startIndex + divIndex] |= (1 << inDivIndex);
-
 
 					//i and s1
 					//if (i > 0)
@@ -398,7 +390,6 @@ int main(int argc, char** argv)
 					//		//Encode
 					//		node_be.cdata()[rsi + offset] |= (1 << byteIndex);
 
-
 					//	}
 					//	else
 					//	{
@@ -414,27 +405,24 @@ int main(int argc, char** argv)
 					//		node_be.cdata()[rsi + offset] |= (1 << byteIndex);
 					//	}
 
-
 					++s1;
 					++s2;
 					loadA = true;
 					loadB = true;
 				}
-				else if (a < b) {
+				else if (a < b)
+				{
 					++s1;
 					loadA = true;
 				}
-				else {
+				else
+				{
 					++s2;
 					loadB = true;
 				}
 			}
-
 		}
-
-
 	}
-
 
 	if (config.mt == TC)
 	{
@@ -469,19 +457,17 @@ int main(int argc, char** argv)
 
 		printf("Tiled Count = %lu, time = %f\n", *c.gdata(), ms / 1e3);*/
 
-
 		//Count traingles binary-search: Thread or Warp
 		uint step = m;
 		uint st = 0;
 		uint ee = st + step; // st + 2;
-		graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(config.deviceId, ee, n);
-		graph::TcBase<uint>* tcNV = new graph::TcNvgraph<uint>(config.deviceId, ee, n);
-		graph::TcBase<uint>* tcBE = new graph::TcBinaryEncoding<uint>(config.deviceId, ee, n);
-		graph::TcBase<uint>* tc = new graph::TcSerial<uint>(config.deviceId, ee, n);
+		graph::TcBase<uint> *tcb = new graph::TcBinary<uint>(config.deviceId, ee, n);
+		graph::TcBase<uint> *tcNV = new graph::TcNvgraph<uint>(config.deviceId, ee, n);
+		graph::TcBase<uint> *tcBE = new graph::TcBinaryEncoding<uint>(config.deviceId, ee, n);
+		graph::TcBase<uint> *tc = new graph::TcSerial<uint>(config.deviceId, ee, n);
 
 		const int divideConstant = 10;
-		graph::TcBase<uint>* tchash = new graph::TcVariableHash<uint>(config.deviceId, ee, n);
-
+		graph::TcBase<uint> *tchash = new graph::TcVariableHash<uint>(config.deviceId, ee, n);
 
 		graph::BmpGpu<uint> bmp(config.deviceId);
 		bmp.InitBMP(*gd);
@@ -510,7 +496,6 @@ int main(int argc, char** argv)
 					printf("%u,", g.colInd->cdata()[srcStart + i]);
 				printf("}\n");
 
-
 				printf("Destenation col ind = {");
 				for (int i = 0; i < dstLen; i++)
 					printf("%u,", g.colInd->cdata()[dstStart + i]);
@@ -519,17 +504,17 @@ int main(int argc, char** argv)
 
 			bmp.Count(*gd);
 
-			uint64  serialTc = CountTriangles<uint>("Serial Thread", config.deviceId, config.allocation, tc, gd, ee, st, ProcessingElementEnum::Thread, 0);
+			uint64 serialTc = CountTriangles<uint>("Serial Thread", config.deviceId, config.allocation, tc, gd, ee, st, ProcessingElementEnum::Thread, 0);
 
 			////CountTriangles<uint>("Serial Warp", tc, rowPtr, sl, dl, ee, csrcoo.num_rows(), st, ProcessingElementEnum::Warp, 0);
-			uint64  binaryTc = CountTriangles<uint>("Binary Warp", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::Block, 0);
-			uint64  binarySharedTc = CountTriangles<uint>("Binary Warp Shared", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::WarpShared, 0);
-			uint64  binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::Test, 0);
+			uint64 binaryTc = CountTriangles<uint>("Binary Warp", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::Block, 0);
+			uint64 binarySharedTc = CountTriangles<uint>("Binary Warp Shared", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::WarpShared, 0);
+			uint64 binarySharedCoalbTc = CountTriangles<uint>("Binary Warp Shared", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::Test, 0);
 
 			uint64 binaryEncodingTc = CountTriangles<uint>("Binary Encoding", config.deviceId, config.allocation, tcBE, gd, ee, st, ProcessingElementEnum::Warp, 0);
 			CountTrianglesHash<uint>(config.deviceId, divideConstant, tchash, g, gd, ee, 0, ProcessingElementEnum::Warp, 0);
 
-			uint64  binaryQueueTc = CountTriangles<uint>("Binary Queue", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
+			uint64 binaryQueueTc = CountTriangles<uint>("Binary Queue", config.deviceId, config.allocation, tcb, gd, ee, st, ProcessingElementEnum::Queue, 0);
 
 			CountTriangles<uint>("NVGRAPH", config.deviceId, config.allocation, tcNV, gd, ee);
 
@@ -546,7 +531,7 @@ int main(int argc, char** argv)
 	else if (config.mt == CROSSDECOMP)
 	{
 		//Update Please
-	/*	sl.switch_to_gpu(0, csrcoo.nnz());
+		/*	sl.switch_to_gpu(0, csrcoo.nnz());
 		dl.switch_to_gpu(0, csrcoo.nnz());
 		rowPtr.switch_to_gpu(0, csrcoo.num_rows() + 1);
 		Thanos<uint> t(rowPtr, sl, dl, csrcoo.nnz(), csrcoo.num_rows());*/
@@ -558,16 +543,15 @@ int main(int argc, char** argv)
 	dl.switch_to_gpu(0, csrcoo.nnz());
 	rowPtr.switch_to_gpu(0, csrcoo.num_rows() + 1);
 	////Takes either serial or binary triangle Counter
-	graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(0, csrcoo.nnz(), csrcoo.num_rows());
+	graph::TcBase<uint> *tcb = new graph::TcBinary<uint>(0, csrcoo.nnz(), csrcoo.num_rows());
 	graph::GPUArray<uint> triPointer("tri Pointer", cpuonly);
 	graph::GPUArray<uint> triIndex("tri Index", cpuonly);
 	ConstructTriList(triIndex, triPointer, tcb, rowPtr, sl, dl, csrcoo.nnz(), csrcoo.num_rows(), 0, ProcessingElementEnum::Warp);
 #endif
 
-
 	if (config.mt == KCORE)
 	{
-		graph::COOCSRGraph_d<uint>* gd;
+		graph::COOCSRGraph_d<uint> *gd;
 		to_csrcoo_device(g, gd, config.deviceId, config.allocation); //got to device !!
 		cudaDeviceSynchronize();
 
@@ -578,7 +562,6 @@ int main(int argc, char** argv)
 		double time = t.elapsed();
 		Log(info, "count time %f s", time);
 		Log(info, "MOHA %d kcore (%f teps)", mohacore.count(), m / time);
-
 
 		uint cc = 0;
 		for (uint i = 0; i < g.numNodes; i++)
@@ -601,7 +584,7 @@ int main(int argc, char** argv)
 					// 	if(max < mohacore.nodeDegree.gdata()[dst])
 					// 		max = mohacore.nodeDegree.gdata()[dst];
 					// }
-					// else 
+					// else
 					//if(mohacore.nodeDegree.gdata()[i] == 111)
 					{
 						if (mohacore.nodePriority.gdata()[i] < mohacore.nodePriority.gdata()[dst])
@@ -619,21 +602,14 @@ int main(int argc, char** argv)
 
 				//break;
 			}
-
-
 		}
 		printf("Number of nodes = %u\n", cc);
-
-
-
 	}
 
 	if (config.mt == KCLIQUE)
 	{
 		if (config.orient == None)
 			Log(warn, "Redundunt K-cliques, Please orient the graph\n");
-
-
 
 		// if(config.processElement == BlockWarp)
 		// {
@@ -678,30 +654,27 @@ int main(int argc, char** argv)
 
 				//k++;
 			}
-
-
 		}
 	}
-
 
 	if (config.mt == KTRUSS)
 	{
 		//The problem with Ktruss that it physically changes the graph structure due to stream compaction !!
-		graph::COOCSRGraph_d<uint>* gd;
+		graph::COOCSRGraph_d<uint> *gd;
 		to_csrcoo_device(g, gd, config.deviceId, unified); //got to device !!
 
-	//#define VLDB2020
+		//#define VLDB2020
 #ifdef VLDB2020
-	//We need unified to do stream compaction
+		//We need unified to do stream compaction
 		graph::GPUArray<int> output("KT Output", AllocationTypeEnum::unified, m / 2, 0);
 		graph::BmpGpu<uint> bmp(config.deviceId);
-		bmp.getEidAndEdgeList(g);// CPU
+		bmp.getEidAndEdgeList(g); // CPU
 		bmp.InitBMP(*gd);
 		bmp.bmpConstruct(*gd);
 
 		double tc_time = bmp.Count_Set(*gd);
-#define MAX_LEVEL  (20000)
-		auto level_start_pos = (uint*)calloc(MAX_LEVEL, sizeof(uint));
+#define MAX_LEVEL (20000)
+		auto level_start_pos = (uint *)calloc(MAX_LEVEL, sizeof(uint));
 
 		graph::PKT_cuda(
 			config.deviceId,
@@ -716,12 +689,13 @@ int main(int argc, char** argv)
 		graph::SingleGPU_Ktruss<uint> mohatruss(0);
 		Timer t;
 		mohatruss.findKtrussIncremental_sync(3, 1000, rowPtr, sl, dl,
-			n, m, nullptr, nullptr, 0, 0);
+											 n, m, nullptr, nullptr, 0, 0);
 		mohatruss.sync();
 		double time = t.elapsed();
 		Log(info, "count time %f s", time);
-		Log(info, "MOHA %d ktruss (%f teps)", mohatruss.count(), m / time); */
-#endif	
+		Log(info, "MOHA %d ktruss (%f teps)", mohatruss.count(), m / time);
+		* /
+#endif
 
 #define OUR_NEW_KTRUSS
 #ifdef OUR_NEW_KTRUSS
@@ -733,7 +707,6 @@ int main(int argc, char** argv)
 
 		Timer t_init;
 		graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, config.deviceId);
-
 
 		execKernel(init, (m + 512 - 1) / 512, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata());
 
@@ -759,18 +732,15 @@ int main(int argc, char** argv)
 		graph::SingleGPU_KtrussMod<uint, PeelType> mohatrussM(config.deviceId);
 
 		Timer t;
-		graph::TcBase<uint>* tcb = new graph::TcBinary<uint>(config.deviceId, m, n, mohatrussM.stream());
+		graph::TcBase<uint> *tcb = new graph::TcBinary<uint>(config.deviceId, m, n, mohatrussM.stream());
 
 		mohatrussM.findKtrussIncremental_sync(3, 1000, tcb, geid, nullptr, nullptr, 0, 0);
 		mohatrussM.sync();
 		double time = t.elapsed();
 
-
 		Log(info, "count time %f s", time);
 		Log(info, "MOHA %d ktruss (%f teps)", mohatrussM.count(), m / time);
 #endif
-
-
 	}
 
 	if (config.mt == GRAPH_MATCH || config.mt == GRAPH_COUNT)
@@ -780,7 +750,8 @@ int main(int argc, char** argv)
 		std::vector<EdgeTy<uint>> patEdges;
 		std::vector<EdgeTy<uint>> patFileEdges;
 
-		while (patFile.get_edges(patFileEdges, 100)) {
+		while (patFile.get_edges(patFileEdges, 100))
+		{
 			patEdges.insert(patEdges.end(), patFileEdges.begin(), patFileEdges.end());
 		}
 
@@ -798,9 +769,18 @@ int main(int argc, char** argv)
 		patG.rowInd->cdata() = patCsrcoo.row_ind();
 		patG.colInd->cdata() = patCsrcoo.col_ind();
 
+		// graph::CSRCOO<uint> temp_csrcoo = graph::CSRCOO<uint>::from_edgelist(edges, lowerTriangular);
+		// uint n1 = csrcoo.num_rows();
+		// uint m1 = csrcoo.nnz();
+
+		// graph::COOCSRGraph<uint> g;
+		// g.capacity = m1;
+		// g.numEdges = m1;
+		// g.numNodes = n1;
+
 		// Initialise subgraph matcher class
-		graph::SG_Match<uint>* sgm = new graph::SG_Match<uint>(config.mt, config.processBy, config.deviceId);
-		
+		graph::SG_Match<uint> *sgm = new graph::SG_Match<uint>(config.mt, config.processBy, config.deviceId);
+
 		// Process template and count subgraphs
 		sgm->run(*gd, patG);
 
@@ -810,137 +790,128 @@ int main(int argc, char** argv)
 
 #pragma region MyRegion
 	////Hashing tests
-////More tests on GPUArray
-//graph::GPUArray<uint> A("Test A: In", AllocationTypeEnum::cpuonly);
-//graph::GPUArray<uint> B("Test B: In", AllocationTypeEnum::cpuonly);
+	////More tests on GPUArray
+	//graph::GPUArray<uint> A("Test A: In", AllocationTypeEnum::cpuonly);
+	//graph::GPUArray<uint> B("Test B: In", AllocationTypeEnum::cpuonly);
 
+	//const uint inputSize = pow<int,int>(2, 18) - 1;
+	//
+	//
+	//A.cdata() = new uint[inputSize];
+	//B.cdata() = new uint[inputSize];
 
+	//const int dimBlock = 512;
+	//const int dimGrid = (inputSize + (dimBlock)-1) / (dimBlock);
 
-//const uint inputSize = pow<int,int>(2, 18) - 1;
-//
-//
-//A.cdata() = new uint[inputSize];
-//B.cdata() = new uint[inputSize];
+	//srand(220);
 
-//const int dimBlock = 512;
-//const int dimGrid = (inputSize + (dimBlock)-1) / (dimBlock);
+	//A.cdata()[0] = 1;
+	//B.cdata()[0] = 1;
+	//for (uint i = 1; i < inputSize; i++)
+	//{
+	//	A.cdata()[i] = A.cdata()[i - 1] + (rand() % 13) + 1;
+	//	B.cdata()[i] = B.cdata()[i - 1] + (rand() % 13) + 1;
+	//}
 
-//srand(220);
+	//graph::Hashing::goldenSerialIntersectionCPU<uint>(A, B, inputSize);
 
-//A.cdata()[0] = 1;
-//B.cdata()[0] = 1;
-//for (uint i = 1; i < inputSize; i++)
-//{
-//	A.cdata()[i] = A.cdata()[i - 1] + (rand() % 13) + 1;
-//	B.cdata()[i] = B.cdata()[i - 1] + (rand() % 13) + 1;
-//}
+	//A.switch_to_gpu(0, inputSize);
+	//B.switch_to_gpu(0, inputSize);
 
-//graph::Hashing::goldenSerialIntersectionCPU<uint>(A, B, inputSize);
+	//graph::Hashing::goldenBinaryGPU<uint>(A, B, inputSize);
 
-//A.switch_to_gpu(0, inputSize);
-//B.switch_to_gpu(0, inputSize);
+	////1-level hash with binary search for stash
+	//graph::Hashing::test1levelHashing<uint>(A, B, inputSize, 4);
 
-//graph::Hashing::goldenBinaryGPU<uint>(A, B, inputSize);
+	////Non-stash hashing
+	//graph::Hashing::testHashNosStash<uint>(A, B, inputSize, 5);
 
-////1-level hash with binary search for stash
-//graph::Hashing::test1levelHashing<uint>(A, B, inputSize, 4);
+	////Store binary tree traversal: Now assume full binary tree
+	//vector<uint> treeSizes;
+	//
+	//int maxInputSize;
+	//int levels = 1;
+	//for (int i = 1; i < 19; i++)
+	//{
+	//	int v = pow<int, int>(2, i) - 1;
 
-////Non-stash hashing
-//graph::Hashing::testHashNosStash<uint>(A, B, inputSize, 5);
+	//	if (inputSize >= v)
+	//	{
+	//		maxInputSize = v;
+	//		levels = i;
+	//	}
+	//	else
+	//		break;
+	//}
 
+	//graph::GPUArray<Node> BT("Binary Traverasl", gpu, maxInputSize, 0);
+	//graph::GPUArray<uint> BTV("Binary Traverasl", gpu, maxInputSize, 0);
+	//
+	//int cl = 0;
+	//int totalElements = 1;
 
-////Store binary tree traversal: Now assume full binary tree
-//vector<uint> treeSizes;
-//
-//int maxInputSize;
-//int levels = 1;
-//for (int i = 1; i < 19; i++)
-//{
-//	int v = pow<int, int>(2, i) - 1;
+	//int element0 = maxInputSize / 2;
+	//BT.cdata()[0].i = element0;
+	//BTV.cdata()[0] = B.cdata()[element0];
+	//BT.cdata()[0].l = 0;
+	//BT.cdata()[0].r = maxInputSize;
 
-//	if (inputSize >= v)
-//	{
-//		maxInputSize = v;
-//		levels = i;
-//	}
-//	else
-//		break;
-//}
+	//while (totalElements < maxInputSize)
+	//{
+	//	int num_elem_lev = pow<int, int>(2, cl);
+	//	int levelStartIndex = pow<int, int>(2, cl) - 1;
+	//	for (int i = levelStartIndex; i < num_elem_lev + levelStartIndex; i++)
+	//	{
+	//		Node parent = BT.cdata()[i];
+	//
+	//		//left
+	//		int leftIndex = 2 * i + 1; //New Index
+	//		int leftVal = (parent.l + parent.i) / 2; //PrevIndex
 
-//graph::GPUArray<Node> BT("Binary Traverasl", gpu, maxInputSize, 0);
-//graph::GPUArray<uint> BTV("Binary Traverasl", gpu, maxInputSize, 0);
-//
-//int cl = 0;
-//int totalElements = 1;
+	//		BT.cdata()[leftIndex].i = leftVal;
+	//		BT.cdata()[leftIndex].l = parent.l;
+	//		BT.cdata()[leftIndex].r = parent.i;
+	//		BTV.cdata()[leftIndex] = B.cdata()[leftVal];
+	//		BT.cdata()[leftIndex].p = i;
 
-//int element0 = maxInputSize / 2;
-//BT.cdata()[0].i = element0;
-//BTV.cdata()[0] = B.cdata()[element0];
-//BT.cdata()[0].l = 0;
-//BT.cdata()[0].r = maxInputSize;
+	//		//right
+	//		int rightIndex = 2 * i + 2; //New Index
+	//		int rightVal = (parent.i + 1 + parent.r) / 2; //PrevIndex
 
-//while (totalElements < maxInputSize)
-//{
-//	int num_elem_lev = pow<int, int>(2, cl);
-//	int levelStartIndex = pow<int, int>(2, cl) - 1;
-//	for (int i = levelStartIndex; i < num_elem_lev + levelStartIndex; i++)
-//	{
-//		Node parent = BT.cdata()[i];
-//		
-//		//left 
-//		int leftIndex = 2 * i + 1; //New Index
-//		int leftVal = (parent.l + parent.i) / 2; //PrevIndex
+	//		BT.cdata()[rightIndex].i = rightVal;
+	//		BT.cdata()[rightIndex].l = parent.i + 1;
+	//		BT.cdata()[rightIndex].r = parent.r;
+	//		BTV.cdata()[rightIndex] = B.cdata()[rightVal];
+	//		BT.cdata()[rightIndex].p = i;
 
-//		BT.cdata()[leftIndex].i = leftVal;
-//		BT.cdata()[leftIndex].l = parent.l;
-//		BT.cdata()[leftIndex].r = parent.i;
-//		BTV.cdata()[leftIndex] = B.cdata()[leftVal];
-//		BT.cdata()[leftIndex].p = i;
+	//		totalElements += 2;
+	//	}
+	//	cl++;
+	//}
 
+	//BTV.switch_to_gpu(0);
 
-//		//right
-//		int rightIndex = 2 * i + 2; //New Index
-//		int rightVal = (parent.i + 1 + parent.r) / 2; //PrevIndex
+	//const auto startBST = stime();
+	//graph::GPUArray<uint> countBST("Test Binary Search Tree search: Out", AllocationTypeEnum::unified, 1, 0);
+	//graph::binary_search_bst_g<uint, 32> << <1, 32 >> > (countBST.gdata(), A.gdata(), inputSize, BTV.gdata(), inputSize);
+	//cudaDeviceSynchronize();
+	//double elapsedBST = elapsedSec(startBST);
+	//printf("BST Elapsed time = %f, Count = %u \n", elapsedBST, countBST.cdata()[0]);
 
-//		BT.cdata()[rightIndex].i = rightVal;
-//		BT.cdata()[rightIndex].l = parent.i + 1;
-//		BT.cdata()[rightIndex].r = parent.r;
-//		BTV.cdata()[rightIndex] = B.cdata()[rightVal];
-//		BT.cdata()[rightIndex].p = i;
+	//BTV.freeCPU();
+	//BTV.freeGPU();
 
-//		totalElements += 2;
-//	}
-//	cl++;
-//}
+	//BT.freeCPU();
+	//BT.freeGPU();
 
-//BTV.switch_to_gpu(0);
-
-//const auto startBST = stime();
-//graph::GPUArray<uint> countBST("Test Binary Search Tree search: Out", AllocationTypeEnum::unified, 1, 0);
-//graph::binary_search_bst_g<uint, 32> << <1, 32 >> > (countBST.gdata(), A.gdata(), inputSize, BTV.gdata(), inputSize);
-//cudaDeviceSynchronize();
-//double elapsedBST = elapsedSec(startBST);
-//printf("BST Elapsed time = %f, Count = %u \n", elapsedBST, countBST.cdata()[0]);
-
-//BTV.freeCPU();
-//BTV.freeGPU();
-
-//BT.freeCPU();
-//BT.freeGPU();
-
-
-////For weighted edges
-////std::vector<WEdgeTy<uint, wtype>> wedges;
-////std::vector<WEdgeTy<uint,wtype>> wfileEdges;
-////while (f.get_weighted_edges(wfileEdges, 10)) {
-////	wedges.insert(wedges.end(), wfileEdges.begin(), wfileEdges.end());
-////}
+	////For weighted edges
+	////std::vector<WEdgeTy<uint, wtype>> wedges;
+	////std::vector<WEdgeTy<uint,wtype>> wfileEdges;
+	////while (f.get_weighted_edges(wfileEdges, 10)) {
+	////	wedges.insert(wedges.end(), wfileEdges.begin(), wfileEdges.end());
+	////}
 
 #pragma endregion
-
-
-
-
 
 	printf("Done ....\n");
 
@@ -948,5 +919,3 @@ int main(int argc, char** argv)
 	//B.freeGPU();
 	return 0;
 }
-
-

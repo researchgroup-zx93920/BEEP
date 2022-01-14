@@ -13,29 +13,64 @@ typedef std::tuple<uint, uint, wtype> WEdge;
 typedef std::vector<Edge> EdgeList;
 typedef std::vector<WEdge> WEdgeList;
 
-template <typename NodeTy> using EdgeTy = std::pair<NodeTy, NodeTy>;
-template <typename NodeTy, typename WeightTy> using WEdgeTy = std::tuple<NodeTy, NodeTy, WeightTy>;
+template <typename NodeTy>
+using EdgeTy = std::pair<NodeTy, NodeTy>;
+template <typename NodeTy, typename WeightTy>
+using WEdgeTy = std::tuple<NodeTy, NodeTy, WeightTy>;
 
-
-#define  BCTYPE bool
+#define BCTYPE bool
 
 #define BITMAP_SCALE_LOG (9)
-#define BITMAP_SCALE (1<<BITMAP_SCALE_LOG)  /*#bits in the first-level bitmap indexed by 1 bit in the second-level bitmap*/
-
+#define BITMAP_SCALE (1 << BITMAP_SCALE_LOG) /*#bits in the first-level bitmap indexed by 1 bit in the second-level bitmap*/
 
 #define __VERBOSE__
+#define __DEBUG__
 //#define __VS__ //visual studio debug
 
-
-
 //Enums
-enum ProcessingElementEnum { Thread, Warp, Block, Grid, WarpShared, Test, Queue, BlockWarp };
-enum AllocationTypeEnum { cpuonly, gpu, unified, zerocopy };
-enum LogPriorityEnum { critical, warn, error, info, debug, none };
-enum OrientGraphByEnum { None, Upper, Lower, Degree, Degeneracy };
-enum ProcessBy { ByNode, ByEdge };
+enum ProcessingElementEnum
+{
+    Thread,
+    Warp,
+    Block,
+    Grid,
+    WarpShared,
+    Test,
+    Queue,
+    BlockWarp
+};
+enum AllocationTypeEnum
+{
+    cpuonly,
+    gpu,
+    unified,
+    zerocopy
+};
+enum LogPriorityEnum
+{
+    critical,
+    warn,
+    error,
+    info,
+    debug,
+    none
+};
+enum OrientGraphByEnum
+{
+    None,
+    Upper,
+    Lower,
+    Degree,
+    Degeneracy
+};
+enum ProcessBy
+{
+    ByNode,
+    ByEdge
+};
 
-enum MAINTASK {
+enum MAINTASK
+{
     CONV_TSV_MTX,
     CONV_MTX_BEL,
     CONV_TSV_BEL,
