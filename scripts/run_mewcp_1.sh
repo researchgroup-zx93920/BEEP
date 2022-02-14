@@ -10,7 +10,7 @@ echo "ProcessBy: $MODE"
 echo "Task: $TASK"
 
 # TEMPLATES=(diamond) # fan4 wheel5 cq6m1 cq6) # cq7 cq8 cq9 cq10) 
-TEMPLATES=(cq4)
+TEMPLATES=(cq5m1)
 # TEMPLATES=(cq5m1 house pyramid fan3)
 #TEMPLATES=(cq6m1)
 #TEMPLATES=(cq7 cq8 cq9 wheel6 wheel7)

@@ -20,12 +20,10 @@
 //freestanding specific
 
 #include "defs.cuh"
-#include "cuda.h" 
+#include "cuda.h"
 #include <cuda_runtime_api.h>
 
-
 #include "../cub/cub.cuh"
-
 
 // #include <simt/cstdint>
 // #include <simt/cstddef>
@@ -39,80 +37,89 @@
 // #include <simt/latch>
 // #include <simt/semaphore>
 
+#define CUDA_RUNTIME(ans)                     \
+	{                                         \
+		gpuAssert((ans), __FILE__, __LINE__); \
+	}
+inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort = false)
+{
 
-
-#define CUDA_RUNTIME(ans) { gpuAssert((ans), __FILE__, __LINE__); }
-inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=false) {
-
-    if(code != cudaSuccess) {
-        fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
-        if (abort) exit(1);
-    }
+	if (code != cudaSuccess)
+	{
+		fprintf(stderr, "GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
+		/*if (abort) */ exit(1);
+	}
 }
 
+#define PRINT_ERROR                                              \
+	do                                                           \
+	{                                                            \
+		fprintf(stderr, "Error at line %d, file %s (%d) [%s]\n", \
+				__LINE__, __FILE__, errno, strerror(errno));     \
+		exit(1);                                                 \
+	} while (0)
 
-#define PRINT_ERROR \
-    do { \
-        fprintf(stderr, "Error at line %d, file %s (%d) [%s]\n", \
-        __LINE__, __FILE__, errno, strerror(errno)); exit(1); \
-    } while(0)
-
-
-static std::chrono::time_point<std::chrono::high_resolution_clock> now() {
-    return std::chrono::high_resolution_clock::now();
+static std::chrono::time_point<std::chrono::high_resolution_clock> now()
+{
+	return std::chrono::high_resolution_clock::now();
 }
 
 static timepoint stime()
 {
-    return std::chrono::system_clock::now();
+	return std::chrono::system_clock::now();
 }
 
 static double elapsedSec(timepoint start)
 {
-    return (std::chrono::system_clock::now() - start).count() / 1e9;
+	return (std::chrono::system_clock::now() - start).count() / 1e9;
 }
 
 /*Device function that returns how many SMs are there in the device/arch - it can be more than the maximum readable SMs*/
-__device__ __forceinline__ unsigned int getnsmid(){
-    unsigned int r;
-    asm("mov.u32 %0, %%nsmid;" : "=r"(r));
-    return r;
+__device__ __forceinline__ unsigned int getnsmid()
+{
+	unsigned int r;
+	asm("mov.u32 %0, %%nsmid;"
+		: "=r"(r));
+	return r;
 }
 
 /*Device function that returns the current SMID of for the block being run*/
-__device__ __forceinline__ unsigned int getsmid(){
-    unsigned int r;
-    asm("mov.u32 %0, %%smid;" : "=r"(r));
-    return r;
+__device__ __forceinline__ unsigned int getsmid()
+{
+	unsigned int r;
+	asm("mov.u32 %0, %%smid;"
+		: "=r"(r));
+	return r;
 }
 
 /*Device function that returns the current warpid of for the block being run*/
-__device__ __forceinline__ unsigned int getwarpid(){
-    unsigned int r;
-    asm("mov.u32 %0, %%warpid;" : "=r"(r));
-    return r;
+__device__ __forceinline__ unsigned int getwarpid()
+{
+	unsigned int r;
+	asm("mov.u32 %0, %%warpid;"
+		: "=r"(r));
+	return r;
 }
 
 /*Device function that returns the current laneid of for the warp in the block being run*/
-__device__ __forceinline__ unsigned int getlaneid(){
-    unsigned int r;
-    asm("mov.u32 %0, %%laneid;" : "=r"(r));
-    return r;
+__device__ __forceinline__ unsigned int getlaneid()
+{
+	unsigned int r;
+	asm("mov.u32 %0, %%laneid;"
+		: "=r"(r));
+	return r;
 }
 
-
-template<typename T>
-__host__ __device__
-void swap_ele(T& a, T& b) {
-    T temp = a;
-    a = b;
-    b = temp;
+template <typename T>
+__host__ __device__ void swap_ele(T &a, T &b)
+{
+	T temp = a;
+	a = b;
+	b = temp;
 }
 
-
-
-template<typename T>
-void MatrixStats(T nnz, T nr, T nc, T* csrRowPointers, T* csrColumns)
+template <typename T>
+void MatrixStats(T nnz, T nr, T nc, T *csrRowPointers, T *csrColumns)
 {
 	std::map<T, T> dictionary;
 
@@ -136,15 +143,15 @@ void MatrixStats(T nnz, T nr, T nc, T* csrRowPointers, T* csrColumns)
 
 		if (dictionary.count(rowCount) < 1)
 			dictionary[rowCount] = 1;
-		else dictionary[rowCount]++;
-
+		else
+			dictionary[rowCount]++;
 
 		if (rowCount == 0)
 			_nr--;
 	}
 
-	typedef typename std::map< T,  T>::iterator it_type;
-	for ( it_type iterator = dictionary.begin(); iterator != dictionary.end(); iterator++) 
+	typedef typename std::map<T, T>::iterator it_type;
+	for (it_type iterator = dictionary.begin(); iterator != dictionary.end(); iterator++)
 	{
 		if (iterator->first == 0)
 			continue;
@@ -183,14 +190,12 @@ void MatrixStats(T nnz, T nr, T nc, T* csrRowPointers, T* csrColumns)
 	double variance = sd / nr;
 	sd = std::sqrt(variance);
 
-
 	printf("%u,%u,%u,%u,%.1f,%.1f,%u,%u,%u,%u,%u\n",
-		nnz, nr, nc, minRow, mean, sd, median, maxRow, countMin, countMedian, countMax);
+		   nnz, nr, nc, minRow, mean, sd, median, maxRow, countMin, countMedian, countMax);
 }
 
-
-template<typename T>
-void PrintMtarixStruct(T nnz, T nr, T nc, T* csrRowPointer, T* csrColumns)
+template <typename T>
+void PrintMtarixStruct(T nnz, T nr, T nc, T *csrRowPointer, T *csrColumns)
 {
 	const int resolution = 10;
 	float st[resolution][resolution];
@@ -229,28 +234,36 @@ void PrintMtarixStruct(T nnz, T nr, T nc, T* csrRowPointer, T* csrColumns)
 				printf("+,");
 			else
 				printf("-,");
-
 		}
 		printf("\n");
 	}
-
 }
 
-template<typename T>
-void quicksort(T* key, T* data, T start, T end) {
-	if ((end - start + 1) > 1) {
+template <typename T>
+void quicksort(T *key, T *data, T start, T end)
+{
+	if ((end - start + 1) > 1)
+	{
 		T left = start, right = end;
 		T pivot = key[right];
-		while (left <= right) {
-			while (key[left] < pivot) {
+		while (left <= right)
+		{
+			while (key[left] < pivot)
+			{
 				left = left + 1;
 			}
-			while (key[right] > pivot) {
+			while (key[right] > pivot)
+			{
 				right = right - 1;
 			}
-			if (left <= right) {
-				T tmpKey = key[left]; key[left] = key[right]; key[right] = tmpKey;
-				T tmpData = data[left]; data[left] = data[right]; data[right] = tmpData;
+			if (left <= right)
+			{
+				T tmpKey = key[left];
+				key[left] = key[right];
+				key[right] = tmpKey;
+				T tmpData = data[left];
+				data[left] = data[right];
+				data[right] = tmpData;
 				left = left + 1;
 				right = right - 1;
 			}
@@ -260,20 +273,28 @@ void quicksort(T* key, T* data, T start, T end) {
 	}
 }
 
-template<typename T>
-void quicksort(T* key, T start, T end) {
-	if ((end - start + 1) > 1) {
+template <typename T>
+void quicksort(T *key, T start, T end)
+{
+	if ((end - start + 1) > 1)
+	{
 		T left = start, right = end;
 		T pivot = key[right];
-		while (left <= right) {
-			while (key[left] < pivot) {
+		while (left <= right)
+		{
+			while (key[left] < pivot)
+			{
 				left = left + 1;
 			}
-			while (key[right] > pivot) {
+			while (key[right] > pivot)
+			{
 				right = right - 1;
 			}
-			if (left <= right) {
-				T tmpKey = key[left]; key[left] = key[right]; key[right] = tmpKey;
+			if (left <= right)
+			{
+				T tmpKey = key[left];
+				key[left] = key[right];
+				key[right] = tmpKey;
 				left = left + 1;
 				right = right - 1;
 			}

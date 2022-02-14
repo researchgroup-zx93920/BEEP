@@ -7,3 +7,4 @@ build/exe/src/main.cu.exe
 build/exe/src/main.cu.o
 .vscode/**
 tests/**
+scripts/racecheck.log
