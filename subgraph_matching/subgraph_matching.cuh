@@ -167,7 +167,7 @@ namespace graph
 
             graph::COOCSRGraph_d<T> *oriented_dataGraph;
             orient_upper_tri(dataGraph, oriented_dataGraph);
-            // print_graph(*oriented_dataGraph);
+            print_graph(*oriented_dataGraph);
             initialize1(*oriented_dataGraph);
             time = p.elapsed();
             Log(info, "Preprocessing time: %f ms", time * 1000);
@@ -637,7 +637,7 @@ namespace graph
         // Log(debug, "Oriented graph Nodes: %u, Edges: %u\n", oriented_dataGraph.numNodes, oriented_dataGraph.numEdges);
         // Initialise Kernel Dims
         const auto block_size_LD = 128; // Block size for low degree nodes
-        const T partitionSize_LD = 32;
+        const T partitionSize_LD = 8;
         const T numPartitions_LD = block_size_LD / partitionSize_LD;
         const auto block_size_HD = 1024; // Block size for high degree nodes
         const T partitionSize_HD = 32;
@@ -645,7 +645,7 @@ namespace graph
         const T bound_LD = 2048;
         const T bound_HD = 32768 + 16384;
         const uint dv = 32;
-
+        Log(debug, "Partition size: %u", partitionSize_LD);
         // CUDA Initialise, gather runtime Info.
         CUDAContext context;
         T num_SMs = context.num_SMs;
@@ -661,7 +661,7 @@ namespace graph
         // GPU Constant memory
         cudaMemcpyToSymbol(KCCOUNT, &(query_sequence->N), sizeof(KCCOUNT));
         cudaMemcpyToSymbol(LUNMAT, &(unmat_level), sizeof(LUNMAT));
-        printf("LUNMAT %d\n", unmat_level);
+        // printf("LUNMAT %d\n", unmat_level);
         cudaMemcpyToSymbol(MAXLEVEL, &max_qDegree, sizeof(MAXLEVEL));
         cudaMemcpyToSymbol(MINLEVEL, &min_qDegree, sizeof(MINLEVEL));
         cudaMemcpyToSymbol(QEDGE, &(query_edges->cdata()[0]), query_edges->N * sizeof(QEDGE[0]));
@@ -873,7 +873,7 @@ namespace graph
         g.rowInd = ri;
         g.colInd = ci;
 
-        // print_graph(g);
+        print_graph(g);
         COOCSRGraph<T> og1;
         graph::CSRCOO<uint> csrcoo;
 

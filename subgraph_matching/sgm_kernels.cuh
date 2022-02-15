@@ -1,6 +1,5 @@
 #pragma once
-#include <thrust/set_operations.h>
-
+// #include <thrust/set_operations.h>
 const uint DEPTH = 10;
 
 __constant__ uint MINLEVEL;
@@ -90,6 +89,7 @@ __device__ __forceinline__ void compute_intersection(
 	T *to, T *cl, T *level_prev_index, T *encode, T *orient_mask)
 {
 	wc = 0;
+	to[threadIdx.x] = 0x00000000;
 	for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 	{
 		to[threadIdx.x] = cl[k] & unset_mask(maskIdx, k);
@@ -108,16 +108,11 @@ __device__ __forceinline__ void compute_intersection(
 			else
 				to[threadIdx.x] &= orient_mask[k];
 		}
-		wc += __popc(to[threadIdx.x]);
-		cl[(lvl - 1) * num_divs_local + k] = to[threadIdx.x];
+		wc += __popc(to[threadIdx.x]);						  //counts number of set bits
+		cl[(lvl - 1) * num_divs_local + k] = to[threadIdx.x]; //saves candidates list in cl
 	}
-	reduce_part<T, CPARTSIZE>(partMask, wc);
-
-	// warpCount += __shfl_down_sync(partMask, warpCount, 16);
-	// warpCount += __shfl_down_sync(partMask, warpCount, 8);
-	// warpCount += __shfl_down_sync(partMask, warpCount, 4);
-	// warpCount += __shfl_down_sync(partMask, warpCount, 2);
-	// warpCount += __shfl_down_sync(partMask, warpCount, 1);
+	reduce_part<T, CPARTSIZE>(partMask, wc); //also does __syncwarp(partMask)
+	__syncwarp(partMask);
 }
 
 template <typename T, uint CPARTSIZE>
@@ -246,8 +241,8 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 	__shared__ uint64 sg_count[numPartitions];
 	__shared__ T l[numPartitions];
 	__shared__ T src, srcStart, srcLen;
-	__shared__ T scratch_space[numPartitions];
-	__shared__ uint64 asym_count[numPartitions];
+	__shared__ T scratch_space[numPartitions];	 //added later
+	__shared__ uint64 asym_count[numPartitions]; //added later
 	__shared__ T num_divs_local, *level_offset, *encode, *orient_mask;
 
 	__shared__ T to[BLOCK_DIM_X], newIndex[numPartitions];
@@ -271,24 +266,38 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 
 			level_offset = &current_level[orient_offset * (numPartitions * MAXLEVEL)];
 			// asym_level = &asymmetric_levelstats[blockOffset * UNDIRECTED_MAXDEG * numPartitions];
+
+			// if (src == 1)
+			// {
+			// 	printf("src: %lu, start pointer: %u, length: %u\n", i, srcStart, srcLen);
+			// }
 		}
 		__syncthreads();
 
 		//Encode
 		T partMask = (1 << CPARTSIZE) - 1;
-		partMask = partMask << ((wx % (32 / CPARTSIZE)) * CPARTSIZE);
+		partMask = partMask << ((wx % (32 / CPARTSIZE)) * CPARTSIZE); //set of 8 set bits for getting candidates
 		for (T j = wx; j < srcLen; j += numPartitions)
 		{
 			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 			{
 				encode[j * num_divs_local + k] = 0x00;
 			}
-			__syncwarp(partMask);
+		}
+		// __syncwarp(partMask);
+		__syncthreads();
+		for (T j = wx; j < srcLen; j += numPartitions)
+		{
+			// if (src == 1 && (j >= 0 && j <= 4))
+			// {
 			graph::warp_sorted_count_and_encode_full<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&o_g.colInd[srcStart], srcLen,
 																						  &o_g.colInd[o_g.rowPtr[o_g.colInd[srcStart + j]]],
 																						  o_g.rowPtr[o_g.colInd[srcStart + j] + 1] - o_g.rowPtr[o_g.colInd[srcStart + j]],
 																						  j, num_divs_local,
 																						  encode);
+			// if (lx == 0)
+			// 	printf("Testing encode: %u, for adjacency of %u\n", encode[j], o_g.colInd[srcStart + j]);
+			// }
 		}
 		__syncthreads(); //Done encoding, has all upper and lower triangular elements..
 
@@ -304,7 +313,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 		}
 		__syncthreads();
 
-		for (T j = wx; j < srcLen; j += numPartitions)
+		for (T j = wx; j < srcLen; j += numPartitions) //each warp processes an edge coming from central node
 		{
 			if (SYMNODE_PTR[2] == 1 && (orient_mask[j / 32] >> (j % 32)) % 2 == 0) //if eliminated by orienting due to being symmetric to central node
 				continue;														   // last bit zero hence %2 is zero
@@ -322,12 +331,14 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 
 				l[wx] = 3; //i.e. at level 2	l[wx] is +1 at all places
 				sg_count[wx] = 0;
-			}
-			if (lx == 1)
-			{
 				level_prev_index[wx][1] = j + 1;
 			}
-			__syncwarp(partMask);
+			// if (lx == 1)
+			// {
+			// 	level_prev_index[wx][1] = j + 1;
+			// }
+			// __syncwarp(partMask);
+
 			// get warp count ??
 			uint64 warpCount = 0; //level 2 reached (base level being 0)
 			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
@@ -380,9 +391,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			{
 				if (l[wx] == KCCOUNT - LUNMAT) //If reached last level
 				{
-					// printf("Enumeration: %u, %u, %u, %u, %u", src, g.colInd[srcStart + level_prev_index[wx][1] - 1], g.colInd[srcStart + level_prev_index[wx][2] - 1],
-					// 	   g.colInd[srcStart + level_prev_index[wx][3] - 1], g.colInd[srcStart + level_prev_index[wx][4] - 1]);
-					sg_count[wx] += warpCount;
+					sg_count[wx] += warpCount; //code reaches here only if counting triangles
 				}
 				else
 				{
@@ -390,11 +399,13 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 					level_index[wx][l[wx] - 3] = 0;			//This index to iterated from 0 to warpCount
 				}
 			}
-			__syncwarp(partMask);
-			while (level_count[wx][l[wx] - 3] > level_index[wx][l[wx] - 3]) //limits work per warp.. [0 to 32*32]
+			// __syncwarp(partMask);
+			// if (src == 1 && wx == 0 && lx == 0 && j == 0)
+			// {
+			// 	printf("j: %u, level count: %u\n", j, level_count[wx][l[wx] - 3]);
+			// }
+			while (level_index[wx][l[wx] - 3] < level_count[wx][l[wx] - 3]) //limits work per warp.. [0 to 32*32]
 			{
-				//First Index
-				__syncwarp(partMask);
 				if (lx == 0)
 				{
 					scratch_space[wx] = 0;
@@ -411,37 +422,71 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 						newIndex[wx] = __ffs(from[maskBlock] & maskIndex);
 					}
 					newIndex[wx] = 32 * maskBlock + newIndex[wx] - 1; //actual new index
+					// if (src == 1 && wx == 0 && j == 0 && l[wx] == 3)
+					// {
+					// 	printf("src: %u, wx: %u, index: %u\n", src, wx, o_g.colInd[srcStart + newIndex[wx]]);
+					// }
 
 					level_prev_index[wx][l[wx] - 1] = newIndex[wx] + 1; //level prev index is numbered from 1
 					level_index[wx][l[wx] - 3]++;
 				}
 				__syncwarp(partMask);
 
-				//Intersect
-				// if (l[wx] <= KCCOUNT - 2) //all levels symmetric to to central node (use oriented graph encoded matrix)
-
-				compute_intersection<T, CPARTSIZE, true>(
-					warpCount, lx, partMask, num_divs_local, newIndex[wx], l[wx], to, cl, level_prev_index[wx], encode, orient_mask);
-				// __syncwarp(partMask);
-				// if (l[wx] == KCCOUNT - 2) //takes care of asymmetric nodes for both levels
+				// compute_intersection<T, CPARTSIZE, true>(
+				// 	warpCount, lx, partMask, num_divs_local, newIndex[wx], l[wx], to, cl, level_prev_index[wx], encode, orient_mask);
+				// if (src == 1 && wx == 0 && j == 0 && l[wx] == 3 && o_g.colInd[srcStart + newIndex[wx]] == 6)
 				// {
-				// 	//use binary search on original graph till src and use compute_intersection for rest
-				// 	if (lx == 0)
-				// 		asym_count[wx] = 0;
-				// 	// if (src == 11 && wx == 1)
-				// 	// {
-				// 	ptr_intersection<T, CPARTSIZE, true>(
-				// 		warpCount, asym_count[wx], lx, wx, partMask, src, l[wx], asym_level, &asym_level[UNDIRECTED_MAXDEG],
-				// 		&scratch_space[wx], level_prev_index[wx], g, o_g);
-
-				// 	if (lx == 0)
-				// 	{
-				// 		printf("\033[0;33m warp: %d, stacktrace: %u, %u, %u, asym count: %lu\n\033[0;37m", wx, src, o_g.colInd[srcStart + level_prev_index[wx][1] - 1],
-				// 			   o_g.colInd[srcStart + level_prev_index[wx][2] - 1], asym_count[wx]);
-				// 		sg_count[wx] += asym_count[wx];
-				// 	}
-				// 	// }
+				warpCount = 0;
+				to[threadIdx.x] = 0;
+				for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+				{
+					to[threadIdx.x] = cl[k] & unset_mask(newIndex[wx], k);
+					//compute intersection
+					for (T q_idx = QEDGE_PTR[l[wx]] + 1; q_idx < QEDGE_PTR[l[wx] + 1]; q_idx++)
+					{
+						// printf("query index: %u, Testing Encoding: %u\n", QEDGE[q_idx], encode[(level_prev_index[wx][QEDGE[q_idx]] - 1) * num_divs_local + k]);
+						to[threadIdx.x] &= encode[(level_prev_index[wx][QEDGE[q_idx]] - 1) * num_divs_local + k];
+					}
+					//remove Redundancies
+					for (T sym_idx = SYMNODE_PTR[l[wx]]; sym_idx < SYMNODE_PTR[l[wx] + 1]; sym_idx++)
+					{
+						// if (!MAT && SYMNODE[sym_idx] == lvl - 1)
+						// 	continue;
+						if (SYMNODE[sym_idx] > 0)
+							to[threadIdx.x] &= ~(cl[(SYMNODE[sym_idx] - 1) * num_divs_local + k] & get_mask(level_prev_index[wx][SYMNODE[sym_idx]] - 1, k));
+						else
+							to[threadIdx.x] &= orient_mask[k];
+					}
+					warpCount += __popc(to[threadIdx.x]);
+					cl[(l[wx] - 1) * num_divs_local + k] = to[threadIdx.x];
+				}
+				reduce_part<T, CPARTSIZE>(partMask, warpCount);
+				// __syncwarp(partMask);
+				// if (lx == 0)
+				// {
+				// 	printf("src: %u, wx: %u, index: %u, count %lu\n", src, wx, o_g.colInd[srcStart + newIndex[wx]], warpCount);
 				// }
+				// }
+
+				if (l[wx] + 1 == KCCOUNT - 1) //takes care of asymmetric nodes for both levels
+				{
+					//use binary search on original graph till src and use compute_intersection for rest
+					if (lx == 0)
+						asym_count[wx] = 0;
+					// if (src == 11 && wx == 1)
+					// {
+					ptr_intersection<T, CPARTSIZE, true>(
+						warpCount, asym_count[wx], lx, wx, partMask, src, l[wx], asym_level, &asym_level[UNDIRECTED_MAXDEG],
+						&scratch_space[wx], level_prev_index[wx], g, o_g);
+
+					if (lx == 0)
+					{
+						// 	printf("\033[0;33m warp: %d, stacktrace: %u, %u, %u, asym_count: %u, warp_count: %lu, formula count: %lu\n\033[0;37m", wx, src, o_g.colInd[srcStart + level_prev_index[wx][1] - 1],
+						// 		   o_g.colInd[srcStart + level_prev_index[wx][2] - 1], scratch_space[wx], warpCount, asym_count[wx]);
+						sg_count[wx] += asym_count[wx];
+					}
+					// }
+				}
 
 				if (l[wx] + 1 == KCCOUNT - LUNMAT && LUNMAT == 1)
 				{
@@ -473,8 +518,8 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 				{
 					if (l[wx] + 1 == KCCOUNT - LUNMAT) //reached last level
 					{
-						printf("Enumeration: %u, %u, %u, %u, count %lu\n", src, g.colInd[srcStart + level_prev_index[wx][1] - 1], g.colInd[srcStart + level_prev_index[wx][2] - 1],
-							   g.colInd[srcStart + level_prev_index[wx][3] - 1], warpCount /*, g.colInd[srcStart + level_prev_index[wx][4] - 1]*/);
+						// printf("Enumeration: %u, %u, %u, %u, count %lu\n", src, g.colInd[srcStart + level_prev_index[wx][1] - 1], g.colInd[srcStart + level_prev_index[wx][2] - 1],
+						// 	   g.colInd[srcStart + level_prev_index[wx][3] - 1], warpCount /*, g.colInd[srcStart + level_prev_index[wx][4] - 1]*/);
 						sg_count[wx] += warpCount;
 					}
 					else if (l[wx] + 1 < KCCOUNT - LUNMAT) //Not at last level yet
@@ -501,7 +546,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			if (lx == 0)
 			{
 				atomicAdd(counter, sg_count[wx]);
-				atomicAdd(&cpn[src], sg_count[wx]);
+				// atomicAdd(&cpn[src], sg_count[wx]);
 			}
 			__syncwarp(partMask);
 		}
