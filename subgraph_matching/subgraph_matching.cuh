@@ -167,7 +167,7 @@ namespace graph
 
             graph::COOCSRGraph_d<T> *oriented_dataGraph;
             orient_upper_tri(dataGraph, oriented_dataGraph);
-            print_graph(*oriented_dataGraph);
+            // print_graph(*oriented_dataGraph);
             initialize1(*oriented_dataGraph);
             time = p.elapsed();
             Log(info, "Preprocessing time: %f ms", time * 1000);
@@ -873,7 +873,7 @@ namespace graph
         g.rowInd = ri;
         g.colInd = ci;
 
-        print_graph(g);
+        // print_graph(g);
         COOCSRGraph<T> og1;
         graph::CSRCOO<uint> csrcoo;
 

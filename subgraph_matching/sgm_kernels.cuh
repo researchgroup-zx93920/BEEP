@@ -1,5 +1,4 @@
 #pragma once
-// #include <thrust/set_operations.h>
 const uint DEPTH = 10;
 
 __constant__ uint MINLEVEL;
@@ -326,7 +325,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 				level_index[wx][k] = 0;
 				level_prev_index[wx][k] = 0;
 			}
-			if (lx == 0)
+			if (lx == 1)
 			{
 
 				l[wx] = 3; //i.e. at level 2	l[wx] is +1 at all places
@@ -337,7 +336,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			// {
 			// 	level_prev_index[wx][1] = j + 1;
 			// }
-			// __syncwarp(partMask);
+			__syncwarp(partMask);
 
 			// get warp count ??
 			uint64 warpCount = 0; //level 2 reached (base level being 0)
@@ -399,13 +398,14 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 					level_index[wx][l[wx] - 3] = 0;			//This index to iterated from 0 to warpCount
 				}
 			}
-			// __syncwarp(partMask);
+			__syncwarp(partMask);
 			// if (src == 1 && wx == 0 && lx == 0 && j == 0)
 			// {
 			// 	printf("j: %u, level count: %u\n", j, level_count[wx][l[wx] - 3]);
 			// }
 			while (level_index[wx][l[wx] - 3] < level_count[wx][l[wx] - 3]) //limits work per warp.. [0 to 32*32]
 			{
+				__syncwarp(partMask);
 				if (lx == 0)
 				{
 					scratch_space[wx] = 0;
