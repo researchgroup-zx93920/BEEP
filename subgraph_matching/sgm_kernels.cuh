@@ -199,11 +199,20 @@ __device__ __forceinline__ void ptr_intersection(
 			intersect_adj<T, CPARTSIZE>(scratchpad, srcLen, &g.colInd[src2start], src2Len, fairpad, scratch, partMask, src, lx);
 		}
 		__syncwarp(partMask);
+		// if (lx == 0)
+		// 	printf("level index: %u, count %u\n", QEDGE[q_idx], scratch[0]);
+		for (T k = lx; k < srcLen; k++)
+		{
+			if (scratchpad[k] > src)
+				break;
+			scratchpad[k] = 0XFFFFFFFF;
+		}
+		// __syncwarp(partMask);
 	}
 	for (T k = lx; k < srcLen; k += CPARTSIZE)
 	{
 		fairpad[k] = 0XFFFFFFFF;
-		scratchpad[k] = 0XFFFFFFFF;
+		// scratchpad[k] = 0XFFFFFFFF;
 	}
 
 	// if (blockIdx.x == 5 && lx == 0 && wx == 0)
@@ -473,7 +482,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 					//use binary search on original graph till src and use compute_intersection for rest
 					if (lx == 0)
 						asym_count[wx] = 0;
-					// if (src == 11 && wx == 1)
+					// if (src == 2 && wx == 1)
 					// {
 					ptr_intersection<T, CPARTSIZE, true>(
 						warpCount, asym_count[wx], lx, wx, partMask, src, l[wx], asym_level, &asym_level[UNDIRECTED_MAXDEG],
@@ -481,8 +490,8 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 
 					if (lx == 0)
 					{
-						// 	printf("\033[0;33m warp: %d, stacktrace: %u, %u, %u, asym_count: %u, warp_count: %lu, formula count: %lu\n\033[0;37m", wx, src, o_g.colInd[srcStart + level_prev_index[wx][1] - 1],
-						// 		   o_g.colInd[srcStart + level_prev_index[wx][2] - 1], scratch_space[wx], warpCount, asym_count[wx]);
+						// printf("\033[0;33m warp: %d, stacktrace: %u, %u, %u, %u asym_count: %u, warp_count: %lu, formula count: %lu\n\033[0;37m", wx, src, o_g.colInd[srcStart + level_prev_index[wx][1] - 1],
+						// 	   o_g.colInd[srcStart + level_prev_index[wx][2] - 1], o_g.colInd[srcStart + level_prev_index[wx][3] - 1], scratch_space[wx], warpCount, asym_count[wx]);
 						sg_count[wx] += asym_count[wx];
 					}
 					// }
