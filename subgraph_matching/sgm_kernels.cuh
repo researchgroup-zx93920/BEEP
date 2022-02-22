@@ -211,6 +211,8 @@ __device__ __forceinline__ void ptr_intersection(
 	}
 	for (T k = lx; k < srcLen; k += CPARTSIZE)
 	{
+		if (fairpad[k] > src)
+			break;
 		fairpad[k] = 0XFFFFFFFF;
 		// scratchpad[k] = 0XFFFFFFFF;
 	}
