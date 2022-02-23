@@ -44,7 +44,8 @@ enum AllocationTypeEnum
     cpuonly,
     gpu,
     unified,
-    zerocopy
+    zerocopy,
+    noalloc
 };
 enum LogPriorityEnum
 {
@@ -68,6 +69,11 @@ enum ProcessBy
     ByNode,
     ByEdge
 };
+enum KCAlgoEnum
+{
+    GraphOrient,
+    Pivoting
+};
 
 enum MAINTASK
 {
@@ -81,8 +87,9 @@ enum MAINTASK
     KCORE,
     KTRUSS,
     KCLIQUE,
-    CROSSDECOMP,
     GRAPH_MATCH,
-    GRAPH_COUNT
-
+    GRAPH_COUNT,
+    KCLIQUE_LOCAL,
+    MAXIMAL_CLIQUE,
+    CROSSDECOMP
 };

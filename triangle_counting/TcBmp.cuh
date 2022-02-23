@@ -668,7 +668,7 @@ namespace graph {
   
 
 
-        void bmpConstruct(graph::COOCSRGraph_d<T> g, AllocationTypeEnum at)
+        void bmpConstruct(graph::COOCSRGraph_d<T> g, AllocationTypeEnum at=unified)
         {
             
             Timer t;

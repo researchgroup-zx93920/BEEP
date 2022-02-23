@@ -476,20 +476,17 @@ namespace graph
         size_t qSize = (by_ == ByEdge) ? dataGraph.numEdges : dataGraph.numNodes;
         bucket_q.Create(unified, qSize, dev_);
         current_q.Create(unified, qSize, dev_);
-
         asc.initialize("Identity array asc", unified, qSize, dev_);
         execKernel(init_asc, (qSize + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, dev_, false,
                    asc.gdata(), qSize);
 
         CUDA_RUNTIME(cudaGetLastError());
         cudaDeviceSynchronize();
-
         // Compute Max Degree
         // nodeDegree.initialize("Edge Support", unified, dataGraph.numNodes, dev_);
         // uint dimGridNodes = (dataGraph.numNodes + block_size - 1) / block_size;
         // execKernel((getNodeDegree_kernel<T, block_size>), dimGridNodes, block_size, dev_, false,
         //            nodeDegree.gdata(), dataGraph, max_dDegree.gdata());
-
         nodeDegree.initialize("Edge Support", unified, dataGraph.numNodes, dev_);
         uint dimGridNodes = (dataGraph.numNodes + block_size - 1) / block_size;
         execKernel((getNodeDegree_kernel<T, block_size>), dimGridNodes, block_size, dev_, false,
@@ -582,6 +579,7 @@ namespace graph
             new_ptr.gdata()[dataGraph.numNodes] = total;
 
             // Select marked edges from ColInd
+            printf("Total value %u\n", total);
             new_adj.initialize("New column index", unified, total, dev_);
             new_row.initialize("New row index", unified, total, dev_);
             if (dataGraph.numEdges < INT_MAX)

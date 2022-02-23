@@ -701,8 +701,8 @@ kernel_binary_block_pe_level_next(
     const size_t numEdges,
     int level, bool* processed, PeelType* edgeSupport,
     graph::GraphQueue_d<T, bool> current,
-    graph::GraphQueue_d<T, bool> next,
-    graph::GraphQueue_d<T, bool> bucket, int bucket_level_end_
+    graph::GraphQueue_d<T, bool>& next,
+    graph::GraphQueue_d<T, bool>& bucket, int bucket_level_end_
 )
 {
 
@@ -1308,14 +1308,11 @@ namespace graph {
             T* ri = g.rowInd;
             T* ci = g.colInd;
 
-            const T dimGrid = (current.count.gdata()[0] - edgeOffset + (dimBlock)-1) / (dimBlock);
-            const T dimGridWarp = (32 * current.count.gdata()[0] + (dimBlock)-1) / (dimBlock);
-            const T dimGridBlock = current.count.gdata()[0]; //(dimBlock * curr_cnt + (dimBlock)-1) / (dimBlock);
+
+            const T dimGrid = (current.count.getSingle(0) - edgeOffset + (dimBlock)-1) / (dimBlock);
+            const T dimGridWarp = (32 * current.count.getSingle(0) + (dimBlock)-1) / (dimBlock);
+            const T dimGridBlock = current.count.getSingle(0); //(dimBlock * curr_cnt + (dimBlock)-1) / (dimBlock);
             CUDA_RUNTIME(cudaSetDevice(TcBase<T>::dev_));
-
-
-
-
 
             //CUDA_RUNTIME(cudaEventRecord(TcBase<T>::kernelStart_, TcBase<T>::stream_));
             if (kernelType == ProcessingElementEnum::Thread)

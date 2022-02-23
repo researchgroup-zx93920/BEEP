@@ -46,8 +46,8 @@ namespace graph
         #ifdef LEGACY_SCAN
         /*filter and get the bool vector*/
         long grid_size = (edge_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        execKernel(filter, grid_size, BLOCK_SIZE, timer, false, EdgeSupport, edge_num, inCurr, level);
-        curr_cnt = CUBSelect(asc, curr, inCurr, edge_num, timer));
+        execKernel(filter, grid_size, BLOCK_SIZE, deviceId, false, EdgeSupport, edge_num, inCurr, level);
+        curr_cnt = CUBSelect(asc, curr, inCurr, edge_num, deviceId));
         #else
         if (level == bucket_level_end_) 
         {
@@ -363,7 +363,7 @@ namespace graph
         execKernelDynamicAllocation(
             bmp_update_next,
             g_cuda.n, t_dimension,
-            num_words_bmp_idx * sizeof(uint32_t), time_stat, true,
+            num_words_bmp_idx * sizeof(uint32_t), deviceId, true,
             g_cuda.num_edges, g_cuda.adj, d_bitmaps, d_bitmap_states,
             vertex_count, conc_blocks_per_SM, g_cuda.eid, EdgeSupport,
             num_words_bmp, num_words_bmp_idx,
@@ -391,21 +391,21 @@ namespace graph
         uint32_t edge_num = m / 2;
 
         // 2nd: Processed.
-        processed.initialize("Processed?", AllocationTypeEnum::gpu, edge_num, 0);
+        processed.initialize("Processed?", AllocationTypeEnum::gpu, edge_num, deviceId);
 
         // 3rd: Queue Related.
        
-        next_cnt.initialize("Next Count", AllocationTypeEnum::unified, 1, 0);
-        curr.initialize("Curr", AllocationTypeEnum::gpu, edge_num, 0);
+        next_cnt.initialize("Next Count", AllocationTypeEnum::unified, 1, deviceId);
+        curr.initialize("Curr", AllocationTypeEnum::gpu, edge_num, deviceId);
 
-        next.initialize("Next", AllocationTypeEnum::gpu, edge_num, 0);
-        inCurr.initialize("In Curr", AllocationTypeEnum::gpu, edge_num, 0);
-        inNext.initialize("in Next", AllocationTypeEnum::gpu, edge_num, 0);
+        next.initialize("Next", AllocationTypeEnum::gpu, edge_num, deviceId);
+        inCurr.initialize("In Curr", AllocationTypeEnum::gpu, edge_num, deviceId);
+        inNext.initialize("in Next", AllocationTypeEnum::gpu, edge_num, deviceId);
 
         // 4th: Keep the edge offset mapping.
         long grid_size = (edge_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
        
-        edge_off_origin.initialize("Edge off Origin", AllocationTypeEnum::gpu, edge_num, 0);
+        edge_off_origin.initialize("Edge off Origin", AllocationTypeEnum::gpu, edge_num, deviceId);
 
         if (edge_off_origin_cpu != nullptr) {
             //cudaMemcpy(edge_off_origin, edge_off_origin_cpu, sizeof(uint) * edge_num, cudaMemcpyHostToDevice);
@@ -415,17 +415,17 @@ namespace graph
         }
         // 5th: Introduce identity_arr_asc for the CUB Select invocations.
        
-        identity_arr_asc.initialize("Identity Array Asc", AllocationTypeEnum::gpu, edge_num, 0);
+        identity_arr_asc.initialize("Identity Array Asc", AllocationTypeEnum::gpu, edge_num, deviceId);
 
         execKernel(init_asc, grid_size, BLOCK_SIZE, deviceId, false, identity_arr_asc.gdata(), edge_num);
     }
 
-    void PrepareBucket(GPUArray<InBucketWinType>& in_bucket_window_,
+    void PrepareBucket(int deviceId, GPUArray<InBucketWinType>& in_bucket_window_,
         GPUArray<int>& bucket_buf_, GPUArray<int>& window_bucket_buf_size_, int todo)
     {
-        in_bucket_window_.initialize("In bucket window", gpu, (todo + sizeof(long long)), 0);
-        bucket_buf_.initialize("Bucket Buffer", gpu, todo, 0);
-        window_bucket_buf_size_.initialize("Window Bucket Buffer Size", unified, 1, 0);
+        in_bucket_window_.initialize("In bucket window", gpu, (todo + sizeof(long long)), deviceId);
+        bucket_buf_.initialize("Bucket Buffer", gpu, todo, deviceId);
+        window_bucket_buf_size_.initialize("Window Bucket Buffer Size", unified, 1, deviceId);
     }
 
     void PKT_cuda(int deviceId,
@@ -447,7 +447,7 @@ namespace graph
         GPUArray<bool> processed;
         GPUArray<uint> edge_off_origin, identity_arr_asc;
 
-        curr_cnt_ptr.initialize("Curr Count Pointer", AllocationTypeEnum::unified, 1, 0);
+        curr_cnt_ptr.initialize("Curr Count Pointer", AllocationTypeEnum::unified, 1, deviceId);
         int*& curr_cnt = curr_cnt_ptr.gdata();
 
         PrepareCSRELEidQueues(deviceId, n, m,
@@ -478,7 +478,7 @@ namespace graph
         GPUArray<int> window_bucket_buf_size_; //should be uint* only
 
         #ifndef LEGACY_SCAN
-        PrepareBucket(in_bucket_window_, bucket_buf_, window_bucket_buf_size_, edge_num);
+        PrepareBucket(deviceId, in_bucket_window_, bucket_buf_, window_bucket_buf_size_, edge_num);
         #endif
 
         // 3rd: Init Triangle-Counting-Based Support Update Data Structures (BMPs and BSRs).
@@ -529,7 +529,7 @@ namespace graph
                 identity_arr_asc = nullptr;
                 ZLCudaMalloc(&identity_arr_asc, sizeof(uint) * edge_num, mem_stat); //now the edge_num is changed.
                 auto grid_size = (edge_num + BLOCK_SIZE - 1) / BLOCK_SIZE;
-                execKernel(init_asc, grid_size, BLOCK_SIZE, time_stat, false, identity_arr_asc, edge_num);
+                execKernel(init_asc, grid_size, BLOCK_SIZE, deviceId, false, identity_arr_asc, edge_num);
                 #endif
                 shrink_first_time = false;
                 Log(LogPriorityEnum::debug, "Shrink graph finished");
@@ -574,13 +574,14 @@ namespace graph
                 if (level == 0) {
                     PKT_LevelZeroProcess(deviceId, curr, *curr_cnt, inCurr, processed);
                 }
-                else {
+                else 
+                {
                     size_t task_size = *curr_cnt * (size_t)(level + 1);
                     size_t left_edge_size = todo;
                     double estimated_tc_time = left_edge_size / (m / 2.0) * tc_time + penalty_tc_time;
                     double estimated_process_throughput = 4.0 * pow(10, 9);
                     double estimated_peel_time = task_size / estimated_process_throughput;
-                    if (estimated_tc_time > estimated_peel_time) 
+                   if (estimated_tc_time > estimated_peel_time) 
                     {
                         //                if (true) {
                         PKT_SubLevelProcess(deviceId, bmp, edge_off_origin,
@@ -591,7 +592,8 @@ namespace graph
                             processed,
                             in_bucket_window_, bucket_buf_, window_bucket_buf_size_.gdata(), bucket_level_end_);
                     }
-                    else {
+                    else 
+                    {
                         shrink_first_time = false;
                         tc_timer.reset();
                         const uint32_t elem_bits = sizeof(uint32_t) * 8; /*#bits in a bitmap element*/
@@ -635,7 +637,6 @@ namespace graph
 
         completeTime = completeTimer.elapsed();
 
-//
           cudaDeviceSynchronize();
           processed.freeGPU();
           next_cnt.freeGPU();

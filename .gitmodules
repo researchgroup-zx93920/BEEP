@@ -1,3 +1,6 @@
 [submodule "freestanding"]
 	path = freestanding
 	url = https://github.com/ogiroux/freestanding
+[submodule "cub"]
+	path = cub
+	url = git@github.com:NVlabs/cub.git

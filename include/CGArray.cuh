@@ -36,6 +36,10 @@ namespace graph
 
 			switch (at)
 			{
+			case cpuonly:
+				cpu_data = (T *)malloc(size * sizeof(T));
+				break;
+
 			case gpu:
 				cpu_data = (T *)malloc(size * sizeof(T));
 				CUDA_RUNTIME(cudaMalloc(&gpu_data, size * sizeof(T)));
@@ -94,6 +98,7 @@ namespace graph
 			{
 				freed = true;
 				CUDA_RUNTIME(cudaSetDevice(_deviceId));
+				// if (_at == AllocationTypeEnum::gpu || _at == AllocationTypeEnum::unified)
 				CUDA_RUNTIME(cudaFree(gpu_data));
 				CUDA_RUNTIME(cudaStreamDestroy(_stream));
 				N = 0;
@@ -121,6 +126,12 @@ namespace graph
 				Log(LogPriorityEnum::critical, "At allocate_cpu: Only CPU allocation\n");
 			}
 		}
+
+		void setAlloc(AllocationTypeEnum at)
+		{
+			_at = at;
+		}
+
 		void switch_to_gpu(int devId = 0, size_t size = 0)
 		{
 			if (_at == AllocationTypeEnum::cpuonly)
@@ -248,9 +259,9 @@ namespace graph
 			return val;
 		}
 
-		T *copytocpu(int startIndex, uint count = 0, bool newAlloc = false)
+		T *copytocpu(uint64 startIndex, size_t count = 0, bool newAlloc = false)
 		{
-			int c = count == 0 ? N : count;
+			size_t c = count == 0 ? N : count;
 
 			if (_at == AllocationTypeEnum::unified)
 				return &(gpu_data[startIndex]);

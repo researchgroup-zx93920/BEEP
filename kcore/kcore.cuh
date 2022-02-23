@@ -347,20 +347,21 @@ namespace graph
 				execKernel((filter_window<T, PeelT>), grid_size, BLOCK_SIZE, dev_, false,
 					nodeDegree.gdata(), node_num, bucket.mark.gdata(), level, bucket_level_end_ + LEVEL_SKIP_SIZE);
 
-				bucket.count.gdata()[0] = CUBSelect(asc.gdata(), bucket.queue.gdata(), bucket.mark.gdata(), node_num, dev_);
+				T val = CUBSelect(asc.gdata(), bucket.queue.gdata(), bucket.mark.gdata(), node_num, dev_);
+				bucket.count.setSingle(0, val, true);
 				bucket_level_end_ += LEVEL_SKIP_SIZE;
 			}
 			// SCAN the window.
-			if (bucket.count.gdata()[0] != 0)
+			if (bucket.count.getSingle(0) != 0)
 			{
-				current.count.gdata()[0] = 0;
-				long grid_size = (bucket.count.gdata()[0] + BLOCK_SIZE - 1) / BLOCK_SIZE;
+				current.count.setSingle(0,0,true);
+				long grid_size = (bucket.count.getSingle(0) + BLOCK_SIZE - 1) / BLOCK_SIZE;
 				execKernel((filter_with_random_append<T, PeelT>), grid_size, BLOCK_SIZE, dev_, false,
-					bucket.queue.gdata(), bucket.count.gdata()[0], nodeDegree.gdata(), current.mark.gdata(), current.queue.gdata(), &(current.count.gdata()[0]), level, 1);
+					bucket.queue.gdata(), bucket.count.getSingle(0), nodeDegree.gdata(), current.mark.gdata(), current.queue.gdata(), &(current.count.gdata()[0]), level, 1);
 			}
 			else
 			{
-				current.count.gdata()[0] = 0;
+				current.count.setSingle(0,0,true);
 			}
 			//Log(LogPriorityEnum::info, "Level: %d, curr: %d/%d", level, current.count.gdata()[0], bucket.count.gdata()[0]);
 		}
@@ -369,7 +370,7 @@ namespace graph
 		void AscendingGpu(int n, GPUArray<T>& identity_arr_asc)
 		{
 			long grid_size = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
-			identity_arr_asc.initialize("Identity Array Asc", AllocationTypeEnum::unified, n, dev_);
+			identity_arr_asc.initialize("Identity Array Asc", gpu, n, dev_);
 			execKernel(init_asc, grid_size, BLOCK_SIZE, dev_, false, identity_arr_asc.gdata(), n);
 		}
 
@@ -437,7 +438,7 @@ namespace graph
 			const size_t nodeOffset = 0, const size_t edgeOffset = 0)
 		{
 			const int dimBlock = 256;
-			nodeDegree.initialize("Node Degree", unified, g.numNodes, dev_);
+			nodeDegree.initialize("Node Degree", gpu, g.numNodes, dev_);
 			uint dimGridNodes = (g.numNodes + dimBlock - 1) / dimBlock;
 			execKernel(getNodeDegree_kernel<T>, dimGridNodes, dimBlock, dev_, false, nodeDegree.gdata(), g);
 
@@ -455,23 +456,24 @@ namespace graph
 			int bucket_level_end_ = level;
 			//Lets apply queues and buckets
 			graph::GraphQueue<T, bool> bucket_q;
-			bucket_q.Create(unified, g.numNodes, dev_);
+			bucket_q.Create(gpu, g.numNodes, dev_);
 
 			graph::GraphQueue<T, bool> current_q;
-			current_q.Create(unified, g.numNodes, dev_);
+			current_q.Create(gpu, g.numNodes, dev_);
 
 			graph::GraphQueue<T, bool> next_q;
-			next_q.Create(unified, g.numNodes, dev_);
+			next_q.Create(gpu, g.numNodes, dev_);
+			next_q.mark.setAll(false, true);
 
 			GPUArray<T> identity_arr_asc;
 			AscendingGpu(g.numNodes, identity_arr_asc);
 
 
-			processed.initialize("is Deleted (Processed)", unified, g.numNodes, dev_);
-			processed.setAll(false, false);
+			// processed.initialize("is Deleted (Processed)", gpu, g.numNodes, dev_);
+			// processed.setAll(false, false);
 
 
-			nodePriority.initialize("Edge Support", unified, g.numNodes, dev_);
+			nodePriority.initialize("Edge Support", gpu, g.numNodes, dev_);
 			nodePriority.setAll(g.numEdges, false);
 
 			uint numDeleted_l = 0;
@@ -493,26 +495,26 @@ namespace graph
 				bucket_scan(nodeDegree, todo_original, level, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
 
 				int iterations = 0;
-				while (current_q.count.gdata()[0] > 0)
+				while (current_q.count.getSingle(0) > 0)
 				{
-					todo -= current_q.count.gdata()[0];
+					todo -= current_q.count.getSingle(0);
 					if (0 == todo) {
 						break;
 					}
 
-					next_q.count.gdata()[0] = 0;
+					next_q.count.setSingle(0,0,true);
 					if (level == 0)
 					{
 						auto block_size = 256;
-						auto grid_size = (current_q.count.gdata()[0] + block_size - 1) / block_size;
+						auto grid_size = (current_q.count.getSingle(0) + block_size - 1) / block_size;
 						execKernel((update_priority<T, PeelT>), grid_size, block_size, dev_, false, current_q.device_queue->gdata()[0], priority, nodePriority.gdata());
 					}
 					else
 					{
 						auto block_size = 256;
-						auto grid_size = (current_q.count.gdata()[0] + block_size - 1) / block_size;
-						auto grid_warp_size = (32 * current_q.count.gdata()[0] + block_size - 1) / block_size;
-						auto grid_block_size = current_q.count.gdata()[0];
+						auto grid_size = (current_q.count.getSingle(0) + block_size - 1) / block_size;
+						auto grid_warp_size = (32 * current_q.count.getSingle(0) + block_size - 1) / block_size;
+						auto grid_block_size = current_q.count.getSingle(0);
 						// if (level < 4)
 						// {
 						// 	execKernel((kernel_thread_level_next<T>), grid_size, block_size, dev_, false,
@@ -561,7 +563,7 @@ namespace graph
 					}
 
 					numDeleted_l = g.numNodes - todo;
-
+					//printf("Level = %d, Itereation = %d, Current = %u, Next = %u\n", level, iterations, current_q.count.getSingle(0), next_q.count.getSingle(0));
 					swap(current_q, next_q);
 					iterations++;
 					priority++;
@@ -570,16 +572,20 @@ namespace graph
 				}
 				//printf("Level %d took %d iterations \n", level, iterations);
 				level ++;
+
+				// if(level == 4)
+				// 	break;
 			}
 
 			processed.freeGPU();
 			current_q.free();
 			next_q.free();
 			bucket_q.free();
+			identity_arr_asc.freeGPU();
 
 			k = level;
 
-			printf("Max Core = %d\n", k - 1);
+			//printf("Max Core = %d\n", k - 1);
 		}
 
 		uint findKtrussIncremental_sync(int kmin, int kmax, TcBase<T>* tcCounter, EidGraph_d<T>& g, int* reverseIndex, EncodeDataType* bitMap, const size_t nodeOffset = 0, const size_t edgeOffset = 0)
