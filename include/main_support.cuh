@@ -6,28 +6,26 @@
 
 __host__ __device__ uint hash1(uint val, uint div) { return (val / 11) % div; };
 
-
 template <typename T, int BLOCK_DIM_X>
 __global__ void count_triangles_kernel(
-    uint64* count,
+    uint64 *count,
     T numNodes,
     T numEdges,
     T tilesPerDim,
     T tileSize,
     T capacity,
-    T* tileRowPtr,
-    T* rowInd,
-    T* colInd)
+    T *tileRowPtr,
+    T *rowInd,
+    T *colInd)
 {
     unsigned int e = blockIdx.x * blockDim.x + threadIdx.x;
     T numTriangles_e = 0;
 
-
     if (e < numEdges)
     {
-        T* srcIdx = rowInd;
-        T* dstIdx = colInd;
-        T* tileSrcPtr = tileRowPtr;
+        T *srcIdx = rowInd;
+        T *dstIdx = colInd;
+        T *tileSrcPtr = tileRowPtr;
         T dst = dstIdx[e];
         T src1 = srcIdx[e];
         T src2 = dst;
@@ -48,10 +46,12 @@ __global__ void count_triangles_kernel(
                 T dst1 = dstIdx[e1];
                 T dst2 = dstIdx[e2];
 
-                if (dst1 < dst2) {
+                if (dst1 < dst2)
+                {
                     ++e1;
                 }
-                else if (dst1 > dst2) {
+                else if (dst1 > dst2)
+                {
                     ++e2;
                 }
                 else
@@ -59,7 +59,6 @@ __global__ void count_triangles_kernel(
                     ++e1;
                     ++e2;
                     ++numTriangles_e;
-
                 }
             }
         }
@@ -69,8 +68,6 @@ __global__ void count_triangles_kernel(
         else {
             atomicAdd(&info.numTriangles[e], numTriangles_e);
         }*/
-
-
     }
 
     typedef cub::BlockReduce<uint64, BLOCK_DIM_X> BlockReduce;
@@ -78,14 +75,14 @@ __global__ void count_triangles_kernel(
     uint64 aggregate = BlockReduce(tempStorage).Sum(numTriangles_e);
 
     // Add to total count
-    if (0 == threadIdx.x) {
+    if (0 == threadIdx.x)
+    {
         atomicAdd(count, aggregate);
     }
 }
 
-
-template<typename T>
-__global__ void init(graph::COOCSRGraph_d<T> g, T* asc, bool* keep)
+template <typename T>
+__global__ void init(graph::COOCSRGraph_d<T> g, T *asc, bool *keep)
 {
     uint tx = threadIdx.x;
     uint bx = blockIdx.x;
@@ -106,16 +103,14 @@ __global__ void init(graph::COOCSRGraph_d<T> g, T* asc, bool* keep)
         const T dstLen = dstStop - dstStart;
         const T srcLen = srcStop - srcStart;
 
-
-        keep[i] = (dstLen < srcLen || ((dstLen == srcLen) && src < dst));// Some simple graph orientation
+        keep[i] = (dstLen < srcLen || ((dstLen == srcLen) && src < dst)); // Some simple graph orientation
         //src[i] < dst[i];
         asc[i] = i;
     }
 }
 
-
-template<typename T, typename PeelT>
-__global__ void initAsc(T* asc, T count)
+template <typename T, typename PeelT>
+__global__ void initAsc(T *asc, T count)
 {
     auto tx = threadIdx.x;
     auto bx = blockIdx.x;
@@ -129,8 +124,8 @@ __global__ void initAsc(T* asc, T count)
     }
 }
 
-template<typename T, typename PeelT>
-__global__ void init(graph::COOCSRGraph_d<T> g, T* asc, bool* keep, PeelT* degeneracy)
+template <typename T, typename PeelT>
+__global__ void init(graph::COOCSRGraph_d<T> g, T *asc, bool *keep, PeelT *degeneracy)
 {
     auto tx = threadIdx.x;
     auto bx = blockIdx.x;
@@ -163,9 +158,8 @@ __global__ void init(graph::COOCSRGraph_d<T> g, T* asc, bool* keep, PeelT* degen
     }
 }
 
-
-template<typename T, typename PeelT>
-__global__ void init(graph::COOCSRGraph_d<T> g, T* asc, bool* keep, PeelT* nodeDegen, T* nodePriority)
+template <typename T, typename PeelT>
+__global__ void init(graph::COOCSRGraph_d<T> g, T *asc, bool *keep, PeelT *nodeDegen, T *nodePriority)
 {
     auto tx = threadIdx.x;
     auto bx = blockIdx.x;
@@ -200,15 +194,12 @@ __global__ void init(graph::COOCSRGraph_d<T> g, T* asc, bool* keep, PeelT* nodeD
             }
         }
 
-
         asc[i] = i;
     }
 }
 
-
-
-template<typename T>
-__global__ void createHashPointer2(graph::COOCSRGraph_d<T> g, T* hashPointer, T minLen, T maxLen, int divideConstant)
+template <typename T>
+__global__ void createHashPointer2(graph::COOCSRGraph_d<T> g, T *hashPointer, T minLen, T maxLen, int divideConstant)
 {
     uint tx = threadIdx.x;
     uint bx = blockIdx.x;
@@ -227,8 +218,8 @@ __global__ void createHashPointer2(graph::COOCSRGraph_d<T> g, T* hashPointer, T 
     }
 }
 
-template<typename T>
-__global__ void createHashStartBin(graph::COOCSRGraph_d<T> g, T* hashPointer, T* hashStart, int minLen, int maxLen, int divideConstant)
+template <typename T>
+__global__ void createHashStartBin(graph::COOCSRGraph_d<T> g, T *hashPointer, T *hashStart, int minLen, int maxLen, int divideConstant)
 {
     uint tx = threadIdx.x;
     uint bx = blockIdx.x;
@@ -248,7 +239,6 @@ __global__ void createHashStartBin(graph::COOCSRGraph_d<T> g, T* hashPointer, T*
         {
             uint numBins = srcLen / divideConstant;
 
-
             for (int j = srcStart; j < srcStop; j++)
             {
                 uint val = g.colInd[j];
@@ -257,28 +247,21 @@ __global__ void createHashStartBin(graph::COOCSRGraph_d<T> g, T* hashPointer, T*
                 hashStart[bin_start + bin + 1] += 1;
             }
 
-
             for (int j = bin_start; j < bin_end - 1; j++)
                 hashStart[j + 1] += hashStart[j];
-
 
             /*if (hashStart[bin_end] != srcLen)
                 printf("%u, %u, at %d\n", hashStart[bin_end], srcLen, i);*/
         }
-
     }
 }
 
-
-
-
 //Overloaded form Ktruss
-template<typename T>
-__global__
-void warp_detect_deleted_edges(
-    T* rowPtr, T numRows,
-    bool* keep,
-    T* histogram)
+template <typename T>
+__global__ void warp_detect_deleted_edges(
+    T *rowPtr, T numRows,
+    bool *keep,
+    T *histogram)
 {
 
     __shared__ uint32_t cnts[WARPS_PER_BLOCK];
@@ -290,7 +273,8 @@ void warp_detect_deleted_edges(
     auto lane = threadIdx.x & WARP_MASK;
     auto lwid = threadIdx.x >> WARP_BITS;
 
-    for (auto u = gwid; u < numRows; u += gwnum) {
+    for (auto u = gwid; u < numRows; u += gwnum)
+    {
         if (0 == lane)
             cnts[lwid] = 0;
         __syncwarp();
@@ -309,8 +293,8 @@ void warp_detect_deleted_edges(
     }
 }
 
-template<typename T>
-__global__ void InitEid(T numEdges, T* asc, T* newSrc, T* newDst, T* rowPtr, T* colInd, T* eid)
+template <typename T>
+__global__ void InitEid(T numEdges, T *asc, T *newSrc, T *newDst, T *rowPtr, T *colInd, T *eid)
 {
     uint tx = threadIdx.x;
     uint bx = blockIdx.x;
@@ -323,22 +307,17 @@ __global__ void InitEid(T numEdges, T* asc, T* newSrc, T* newDst, T* rowPtr, T* 
         T srcnode = newSrc[i];
         T dstnode = newDst[i];
 
-
-
         T olduV = asc[i];
         T oldUv = getEdgeId(rowPtr, colInd, dstnode, srcnode); //Search for it please !!
-
 
         eid[olduV] = i;
         eid[oldUv] = i;
     }
 }
 
-
-
-template<typename T>
-uint64 CountTriangles(std::string message, int deviceId, AllocationTypeEnum at, graph::TcBase<T>* tc, graph::COOCSRGraph_d<T>* g,
-    const size_t numEdges_upto, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+template <typename T>
+uint64 CountTriangles(std::string message, int deviceId, AllocationTypeEnum at, graph::TcBase<T> *tc, graph::COOCSRGraph_d<T> *g,
+                      const size_t numEdges_upto, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
 {
 
 #ifndef __VS__
@@ -363,13 +342,12 @@ uint64 CountTriangles(std::string message, int deviceId, AllocationTypeEnum at, 
     Log(LogPriorityEnum::info, "Kernel [%s]: gpu %d kernel time %f (%f teps) \n", message.c_str(), dev, secs, (numEdges_upto - edgeOffset) / secs);
     cudaDeviceSynchronize();
 
-
     return tc->count();
 }
 
-template<typename T>
-void CountTrianglesHash(int deviceId, const int divideConstant, graph::TcBase<T>* tc, graph::COOCSRGraph<T> gH, graph::COOCSRGraph_d<T>* g,
-    const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
+template <typename T>
+void CountTrianglesHash(int deviceId, const int divideConstant, graph::TcBase<T> *tc, graph::COOCSRGraph<T> gH, graph::COOCSRGraph_d<T> *g,
+                        const size_t numEdges, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread, int increasing = 0)
 {
 
     const T minRowLen = 256;
@@ -396,8 +374,6 @@ void CountTrianglesHash(int deviceId, const int divideConstant, graph::TcBase<T>
     hts.setAll(0, true);
     execKernel(createHashStartBin, (g->numNodes + 128 - 1) / 128, 128, deviceId, false, *g, htp.gdata(), hts.gdata(), minRowLen, maxRowLen, divideConstant);
 
-
-
     //Mode data to hash tables
     for (int i = 0; i < gH.numNodes; i++)
     {
@@ -409,7 +385,7 @@ void CountTrianglesHash(int deviceId, const int divideConstant, graph::TcBase<T>
         const uint numBins = (e - s) / divideConstant;
         if (bin_end > bin_start)
         {
-            uint* binCounter = new uint[numBins];
+            uint *binCounter = new uint[numBins];
             for (int n = 0; n < numBins; n++)
                 binCounter[n] = 0;
             for (int j = s; j < e; j++)
@@ -437,8 +413,6 @@ void CountTrianglesHash(int deviceId, const int divideConstant, graph::TcBase<T>
 
     htd.switch_to_gpu(0);
 
-
-
     tc->count_hash_async(divideConstant, g, htd, htp, hts, numEdges, edgeOffset, kernelType, increasing);
     tc->sync();
     CUDA_RUNTIME(cudaGetLastError());
@@ -450,10 +424,9 @@ void CountTrianglesHash(int deviceId, const int divideConstant, graph::TcBase<T>
     cudaDeviceSynchronize();
 }
 
-
-template<typename T>
-void ConstructTriList(graph::GPUArray<T>& triIndex, graph::GPUArray<T>& triPointer, graph::TcBase<T>* tc, graph::GPUArray<T> rowPtr, graph::GPUArray<T> rowInd, graph::GPUArray<T> colInd,
-    const size_t numEdges, const size_t numRows, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread)
+template <typename T>
+void ConstructTriList(graph::GPUArray<T> &triIndex, graph::GPUArray<T> &triPointer, graph::TcBase<T> *tc, graph::GPUArray<T> rowPtr, graph::GPUArray<T> rowInd, graph::GPUArray<T> colInd,
+                      const size_t numEdges, const size_t numRows, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread)
 {
     //Count triangle
     tc->count_async(rowPtr, rowInd, colInd, numEdges, edgeOffset, kernelType, 0);
@@ -466,11 +439,10 @@ void ConstructTriList(graph::GPUArray<T>& triIndex, graph::GPUArray<T>& triPoint
     tc->count_per_edge_async(temp, rowPtr, rowInd, colInd, numEdges, edgeOffset, kernelType, 0);
     tc->sync();
 
-
     //Scan
     triPointer = graph::GPUArray<uint>("TriPointer", unified, numEdges + 1, 0);
-    void* d_temp_storage = NULL;
-    size_t   temp_storage_bytes = 0;
+    void *d_temp_storage = NULL;
+    size_t temp_storage_bytes = 0;
     cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, temp.gdata(), triPointer.gdata(), numEdges);
     CUDA_RUNTIME(cudaMalloc(&d_temp_storage, temp_storage_bytes));
     cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, temp.gdata(), triPointer.gdata(), numEdges);
@@ -509,7 +481,6 @@ void ConstructTriList(graph::GPUArray<T>& triIndex, graph::GPUArray<T>& triPoint
     printf("%u\n", triPointer.cdata()[numEdges]);*/
 }
 
-
 struct Node
 {
     uint val;
@@ -519,8 +490,8 @@ struct Node
     int p;
 };
 
-template<typename T>
-__global__ void split_inverse(bool* keep, T m)
+template <typename T>
+__global__ void split_inverse(bool *keep, T m)
 {
     auto tx = threadIdx.x;
     auto bx = blockIdx.x;
@@ -533,8 +504,8 @@ __global__ void split_inverse(bool* keep, T m)
     }
 }
 
-template<typename T>
-__global__ void split_acc(graph::COOCSRGraph_d<T> g, T* split_ptr)
+template <typename T>
+__global__ void split_acc(graph::COOCSRGraph_d<T> g, T *split_ptr)
 {
     auto tx = threadIdx.x;
     auto bx = blockIdx.x;
@@ -547,8 +518,8 @@ __global__ void split_acc(graph::COOCSRGraph_d<T> g, T* split_ptr)
     }
 }
 
-template<typename T>
-__global__ void split_child(graph::COOCSRGraph_d<T> g, T* tmp_row, T* tmp_col, T* split_col, T* split_ptr)
+template <typename T>
+__global__ void split_child(graph::COOCSRGraph_d<T> g, T *tmp_row, T *tmp_col, T *split_col, T *split_ptr)
 {
     auto tx = threadIdx.x;
     auto bx = blockIdx.x;
@@ -563,8 +534,8 @@ __global__ void split_child(graph::COOCSRGraph_d<T> g, T* tmp_row, T* tmp_col, T
     }
 }
 
-template<typename T>
-__global__ void split_parent(graph::COOCSRGraph_d<T> g, T* tmp_row, T* tmp_col, T* split_col, T* split_ptr)
+template <typename T>
+__global__ void split_parent(graph::COOCSRGraph_d<T> g, T *tmp_row, T *tmp_col, T *split_col, T *split_ptr)
 {
     auto tx = threadIdx.x;
     auto bx = blockIdx.x;

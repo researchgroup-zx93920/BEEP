@@ -100,17 +100,21 @@ __device__ __forceinline__ void compute_intersection(
 		// Remove Redundancies
 		for (T sym_idx = SYMNODE_PTR[lvl]; sym_idx < SYMNODE_PTR[lvl + 1]; sym_idx++)
 		{
-			if (!MAT && SYMNODE[sym_idx] == lvl - 1)
-				continue;
-			if (SYMNODE[sym_idx] > 0)
-				to[threadIdx.x] &= ~(cl[(SYMNODE[sym_idx] - 1) * num_divs_local + k] & get_mask(level_prev_index[SYMNODE[sym_idx]] - 1, k));
-			else
-				to[threadIdx.x] &= orient_mask[k];
+			to[threadIdx.x] &= unset_mask(level_prev_index[SYMNODE[sym_idx]] - 1, k);
 		}
-		wc += __popc(to[threadIdx.x]);						  //counts number of set bits
-		cl[(lvl - 1) * num_divs_local + k] = to[threadIdx.x]; //saves candidates list in cl
+		// for (T sym_idx = SYMNODE_PTR[lvl]; sym_idx < SYMNODE_PTR[lvl + 1]; sym_idx++)
+		// {
+		// 	if (!MAT && SYMNODE[sym_idx] == lvl - 1)
+		// 		continue;
+		// 	if (SYMNODE[sym_idx] > 0)
+		// 		to[threadIdx.x] &= ~(cl[(SYMNODE[sym_idx] - 1) * num_divs_local + k] & get_mask(level_prev_index[SYMNODE[sym_idx]] - 1, k));
+		// 	else
+		// 		to[threadIdx.x] &= orient_mask[k];
+		// }
+		wc += __popc(to[threadIdx.x]);						  // counts number of set bits
+		cl[(lvl - 1) * num_divs_local + k] = to[threadIdx.x]; // saves candidates list in cl
 	}
-	reduce_part<T, CPARTSIZE>(partMask, wc); //also does __syncwarp(partMask)
+	reduce_part<T, CPARTSIZE>(partMask, wc); // also does __syncwarp(partMask)
 	__syncwarp(partMask);
 }
 
@@ -119,7 +123,7 @@ __device__ __forceinline__ void intersect_adj(
 	const T *A, const T aSz,
 	const T *B, const T bSz,
 	T *out, T *outSz, const T partMask,
-	const T cutoff, const size_t lx)
+	const size_t lx)
 {
 	// Assume A is lower degree than B
 	if (lx == 0)
@@ -129,17 +133,17 @@ __device__ __forceinline__ void intersect_adj(
 	for (T i = lx; i < aSz; i += CPARTSIZE)
 	{
 		const T searchVal = A[i];
-		if (searchVal < cutoff) //rest taken care by oriented datagraph
+		// if (searchVal < cutoff) //rest taken care by oriented datagraph
+		// {
+		bool found = false;
+		graph::binary_search<T>(B, 0, bSz, searchVal, found);
+		if (found)
 		{
-			bool found = false;
-			graph::binary_search<T>(B, 0, bSz, searchVal, found);
-			if (found)
-			{
-				T sz = atomicAdd(outSz, 1);
-				out[sz] = searchVal;
-			}
-			// printf("\033[0;36m lx: %lu, searchvalue %u, result %s\n\033[0;37m", lx, searchVal, found ? "true" : "false");
+			T sz = atomicAdd(outSz, 1);
+			out[sz] = searchVal;
 		}
+		// printf("\033[0;36m lx: %lu, searchvalue %u, result %s\n\033[0;37m", lx, searchVal, found ? "true" : "false");
+		// }
 	}
 }
 
@@ -149,7 +153,7 @@ __device__ __forceinline__ void ptr_intersection(
 	const size_t lx, const size_t wx, const T partMask,
 	const T src, const T lvl,
 	T *scratchpad, T *fairpad, T *scratch, T *level_prev_index,
-	const graph::COOCSRGraph_d<T> &g, const graph::COOCSRGraph_d<T> &o_g)
+	const graph::COOCSRGraph_d<T> &g)
 {
 	// if (lx == 0 && blockIdx.x == 5 && wx == 0)
 	// {
@@ -159,13 +163,12 @@ __device__ __forceinline__ void ptr_intersection(
 	asym_count = 0;
 	// __syncwarp(partMask);
 	const T start = g.rowPtr[src];
-	T end = g.rowPtr[src + 1];
-	const T srcLen = end - start; //unditected source degree
+	T end = g.splitPtr[src];	  // end of parents list
+	const T srcLen = end - start; // unditected source degree
 	for (T k = lx; k < srcLen; k += CPARTSIZE)
 	{
 		const T neighbor = g.colInd[k + start];
-		if (neighbor < src)
-			fairpad[k] = g.colInd[k + start];
+		fairpad[k] = g.colInd[k + start];
 	}
 	__syncwarp(partMask);
 	// if (lx < srcLen)
@@ -175,44 +178,49 @@ __device__ __forceinline__ void ptr_intersection(
 	{
 		T *swap = fairpad;
 		fairpad = scratchpad;
-		scratchpad = swap; //output always written in fairpad
-		// __syncwarp(partMask);
+		scratchpad = swap; // output always written in fairpad
+		__syncwarp(partMask);
 		// if (q_idx == QEDGE_PTR[lvl] + 1 && lx < srcLen)
 		// 	printf("\033[0;33m Now in scratchpad lx: %lu, Source adj %u\n\033[0;37m", lx, scratchpad[lx]);
-		T src2start = g.rowPtr[o_g.colInd[o_g.rowPtr[src] + level_prev_index[QEDGE[q_idx]] - 1]];
-		T src2end = g.rowPtr[o_g.colInd[o_g.rowPtr[src] + level_prev_index[QEDGE[q_idx]] - 1] + 1];
+		T src2start = g.rowPtr[g.colInd[g.splitPtr[src] + level_prev_index[QEDGE[q_idx]] - 1]]; // destination start
+		T src2end = g.splitPtr[g.colInd[g.splitPtr[src] + level_prev_index[QEDGE[q_idx]] - 1]]; // destination end
 		T src2Len = src2end - src2start;
+		// if (!first)
+		{
+			// printf("adjacency of %u:\tlx: %lu, adj %u\n", g.colInd[g.splitPtr[src] + level_prev_index[QEDGE[q_idx]] - 1], lx, g.colInd[src2start + lx]);
+			// if (lx < srcLen)
+			// printf("lx: %lu, %u\n", lx, scratchpad[lx]);
+		}
 		if (first)
 		{
 			if (srcLen < src2Len)
 			{
-				intersect_adj<T, CPARTSIZE>(scratchpad, srcLen, &g.colInd[src2start], src2Len, fairpad, scratch, partMask, src, lx);
+				intersect_adj<T, CPARTSIZE>(scratchpad, srcLen, &g.colInd[src2start], src2Len, fairpad, scratch, partMask, lx);
 			}
 			else
 			{
-				intersect_adj<T, CPARTSIZE>(&g.colInd[src2start], src2Len, scratchpad, srcLen, fairpad, scratch, partMask, src, lx);
+				intersect_adj<T, CPARTSIZE>(&g.colInd[src2start], src2Len, scratchpad, srcLen, fairpad, scratch, partMask, lx);
 			}
 			first = false;
 		}
 		else
 		{
-			intersect_adj<T, CPARTSIZE>(scratchpad, srcLen, &g.colInd[src2start], src2Len, fairpad, scratch, partMask, src, lx);
+			intersect_adj<T, CPARTSIZE>(scratchpad, srcLen, &g.colInd[src2start], src2Len, fairpad, scratch, partMask, lx);
 		}
 		__syncwarp(partMask);
-		// if (lx == 0)
-		// 	printf("level index: %u, count %u\n", QEDGE[q_idx], scratch[0]);
-		for (T k = lx; k < srcLen; k++)
+		for (T k = lx; k < srcLen; k += CPARTSIZE)
 		{
-			if (scratchpad[k] > src)
-				break;
+			// if (scratchpad[k] > src)
+			// 	break;
+			// printf("Intersection output: pos: %lu, index %u\n", lx, fairpad[k]);
 			scratchpad[k] = 0XFFFFFFFF;
 		}
-		// __syncwarp(partMask);
+		__syncwarp(partMask);
 	}
 	for (T k = lx; k < srcLen; k += CPARTSIZE)
 	{
-		if (fairpad[k] > src)
-			break;
+		// if (fairpad[k] > src)
+		// 	break;
 		fairpad[k] = 0XFFFFFFFF;
 		// scratchpad[k] = 0XFFFFFFFF;
 	}
@@ -223,7 +231,7 @@ __device__ __forceinline__ void ptr_intersection(
 	// }
 	if (lx == 0)
 	{
-		asym_count = (((long)scratch[0]) * ((long)scratch[0] - 1) / 2) + count * (long)scratch[0]; //since last 2 levels have to be symmetric
+		asym_count = (((long)scratch[0]) * ((long)scratch[0] - 1) / 2) + count * (long)scratch[0] + count * (count - 1) / 2; // since last 2 levels have to be symmetric
 
 		// printf("asymmetric count %u, symmetric count %lu\n", scratch[0], count);
 	}
@@ -234,13 +242,13 @@ template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 	T blockOffset,
 	uint64 *counter, T *cpn,
-	const graph::COOCSRGraph_d<T> &g, const graph::COOCSRGraph_d<T> &o_g,
+	const graph::COOCSRGraph_d<T> &g,
 	const graph::GraphQueue_d<T, bool> current,
 	T *current_level, T *asymmetric_levelstats,
-	T *adj_enc,
+	T *adj_enc, T *adj_enc_full,
 	T *orient)
 {
-	//will be removed later
+	// will be removed later
 	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
 	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
 	const size_t lx = threadIdx.x % CPARTSIZE;
@@ -251,20 +259,20 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 	__shared__ uint64 sg_count[numPartitions];
 	__shared__ T l[numPartitions];
 	__shared__ T src, srcStart, srcLen;
-	__shared__ T scratch_space[numPartitions];	 //added later
-	__shared__ uint64 asym_count[numPartitions]; //added later
-	__shared__ T num_divs_local, *level_offset, *encode, *orient_mask;
+	__shared__ T scratch_space[numPartitions];	 // added later
+	__shared__ uint64 asym_count[numPartitions]; // added later
+	__shared__ T num_divs_local, *level_offset, *encode, *encode_full, *orient_mask;
 
 	__shared__ T to[BLOCK_DIM_X], newIndex[numPartitions];
 
 	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
 	{
-		//block things
+		// block things
 		if (threadIdx.x == 0)
 		{
 			src = current.queue[i];
-			srcStart = o_g.rowPtr[src];
-			srcLen = o_g.rowPtr[src + 1] - srcStart;
+			srcStart = g.splitPtr[src];
+			srcLen = g.rowPtr[src + 1] - srcStart;
 
 			num_divs_local = (srcLen + 32 - 1) / 32;
 
@@ -273,6 +281,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 
 			uint64 encode_offset = (uint64)orient_offset * MAXDEG;
 			encode = &adj_enc[encode_offset /*srcStart[wx]*/];
+			encode_full = &adj_enc_full[encode_offset];
 
 			level_offset = &current_level[orient_offset * (numPartitions * MAXLEVEL)];
 			// asym_level = &asymmetric_levelstats[blockOffset * UNDIRECTED_MAXDEG * numPartitions];
@@ -284,48 +293,59 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 		}
 		__syncthreads();
 
-		//Encode
+		// Encode
 		T partMask = (1 << CPARTSIZE) - 1;
-		partMask = partMask << ((wx % (32 / CPARTSIZE)) * CPARTSIZE); //set of 8 set bits for getting candidates
+		partMask = partMask << ((wx % (32 / CPARTSIZE)) * CPARTSIZE); // set of 8 set bits for getting candidates
 		for (T j = wx; j < srcLen; j += numPartitions)
 		{
 			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 			{
 				encode[j * num_divs_local + k] = 0x00;
+				encode_full[j * num_divs_local + k] = 0x00;
 			}
 		}
 		// __syncwarp(partMask);
 		__syncthreads();
 		for (T j = wx; j < srcLen; j += numPartitions)
 		{
-			// if (src == 1 && (j >= 0 && j <= 4))
+			// if (src == 5)
 			// {
-			graph::warp_sorted_count_and_encode_full<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&o_g.colInd[srcStart], srcLen,
-																						  &o_g.colInd[o_g.rowPtr[o_g.colInd[srcStart + j]]],
-																						  o_g.rowPtr[o_g.colInd[srcStart + j] + 1] - o_g.rowPtr[o_g.colInd[srcStart + j]],
+			graph::warp_sorted_count_and_encode<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&g.colInd[srcStart], srcLen,
+																					 &g.colInd[g.splitPtr[g.colInd[srcStart + j]]],
+																					 g.rowPtr[g.colInd[srcStart + j] + 1] - g.splitPtr[g.colInd[srcStart + j]],
+																					 j, num_divs_local,
+																					 encode);
+			graph::warp_sorted_count_and_encode_full<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&g.colInd[srcStart], srcLen,
+																						  &g.colInd[g.splitPtr[g.colInd[srcStart + j]]],
+																						  g.rowPtr[g.colInd[srcStart + j] + 1] - g.splitPtr[g.colInd[srcStart + j]],
 																						  j, num_divs_local,
-																						  encode);
+																						  encode_full);
 			// if (lx == 0)
-			// 	printf("Testing encode: %u, for adjacency of %u\n", encode[j], o_g.colInd[srcStart + j]);
+			// {
+			// 	printf("Testing encode: %u, for adjacency of %u\n", encode[num_divs_local * j + 0], g.colInd[srcStart + j]);
+			// 	printf("Testing full encode: %u, for adjacency of %u\n", encode_full[num_divs_local * j + 0], g.colInd[srcStart + j]);
+			// }
 			// }
 		}
-		__syncthreads(); //Done encoding, has all upper and lower triangular elements..
+		__syncthreads(); // Done encoding, has all upper and lower triangular elements..
 
 		// Compute orientation mask (For any level symmetric to node 0 i.e. the central node)
 		for (T tid = threadIdx.x; tid < srcLen; tid += blockDim.x)
 		{
-			T dst = o_g.colInd[srcStart + tid];
+			T dst = g.colInd[srcStart + tid];
 			// T dstLen = g.rowPtr[dst + 1] - g.rowPtr[dst];
-			T mask = get_mask(srcLen, tid / 32); //returns all 1
-			// bool keep = (dstLen > srcLen || ((dstLen == srcLen) && src < dst));
-			bool keep = dst > src;
-			orient_mask[tid / 32] = __ballot_sync(mask, keep);
+			T mask = get_mask(srcLen, tid / 32); // returns all 1
+
+			// critical!!!
+			//  bool keep = (dstLen > srcLen || ((dstLen == srcLen) && src < dst));
+			//  bool keep = dst > src;	//since oriented, orientation mask does nothing
+			orient_mask[tid / 32] = __ballot_sync(mask, true);
 		}
 		__syncthreads();
 
-		for (T j = wx; j < srcLen; j += numPartitions) //each warp processes an edge coming from central node
+		for (T j = wx; j < srcLen; j += numPartitions) // each warp processes an edge coming from central node
 		{
-			if (SYMNODE_PTR[2] == 1 && (orient_mask[j / 32] >> (j % 32)) % 2 == 0) //if eliminated by orienting due to being symmetric to central node
+			if (SYMNODE_PTR[2] == 1 && (orient_mask[j / 32] >> (j % 32)) % 2 == 0) // if eliminated by orienting due to being symmetric to central node
 				continue;														   // last bit zero hence %2 is zero
 
 			T *cl = level_offset + wx * (NUMDIVS * MAXLEVEL);
@@ -339,7 +359,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			if (lx == 1)
 			{
 
-				l[wx] = 3; //i.e. at level 2	l[wx] is +1 at all places
+				l[wx] = 3; // i.e. at level 2	l[wx] is +1 at all places
 				sg_count[wx] = 0;
 				level_prev_index[wx][1] = j + 1;
 			}
@@ -350,24 +370,24 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			__syncwarp(partMask);
 
 			// get warp count ??
-			uint64 warpCount = 0; //level 2 reached (base level being 0)
+			uint64 warpCount = 0; // level 2 reached (base level being 0)
 			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 			{
-				cl[k] = get_mask(srcLen, k) & unset_mask(j, k); //unset mask returns all ones except k
-				if (QEDGE_PTR[3] - QEDGE_PTR[2] == 2)			//i.e. if connected to both nodes at level 0 and 1
+				cl[k] = get_mask(srcLen, k) & unset_mask(j, k); // unset mask returns all ones except k
+				if (QEDGE_PTR[3] - QEDGE_PTR[2] == 2)			// i.e. if connected to both nodes at level 0 and 1
 					to[threadIdx.x] = encode[j * num_divs_local + k];
 				else
-					to[threadIdx.x] = cl[k]; //if only connected to central node, everything is a candidate..
+					to[threadIdx.x] = cl[k]; // if only connected to central node, everything is a candidate..
 
 				// Remove Redundancies
-				for (T sym_idx = SYMNODE_PTR[l[wx] - 1]; sym_idx < SYMNODE_PTR[l[wx]]; sym_idx++)
-				{
-					if (SYMNODE[sym_idx] > 0)
-						to[threadIdx.x] &= ~(cl[k] & get_mask(j, k)); //if symmetric to level 1 (lexicographic symmetry breaking)
-					else
-						to[threadIdx.x] &= orient_mask[k]; //if symmetric to central node
-				}
-				cl[1 * num_divs_local + k] = to[threadIdx.x]; //candidates for level 2
+				// for (T sym_idx = SYMNODE_PTR[l[wx] - 1]; sym_idx < SYMNODE_PTR[l[wx]]; sym_idx++)
+				// {
+				// 	if (SYMNODE[sym_idx] > 0)
+				// 		to[threadIdx.x] &= (cl[k] & unset_mask(j, k)); // if symmetric to level 1 (lexicographic symmetry breaking)
+				// 	else
+				// 		to[threadIdx.x] &= orient_mask[k]; // if symmetric to central node
+				// }
+				cl[1 * num_divs_local + k] = to[threadIdx.x]; // candidates for level 2
 				warpCount += __popc(to[threadIdx.x]);
 			}
 			reduce_part<T, CPARTSIZE>(partMask, warpCount);
@@ -399,14 +419,14 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			}
 			if (lx == 0)
 			{
-				if (l[wx] == KCCOUNT - LUNMAT) //If reached last level
+				if (l[wx] == KCCOUNT - LUNMAT) // If reached last level
 				{
-					sg_count[wx] += warpCount; //code reaches here only if counting triangles
+					sg_count[wx] += warpCount; // code reaches here only if counting triangles
 				}
 				else
 				{
-					level_count[wx][l[wx] - 3] = warpCount; //since 2 levels already finalized and l[wx] indexed from 1
-					level_index[wx][l[wx] - 3] = 0;			//This index to iterated from 0 to warpCount
+					level_count[wx][l[wx] - 3] = warpCount; // since 2 levels already finalized and l[wx] indexed from 1
+					level_index[wx][l[wx] - 3] = 0;			// This index to iterated from 0 to warpCount
 				}
 			}
 			__syncwarp(partMask);
@@ -414,64 +434,43 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			// {
 			// 	printf("j: %u, level count: %u\n", j, level_count[wx][l[wx] - 3]);
 			// }
-			while (level_index[wx][l[wx] - 3] < level_count[wx][l[wx] - 3]) //limits work per warp.. [0 to 32*32]
+			while (level_index[wx][l[wx] - 3] < level_count[wx][l[wx] - 3]) // limits work per warp.. [0 to 32*32]
 			{
 				__syncwarp(partMask);
 				if (lx == 0)
 				{
 					scratch_space[wx] = 0;
 
-					T *from = &(cl[num_divs_local * (l[wx] - 2)]);						  //all the current candidates
-					T maskBlock = level_prev_index[wx][l[wx] - 1] / 32;					  //to identify which 32 bits to pick from num_divs_local
-					T maskIndex = ~((1 << (level_prev_index[wx][l[wx] - 1] & 0x1F)) - 1); //to unset previously visited index
+					T *from = &(cl[num_divs_local * (l[wx] - 2)]);						  // all the current candidates
+					T maskBlock = level_prev_index[wx][l[wx] - 1] / 32;					  // to identify which 32 bits to pick from num_divs_local
+					T maskIndex = ~((1 << (level_prev_index[wx][l[wx] - 1] & 0x1F)) - 1); // to unset previously visited index
 					newIndex[wx] = __ffs(from[maskBlock] & maskIndex);					  //__ffs is find first set bit returns 0 if nothing set
 
-					while (newIndex[wx] == 0) //if not found, look into next block
+					while (newIndex[wx] == 0) // if not found, look into next block
 					{
 						maskIndex = 0xFFFFFFFF;
 						maskBlock++;
 						newIndex[wx] = __ffs(from[maskBlock] & maskIndex);
 					}
-					newIndex[wx] = 32 * maskBlock + newIndex[wx] - 1; //actual new index
+					newIndex[wx] = 32 * maskBlock + newIndex[wx] - 1; // actual new index
 					// if (src == 1 && wx == 0 && j == 0 && l[wx] == 3)
 					// {
 					// 	printf("src: %u, wx: %u, index: %u\n", src, wx, o_g.colInd[srcStart + newIndex[wx]]);
 					// }
 
-					level_prev_index[wx][l[wx] - 1] = newIndex[wx] + 1; //level prev index is numbered from 1
+					level_prev_index[wx][l[wx] - 1] = newIndex[wx] + 1; // level prev index is numbered from 1
 					level_index[wx][l[wx] - 3]++;
 				}
 				__syncwarp(partMask);
 
-				// compute_intersection<T, CPARTSIZE, true>(
-				// 	warpCount, lx, partMask, num_divs_local, newIndex[wx], l[wx], to, cl, level_prev_index[wx], encode, orient_mask);
+				//
 				// if (src == 1 && wx == 0 && j == 0 && l[wx] == 3 && o_g.colInd[srcStart + newIndex[wx]] == 6)
 				// {
-				warpCount = 0;
-				to[threadIdx.x] = 0;
-				for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+				if (l[wx] + 1 < KCCOUNT - 1)
 				{
-					to[threadIdx.x] = cl[k] & unset_mask(newIndex[wx], k);
-					//compute intersection
-					for (T q_idx = QEDGE_PTR[l[wx]] + 1; q_idx < QEDGE_PTR[l[wx] + 1]; q_idx++)
-					{
-						// printf("query index: %u, Testing Encoding: %u\n", QEDGE[q_idx], encode[(level_prev_index[wx][QEDGE[q_idx]] - 1) * num_divs_local + k]);
-						to[threadIdx.x] &= encode[(level_prev_index[wx][QEDGE[q_idx]] - 1) * num_divs_local + k];
-					}
-					//remove Redundancies
-					for (T sym_idx = SYMNODE_PTR[l[wx]]; sym_idx < SYMNODE_PTR[l[wx] + 1]; sym_idx++)
-					{
-						// if (!MAT && SYMNODE[sym_idx] == lvl - 1)
-						// 	continue;
-						if (SYMNODE[sym_idx] > 0)
-							to[threadIdx.x] &= ~(cl[(SYMNODE[sym_idx] - 1) * num_divs_local + k] & get_mask(level_prev_index[wx][SYMNODE[sym_idx]] - 1, k));
-						else
-							to[threadIdx.x] &= orient_mask[k];
-					}
-					warpCount += __popc(to[threadIdx.x]);
-					cl[(l[wx] - 1) * num_divs_local + k] = to[threadIdx.x];
+					compute_intersection<T, CPARTSIZE, true>(
+						warpCount, lx, partMask, num_divs_local, newIndex[wx], l[wx], to, cl, level_prev_index[wx], encode, orient_mask);
 				}
-				reduce_part<T, CPARTSIZE>(partMask, warpCount);
 				// __syncwarp(partMask);
 				// if (lx == 0)
 				// {
@@ -479,21 +478,26 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 				// }
 				// }
 
-				if (l[wx] + 1 == KCCOUNT - 1) //takes care of asymmetric nodes for both levels
+				if (l[wx] + 1 == KCCOUNT - 1) // takes care of asymmetric nodes for both levels
 				{
-					//use binary search on original graph till src and use compute_intersection for rest
+					compute_intersection<T, CPARTSIZE, true>(
+						warpCount, lx, partMask, num_divs_local, newIndex[wx], l[wx], to, cl, level_prev_index[wx], encode_full, orient_mask);
+
+					// use binary search on original graph till src and use compute_intersection for rest
 					if (lx == 0)
 						asym_count[wx] = 0;
-					// if (src == 2 && wx == 1)
+					// if (src == 5 && wx == 0)
 					// {
 					ptr_intersection<T, CPARTSIZE, true>(
 						warpCount, asym_count[wx], lx, wx, partMask, src, l[wx], asym_level, &asym_level[UNDIRECTED_MAXDEG],
-						&scratch_space[wx], level_prev_index[wx], g, o_g);
+						&scratch_space[wx], level_prev_index[wx], g);
 
 					if (lx == 0)
 					{
-						// printf("\033[0;33m warp: %d, stacktrace: %u, %u, %u, %u asym_count: %u, warp_count: %lu, formula count: %lu\n\033[0;37m", wx, src, o_g.colInd[srcStart + level_prev_index[wx][1] - 1],
-						// 	   o_g.colInd[srcStart + level_prev_index[wx][2] - 1], o_g.colInd[srcStart + level_prev_index[wx][3] - 1], scratch_space[wx], warpCount, asym_count[wx]);
+						// printf("\033[0;33m warp: %d, stacktrace: %u, %u, %u, %u, asym_count: %u, warp_count: %lu, formula count: %lu\n\033[0;37m",
+						// 	   wx, src, g.colInd[srcStart + level_prev_index[wx][1] - 1],
+						// 	   g.colInd[srcStart + level_prev_index[wx][2] - 1], g.colInd[srcStart + level_prev_index[wx][3] - 1], scratch_space[wx], warpCount, asym_count[wx]);
+						// printf("Last level index: %u\n", g.colInd[srcStart + __ffs(cl[(l[wx] - 1) * num_divs_local + lx]) - 1]);
 						sg_count[wx] += asym_count[wx];
 					}
 					// }
@@ -520,32 +524,32 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 						warpCount /= 2;
 				}
 
-				if (l[wx] + 1 < KCCOUNT - LUNMAT) //not at last level yet, then unset previously visited indexes
+				if (l[wx] + 1 < KCCOUNT - LUNMAT) // not at last level yet, then unset previously visited indexes
 				{
 					for (T k = lx; k < num_divs_local; k += CPARTSIZE)
-						cl[k] &= unset_mask(level_prev_index[wx][l[wx] - 1] - 1, k); //make sure visited elements don't repeat
+						cl[k] &= unset_mask(level_prev_index[wx][l[wx] - 1] - 1, k); // make sure visited elements don't repeat
 				}
 				if (lx == 0)
 				{
-					if (l[wx] + 1 == KCCOUNT - LUNMAT) //reached last level
+					if (l[wx] + 1 == KCCOUNT - LUNMAT) // reached last level
 					{
 						// printf("Enumeration: %u, %u, %u, %u, count %lu\n", src, g.colInd[srcStart + level_prev_index[wx][1] - 1], g.colInd[srcStart + level_prev_index[wx][2] - 1],
 						// 	   g.colInd[srcStart + level_prev_index[wx][3] - 1], warpCount /*, g.colInd[srcStart + level_prev_index[wx][4] - 1]*/);
-						sg_count[wx] += warpCount;
+						// sg_count[wx] += warpCount;
 					}
-					else if (l[wx] + 1 < KCCOUNT - LUNMAT) //Not at last level yet
+					else if (l[wx] + 1 < KCCOUNT - LUNMAT) // Not at last level yet
 					{
-						(l[wx])++;								//go further
-						level_count[wx][l[wx] - 3] = warpCount; //save level_count (warpcount updated during compute intersection)
-						level_index[wx][l[wx] - 3] = 0;			//initialize level index
-						level_prev_index[wx][l[wx] - 1] = 0;	//initialize level previous index
+						(l[wx])++;								// go further
+						level_count[wx][l[wx] - 3] = warpCount; // save level_count (warpcount updated during compute intersection)
+						level_index[wx][l[wx] - 3] = 0;			// initialize level index
+						level_prev_index[wx][l[wx] - 1] = 0;	// initialize level previous index
 
 						T idx = level_prev_index[wx][l[wx] - 2] - 1; //-1 since +1 is always added to level previous index
-						cl[idx / 32] &= ~(1 << (idx & 0x1F));		 //idx&0x1F gives remainder after dividing by 32
-																	 //this puts the newindex at correct place in current level
+						cl[idx / 32] &= ~(1 << (idx & 0x1F));		 // idx & 0x1F gives remainder after dividing by 32
+																	 // this puts the newindex at correct place in current level
 					}
 
-					while (l[wx] > 3 && level_index[wx][l[wx] - 3] >= level_count[wx][l[wx] - 3]) //reset memory since will be going out of while loop (i.e. backtracking)
+					while (l[wx] > 3 && level_index[wx][l[wx] - 3] >= level_count[wx][l[wx] - 3]) // reset memory since will be going out of while loop (i.e. backtracking)
 					{
 						(l[wx])--;
 						T idx = level_prev_index[wx][l[wx] - 1] - 1;
@@ -577,10 +581,10 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byEdge(
 	const graph::COOCSRGraph_d<T> g,
 	const graph::GraphQueue_d<T, bool> current,
 	T *current_level, T *asymmetric_levelstats,
-	T *adj_enc,
+	T *adj_enc, T *adj_enc_full,
 	T *orient)
 {
-	//will be removed later
+	// will be removed later
 	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
 	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
 	const size_t lx = threadIdx.x % CPARTSIZE;
@@ -598,7 +602,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byEdge(
 
 	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
 	{
-		//block things
+		// block things
 		if (threadIdx.x == 0)
 		{
 			src = g.rowInd[current.queue[i]];
@@ -629,7 +633,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byEdge(
 				continue;
 		}
 
-		//Encode
+		// Encode
 		T partMask = (1 << CPARTSIZE) - 1;
 		partMask = partMask << ((wx % (32 / CPARTSIZE)) * CPARTSIZE);
 		for (T j = wx; j < srcLen; j += numPartitions)
@@ -640,11 +644,12 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byEdge(
 			}
 			__syncwarp(partMask);
 			graph::warp_sorted_count_and_encode_full<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&g.colInd[srcStart], srcLen,
-																						  &g.colInd[g.rowPtr[g.colInd[srcStart + j]]], g.rowPtr[g.colInd[srcStart + j] + 1] - g.rowPtr[g.colInd[srcStart + j]],
+																						  &g.colInd[g.rowPtr[g.colInd[srcStart + j]]],
+																						  g.rowPtr[g.colInd[srcStart + j] + 1] - g.rowPtr[g.colInd[srcStart + j]],
 																						  j, num_divs_local,
 																						  encode);
 		}
-		__syncthreads(); //Done encoding
+		__syncthreads(); // Done encoding
 
 		// Compute orientation mask (If any level is symmetric to node 0)
 		for (T tid = threadIdx.x; tid < srcLen; tid += blockDim.x)
@@ -689,7 +694,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byEdge(
 		{
 			if (threadIdx.x == 0)
 				atomicAdd(counter, warpCount);
-			//if (threadIdx.x == 0) printf("Src: %d, Dst: %d, count: %d\n", src, dst, warpCount);
+			// if (threadIdx.x == 0) printf("Src: %d, Dst: %d, count: %d\n", src, dst, warpCount);
 			continue;
 		}
 		__syncthreads();
@@ -721,7 +726,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byEdge(
 			}
 			__syncwarp(partMask);
 
-			//get warp count ??
+			// get warp count ??
 			warpCount = 0;
 			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 			{
@@ -765,7 +770,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byEdge(
 
 			while (level_count[wx][l[wx] - 3] > level_index[wx][l[wx] - 3])
 			{
-				//First Index
+				// First Index
 				if (lx == 0)
 				{
 					T *from = &(cl[num_divs_local * (l[wx] - 2)]);
@@ -786,7 +791,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byEdge(
 				}
 				__syncwarp(partMask);
 
-				//Intersect
+				// Intersect
 				warpCount = 0;
 				for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 				{
@@ -848,7 +853,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byEdge(
 			if (lx == 0)
 			{
 				atomicAdd(counter, sg_count[wx]);
-				//cpn[current.queue[i]] = sg_count[wx];
+				// cpn[current.queue[i]] = sg_count[wx];
 			}
 			__syncwarp(partMask);
 		}
@@ -860,35 +865,35 @@ template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X)
 	__global__ void sgm_kernel_central_node_base_binary(
 		uint64 *counter, T *cpn,
-		const graph::COOCSRGraph_d<T> g, const graph::COOCSRGraph_d<T> o_g,
+		const graph::COOCSRGraph_d<T> g,
 		const graph::GraphQueue_d<T, bool> current,
 		T *current_level, T *asymmetric_levelstats,
-		T *adj_enc,
+		T *adj_enc, T *adj_enc_full,
 		T *orient,
 		const bool byNode)
 {
 	if (byNode)
 		sgm_kernel_central_node_function_byNode<T, BLOCK_DIM_X, CPARTSIZE>(blockIdx.x,
-																		   counter, cpn, g, o_g, current, current_level, asymmetric_levelstats, adj_enc, orient);
+																		   counter, cpn, g, current, current_level, asymmetric_levelstats, adj_enc, adj_enc_full, orient);
 	else
 		sgm_kernel_central_node_function_byEdge<T, BLOCK_DIM_X, CPARTSIZE>(blockIdx.x,
-																		   counter, g, current, current_level, asymmetric_levelstats, adj_enc, orient);
+																		   counter, g, current, current_level, asymmetric_levelstats, adj_enc, adj_enc_full, orient);
 }
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X)
 	__global__ void sgm_kernel_central_node_base_binary_persistant(
 		uint64 *counter, T *cpn,
-		const graph::COOCSRGraph_d<T> g, const graph::COOCSRGraph_d<T> o_g,
+		const graph::COOCSRGraph_d<T> g,
 		const graph::GraphQueue_d<T, bool> current,
 		T *current_level, T *asymmetric_levelstats,
 		T *levelStats,
-		T *adj_enc,
+		T *adj_enc, T *adj_enc_full,
 		T *orient,
 		const bool byNode)
 {
 
-	//only needed for persistant launches
+	// only needed for persistant launches
 	__shared__ uint32_t sm_id, levelPtr;
 
 	if (threadIdx.x == 0)
@@ -904,10 +909,10 @@ __launch_bounds__(BLOCK_DIM_X)
 
 	if (byNode)
 		sgm_kernel_central_node_function_byNode<T, BLOCK_DIM_X, CPARTSIZE>((sm_id * CBPSM) + levelPtr,
-																		   counter, cpn, g, o_g, current, current_level, asymmetric_levelstats, adj_enc, orient);
+																		   counter, cpn, g, current, current_level, asymmetric_levelstats, adj_enc, adj_enc_full, orient);
 	else
 		sgm_kernel_central_node_function_byEdge<T, BLOCK_DIM_X, CPARTSIZE>((sm_id * CBPSM) + levelPtr,
-																		   counter, g, current, current_level, asymmetric_levelstats, adj_enc, orient);
+																		   counter, g, current, current_level, asymmetric_levelstats, adj_enc, adj_enc_full, orient);
 
 	__syncthreads();
 

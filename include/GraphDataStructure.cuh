@@ -26,7 +26,7 @@ namespace graph
         T *rowPtr;
         T *rowInd;
         T *colInd;
-        T *splitPtr;
+        T *splitPtr; //ptr to split parents and children
     };
 
     template <typename T>
@@ -72,6 +72,17 @@ namespace graph
         g.rowPtr->freeGPU();
         g.rowInd->freeGPU();
         g.colInd->freeGPU();
+        g.capacity = 0;
+        g.numEdges = 0;
+        g.numNodes = 0;
+    }
+
+    template <typename T>
+    void free_csrcoo_host(COOCSRGraph<T> &g)
+    {
+        g.rowPtr->freeCPU();
+        g.rowInd->freeCPU();
+        g.colInd->freeCPU();
         g.capacity = 0;
         g.numEdges = 0;
         g.numNodes = 0;

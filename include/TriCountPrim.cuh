@@ -245,14 +245,14 @@ namespace graph
                 return false;
             }
         }
-        //for (int i = 0; i < stashSize; i++)
+        // for (int i = 0; i < stashSize; i++)
         //{
-        //    if (arr[i + stashStart] == searchVal)
-        //    {
-        //        //printf("Hash - Bin: %u\n", searchVal);
-        //        return true;
-        //    }
-        //}
+        //     if (arr[i + stashStart] == searchVal)
+        //     {
+        //         //printf("Hash - Bin: %u\n", searchVal);
+        //         return true;
+        //     }
+        // }
 
         /*T left = graph::binary_search<T>(&arr[b*binSize], 0, binSize, searchVal);
        if (arr[b*binSize + left] == searchVal)
@@ -304,7 +304,7 @@ namespace graph
         T start = arrPointer[b];
         T end = arrPointer[b + 1];
 
-        if (end - start == 0) //empty bin
+        if (end - start == 0) // empty bin
             return false;
 
         /* if (end - start < 32)
@@ -337,7 +337,7 @@ namespace graph
         {
             T searchVal = A[i];
 
-            //printf("%d, %u\n", i, searchVal);
+            // printf("%d, %u\n", i, searchVal);
             threadCount += graph::hash_nostash_search<T>(BP, BD, numBins, searchVal) ? 1 : 0;
         }
         return threadCount;
@@ -575,7 +575,7 @@ namespace graph
                 {
                     if (B[lb] == searchVal)
                     {
-                        //printf("At %u, SearchVal = %u\n", lb, searchVal);
+                        // printf("At %u, SearchVal = %u\n", lb, searchVal);
                         threadCount++;
                     }
                 }
@@ -629,7 +629,7 @@ namespace graph
                 {
                     if (B[lb] == searchVal)
                     {
-                        //printf("At %u, SearchVal = %u\n", lb, searchVal);
+                        // printf("At %u, SearchVal = %u\n", lb, searchVal);
                         threadCount++;
                     }
                 }
@@ -694,7 +694,7 @@ namespace graph
                 if (found)
                 {
                     threadCount++;
-                    //printf("At %u, searchVal = %u, direct\n", fl * par, searchVal);
+                    // printf("At %u, searchVal = %u, direct\n", fl * par, searchVal);
                 }
                 continue;
             }
@@ -709,7 +709,7 @@ namespace graph
                 threadCount++;
             }
 
-            //lastIndex = lb;
+            // lastIndex = lb;
 
             /* unsigned int writemask_deq = __activemask();
             fl = __shfl_sync(writemask_deq, fl, 31);*/
@@ -817,7 +817,7 @@ namespace graph
                 {
                     if (B[lb] == searchVal && keep[lb + bStart])
                     {
-                        //printf("At %u, SearchVal = %u\n", lb, searchVal);
+                        // printf("At %u, SearchVal = %u\n", lb, searchVal);
                         threadCount++;
                     }
                 }
@@ -1123,7 +1123,7 @@ namespace graph
                         bool b = AisMaster || (!AisMaster && current_level[lb] == new_level - 1);
                         if (b)
                         {
-                            //printf("At %u, SearchVal = %u\n", lb, searchVal);
+                            // printf("At %u, SearchVal = %u\n", lb, searchVal);
                             threadCount++;
                             //////////////////////////////Device function ///////////////////////
                             if (new_level < clique_number)
@@ -1198,10 +1198,10 @@ namespace graph
                 const T lb = graph::binary_search<T>(B, lastIndex, bSz, searchVal, found);
                 if (found)
                 {
-                    bool b = AisMaster || (!AisMaster && (current_level[lb] & (0x01 << (new_level - 3)))); //current_level[lb] == new_level - 1);
+                    bool b = AisMaster || (!AisMaster && (current_level[lb] & (0x01 << (new_level - 3)))); // current_level[lb] == new_level - 1);
                     if (b)
                     {
-                        //printf("At %u, SearchVal = %u\n", lb, searchVal);
+                        // printf("At %u, SearchVal = %u\n", lb, searchVal);
                         threadCount++;
                         //////////////////////////////Device function ///////////////////////
                         if (new_level < clique_number)
@@ -1233,7 +1233,7 @@ namespace graph
             threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 4);
             threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 2);
             threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 1);
-            //reduce_part<T>(partMask, threadCount);
+            // reduce_part<T>(partMask, threadCount);
 
             return threadCount;
         }
@@ -1261,7 +1261,7 @@ namespace graph
         const int laneIdx = threadIdx.x % CPARTSIZE; // which thread in warp
 
         uint64 threadCount = 0;
-        //T lastIndex = 0;
+        // T lastIndex = 0;
 
         // cover entirety of A with warp
         for (T i = laneIdx; i < aSz; i += CPARTSIZE)
@@ -1272,15 +1272,15 @@ namespace graph
             if (a)
             {
                 const T searchVal = A[i];
-                //const T leftValue = B[lastIndex];
+                // const T leftValue = B[lastIndex];
                 bool found = false;
                 const T lb = graph::binary_search<T>(B, 0, bSz, searchVal, found);
                 if (found)
                 {
-                    bool b = AisMaster || (!AisMaster && (current_level[lb] & (0x01 << (new_level - origin)))); //current_level[lb] == new_level - 1);
+                    bool b = AisMaster || (!AisMaster && (current_level[lb] & (0x01 << (new_level - origin)))); // current_level[lb] == new_level - 1);
                     if (b)
                     {
-                        //printf("At %u, SearchVal = %u\n", lb, searchVal);
+                        // printf("At %u, SearchVal = %u\n", lb, searchVal);
                         threadCount++;
                         //////////////////////////////Device function ///////////////////////
                         if (new_level < clique_number)
@@ -1339,24 +1339,24 @@ namespace graph
         const int laneIdx = threadIdx.x % CPARTSIZE; // which thread in warp
 
         uint64 threadCount = 0;
-        //T lastIndex = 0;
+        // T lastIndex = 0;
 
         // cover entirety of A with warp
         for (T i = laneIdx; i < aSz; i += CPARTSIZE)
         {
             // one element of A per thread, just search for A into B
             const T searchVal = A[i];
-            //const T leftValue = B[lastIndex];
+            // const T leftValue = B[lastIndex];
             bool found = false;
             const T lb = graph::binary_search<T>(B, 0, bSz, searchVal, found);
             if (found)
             {
-                //printf("At %u, SearchVal = %u\n", lb, searchVal);
-                //threadCount++;
+                // printf("At %u, SearchVal = %u\n", lb, searchVal);
+                // threadCount++;
                 //////////////////////////////Device function ///////////////////////
-                //if (new_level < clique_number)
+                // if (new_level < clique_number)
                 {
-                    //current_level[i] = searchVal;
+                    // current_level[i] = searchVal;
 
                     T old = atomicAdd(counter, 1);
                     current_level[old] = searchVal;
@@ -1384,7 +1384,7 @@ namespace graph
             // threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 2);
             // threadCount += __shfl_down_sync(0xFFFFFFFF, threadCount, 1);
 
-            //reduce_part<T>(partMask, threadCount);
+            // reduce_part<T>(partMask, threadCount);
 
             return threadCount;
         }
@@ -1409,21 +1409,21 @@ namespace graph
         const T laneIdx = threadIdx.x % CPARTSIZE; // which thread in warp
 
         uint64 threadCount = 0;
-        //T lastIndex = 0;
+        // T lastIndex = 0;
 
         // cover entirety of A with warp
         for (T i = laneIdx; i < aSz; i += CPARTSIZE)
         {
             // one element of A per thread, just search for A into B
             const T searchVal = A[i];
-            //const T leftValue = B[lastIndex];
+            // const T leftValue = B[lastIndex];
             bool found = false;
             const T lb = graph::binary_search<T>(B, 0, bSz, searchVal, found);
             if (found)
             {
                 if (current_level[lb] == new_level - 1)
                 {
-                    //printf("At %u, SearchVal = %u\n", lb, searchVal);
+                    // printf("At %u, SearchVal = %u\n", lb, searchVal);
                     threadCount++;
                     //////////////////////////////Device function ///////////////////////
                     if (new_level < clique_number)
@@ -1488,7 +1488,7 @@ namespace graph
                         }
                         ////////////////////////////////////////////////
 
-                        //printf("At %u, searchVal = %u, direct\n", fl * par, searchVal);
+                        // printf("At %u, searchVal = %u, direct\n", fl * par, searchVal);
                     }
                     continue;
                 }
@@ -1504,7 +1504,7 @@ namespace graph
                     bool b = AisMaster || (!AisMaster && current_level[lb] == new_level - 1);
                     if (b)
                     {
-                        //printf("At %u, searchVal = %u\n", lb, searchVal);
+                        // printf("At %u, searchVal = %u\n", lb, searchVal);
                         threadCount++;
                         if (new_level < clique_number)
                         {
@@ -1515,7 +1515,7 @@ namespace graph
                 }
             }
 
-            //lastIndex = lb;
+            // lastIndex = lb;
 
             /* unsigned int writemask_deq = __activemask();
             fl = __shfl_sync(writemask_deq, fl, 31);*/
@@ -1677,7 +1677,7 @@ namespace graph
                 bool b = (current_level[lb] & (0x01 << (new_level - 3)));
                 if (b)
                 {
-                    //printf("At %u, searchVal = %u\n", lb, searchVal);
+                    // printf("At %u, searchVal = %u\n", lb, searchVal);
                     threadCount++;
                     if (new_level < clique_number)
                     {
@@ -1734,6 +1734,43 @@ namespace graph
             }
         }
 
+        return 0;
+    }
+    template <size_t WARPS_PER_BLOCK, typename T, bool reduce = true, uint CPARTSIZE = 32>
+    __device__ __forceinline__ uint64 warp_sorted_count_and_encode(const T *const A, //!< [in] array A
+                                                                   const size_t aSz, //!< [in] the number of elements in A
+                                                                   T *B,             //!< [in] array B
+                                                                   T bSz,            //!< [in] the number of elements in B
+
+                                                                   T j,
+                                                                   T num_divs_local,
+                                                                   T *encode)
+    {
+        // if (threadIdx.x == 0)
+        // {
+        // printf("CPARTSIZE: %u\n", CPARTSIZE);
+        // }
+        const int warpIdx = threadIdx.x / CPARTSIZE; // which warp in thread block
+        const int laneIdx = threadIdx.x % CPARTSIZE; // which thread in warp
+        // cover entirety of A with warp
+        for (T i = laneIdx; i < aSz; i += CPARTSIZE)
+        {
+            const T searchVal = A[i];
+            bool found = false;
+            const T lb = graph::binary_search<T>(B, 0, bSz, searchVal, found);
+
+            if (found)
+            {
+                // printf("\033[0;32m Found %u, in adjacency of: %u\033[0;37m\n", searchVal, A[j]);
+                //////////////////////////////Device function ///////////////////////
+                T chunk_index = i / 32; // 32 here is the division size of the encode
+                T inChunkIndex = i % 32;
+                atomicOr(&encode[j * num_divs_local + chunk_index], 1 << inChunkIndex);
+                /////////////////////////////////////////////////////////////////////
+            }
+            // else
+            //     printf("\033[0;31m Not found %u in adjacency of: %u\033[0;37m\n", searchVal, A[j]);
+        }
         return 0;
     }
 
@@ -1867,7 +1904,7 @@ namespace graph
             if (found)
             {
                 encode[j * maxdeg + i] = i;
-                //encode[i*maxdeg + j] = j;
+                // encode[i*maxdeg + j] = j;
             }
         }
 
@@ -1902,7 +1939,7 @@ namespace graph
             {
                 threadCount++;
                 //////////////////////////////Device function ///////////////////////
-                //if (new_level < clique_number)
+                // if (new_level < clique_number)
                 {
                     T intr_index = (AisMaster ? i : lb);
                     T chunk_index = intr_index / 32;
@@ -1945,14 +1982,14 @@ namespace graph
                                                                 T *tri,
                                                                 T *counter)
     {
-        //T lastIndex = 0;
-        // cover entirety of A with block
+        // T lastIndex = 0;
+        //  cover entirety of A with block
         for (size_t i = threadIdx.x; i < aSz; i += BLOCK_DIM_X)
         {
             // one element of A per thread, just search for A into B
             const T searchVal = A[i];
-            //const T leftValue = B[lastIndex];
-            //if (searchVal >= leftValue)
+            // const T leftValue = B[lastIndex];
+            // if (searchVal >= leftValue)
             {
                 bool found = false;
                 graph::binary_search<T>(B, 0, bSz, searchVal, found);
@@ -1962,7 +1999,7 @@ namespace graph
                     tri[old] = searchVal;
                 }
 
-                //lastIndex = lb;
+                // lastIndex = lb;
             }
         }
 
@@ -2153,7 +2190,7 @@ namespace graph
         return count;
     }
 
-    //min is used to enforce increasing order !!
+    // min is used to enforce increasing order !!
     template <typename T>
     __host__ __device__ static uint64_t serial_sorted_set_linear(T *arr, const T *aBegin, //!< beginning of a
                                                                  const T *aEnd,           //!< end of a

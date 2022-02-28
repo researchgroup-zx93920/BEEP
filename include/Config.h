@@ -339,11 +339,11 @@ static Config parseArgs(int argc, char **argv)
     config.deviceId = 0;
     config.mt = KCLIQUE;
     config.printStats = false;
-    config.orient = Degree;
+    config.orient = None;
     config.allocation = gpu;
     config.k = 5;
     config.sortEdges = false;
-    ;
+
     config.processBy = ByNode;
     config.processElement = BlockWarp;
     config.kcConfig = parseKcConfig("");

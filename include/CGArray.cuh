@@ -132,7 +132,7 @@ namespace graph
 			_at = at;
 		}
 
-		void switch_to_gpu(int devId = 0, size_t size = 0)
+		void switch_to_gpu(int devId = 0, size_t size = 0) //copies from cpu to GPU (doesn't delete data on CPU)
 		{
 			if (_at == AllocationTypeEnum::cpuonly)
 			{

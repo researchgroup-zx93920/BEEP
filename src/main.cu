@@ -40,6 +40,32 @@
 #include "../include/ScanLarge.cuh"
 
 #include "../subgraph_matching/subgraph_matching.cuh"
+__global__ void print_array(uint size, uint *data)
+{
+    for (int i = 0; i < size; i++)
+    {
+        printf("%u,\t", data[i]);
+    }
+    printf("\n");
+}
+
+__global__ void print_graph(graph::COOCSRGraph_d<uint> dataGraph)
+{
+    printf("Printing graph from device\n");
+    printf("testing rowInd: %u\n", dataGraph.rowInd[0]);
+    for (uint src = dataGraph.rowInd[0]; src < dataGraph.numNodes; src++)
+    {
+        uint srcStart = dataGraph.rowPtr[src];
+        uint srcEnd = dataGraph.rowPtr[src + 1];
+        printf("%u\t: ", src);
+        for (uint j = srcStart; j < srcEnd; j++)
+        {
+            printf("%u, ", dataGraph.colInd[j]);
+        }
+        printf("\n");
+    }
+    printf("\n");
+}
 
 using namespace std;
 //#define TriListConstruct
@@ -47,7 +73,7 @@ using namespace std;
 int main(int argc, char **argv)
 {
 
-    //CUDA_RUNTIME(cudaDeviceReset());
+    // CUDA_RUNTIME(cudaDeviceReset());
     Config config = parseArgs(argc, argv);
 
     printf("\033[0m");
@@ -120,13 +146,15 @@ int main(int argc, char **argv)
 
     uint n = csrcoo.num_rows();
     uint m = csrcoo.nnz();
+    Log(debug, "value of n: %u\n", n);
+    Log(debug, "value of m: %u\n", m);
 
     graph::COOCSRGraph<uint> g;
     g.capacity = m;
     g.numEdges = m;
     g.numNodes = n;
 
-    //No Allocation
+    // No Allocation
     g.rowPtr = new graph::GPUArray<uint>("Row pointer", AllocationTypeEnum::noalloc, n + 1, config.deviceId, true);
     g.rowInd = new graph::GPUArray<uint>("Src Index", AllocationTypeEnum::noalloc, m, config.deviceId, true);
     g.colInd = new graph::GPUArray<uint>("Dst Index", AllocationTypeEnum::noalloc, m, config.deviceId, true);
@@ -149,7 +177,7 @@ int main(int argc, char **argv)
 
     Log(info, "Read graph time: %f s", read_graph_timer.elapsed());
 
-    ///Now we need to orient the graph
+    /// Now we need to orient the graph
     Timer total_timer;
 
     graph::COOCSRGraph_d<uint> *gd = (graph::COOCSRGraph_d<uint> *)malloc(sizeof(graph::COOCSRGraph_d<uint>));
@@ -173,8 +201,11 @@ int main(int argc, char **argv)
         gd->rowInd = g.rowInd->gdata();
         gd->colInd = g.colInd->gdata();
     }
-    double total = total_timer.elapsed();
-    Log(info, "Transfer Time: %f s", total);
+    // double total = total_timer.elapsed();
+    Log(info, "Transfer Time: %f s", total_timer.elapsed());
+    // printf("value at 97: %u\n", g.colInd->cdata()[97]);
+    // execKernel(print_array, 1, 1, config.deviceId, false, 116, gd->rowInd);
+    // execKernel(print_graph, 1, 1, config.deviceId, false, *gd);
 
     Timer t;
     graph::SingleGPU_Kcore<uint, PeelType> mohacore(config.deviceId);
@@ -215,7 +246,7 @@ int main(int argc, char **argv)
         execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), new_rowPtr.gdata());
         uint total = CUBScanExclusive<uint, uint>(new_rowPtr.gdata(), new_rowPtr.gdata(), n, config.deviceId, 0, config.allocation);
         new_rowPtr.setSingle(n, total, false);
-        //assert(total == new_edge_num * 2);
+        // assert(total == new_edge_num * 2);
         cudaDeviceSynchronize();
         asc.freeGPU();
         keep.freeGPU();
@@ -272,12 +303,12 @@ int main(int argc, char **argv)
             // 	printf("For %u, %u, %u, %u\n", i, d-s, g.colInd->cdata()[s], g.colInd->cdata()[s + 1]);
             // }
 
-            //if (deg > 128)
+            // if (deg > 128)
             {
                 uint64 v = deg * (deg + dv - 1) / dv;
                 sum += v;
 
-                //now the compressed one :D
+                // now the compressed one :D
                 uint64 nelem8 = deg / dv;
                 uint64 rem = deg - nelem8 * dv;
 
@@ -311,7 +342,7 @@ int main(int argc, char **argv)
             uint dstEnd = g.rowPtr->cdata()[dst + 1];
             uint dstDegree = dstEnd - dstStart;
 
-            //Intersect Src, Dst
+            // Intersect Src, Dst
             uint s1 = 0, s2 = 0;
             bool loadA = true, loadB = true;
             uint a, b;
@@ -338,8 +369,8 @@ int main(int argc, char **argv)
                     uint inDivIndex = s1 % dv;
                     node_be.cdata()[startIndex + divIndex] |= (1 << inDivIndex);
 
-                    //i and s1
-                    //if (i > 0)
+                    // i and s1
+                    // if (i > 0)
                     //{
                     //	if (i > s1)
                     //	{
@@ -423,7 +454,7 @@ int main(int argc, char **argv)
 
         printf("Tiled Count = %lu, time = %f\n", *c.gdata(), ms / 1e3);*/
 
-        //Count traingles binary-search: Thread or Warp
+        // Count traingles binary-search: Thread or Warp
         uint step = m;
         uint st = 0;
         uint ee = st + step; // st + 2;
@@ -496,14 +527,14 @@ int main(int argc, char **argv)
     }
     else if (config.mt == CROSSDECOMP)
     {
-        //Update Please
+        // Update Please
         /*	sl.switch_to_gpu(0, csrcoo.nnz());
         dl.switch_to_gpu(0, csrcoo.nnz());
         rowPtr.switch_to_gpu(0, csrcoo.num_rows() + 1);
         Thanos<uint> t(rowPtr, sl, dl, csrcoo.nnz(), csrcoo.num_rows());*/
     }
 
-    //Not needed anymore
+    // Not needed anymore
 #ifdef TriListConstruct
     sl.switch_to_gpu(0, csrcoo.nnz());
     dl.switch_to_gpu(0, csrcoo.nnz());
@@ -518,7 +549,7 @@ int main(int argc, char **argv)
     if (config.mt == KCORE)
     {
         graph::COOCSRGraph_d<uint> *gd;
-        to_csrcoo_device(g, gd, config.deviceId, config.allocation); //got to device !!
+        to_csrcoo_device(g, gd, config.deviceId, config.allocation); // got to device !!
         cudaDeviceSynchronize();
 
         graph::SingleGPU_Kcore<uint, PeelType> mohacore(config.deviceId);
@@ -555,7 +586,7 @@ int main(int argc, char **argv)
         // else
         {
 
-            //read the nCr values, to be saved in (Constant or global or )
+            // read the nCr values, to be saved in (Constant or global or )
 
             graph::SingleGPU_Kclique<uint> mohaclique(config.deviceId, *gd);
 
@@ -564,7 +595,7 @@ int main(int argc, char **argv)
             // int k = 4;
             // while ( k < 11)
             {
-                //printf("------------------ K=%d ----------------------\n", k);
+                // printf("------------------ K=%d ----------------------\n", k);
                 for (int i = 0; i < 1; i++)
                 {
                     Timer t;
@@ -627,7 +658,7 @@ int main(int argc, char **argv)
                                     Log(error, "WRONG PARTITION SIZE SELECTED\n");
                                 }
 
-                                //mohaclique.findKclqueIncremental_node_async(config.k, *gd, config.processElement);
+                                // mohaclique.findKclqueIncremental_node_async(config.k, *gd, config.processElement);
                             }
                         }
                         else // Pivoting
@@ -659,7 +690,7 @@ int main(int argc, char **argv)
                                     Log(error, "WRONG PARTITION SIZE SELECTED\n");
                                 }
 
-                                //mohaclique.findKclqueIncremental_node_pivot_async(config.k, *gd, config.processElement);
+                                // mohaclique.findKclqueIncremental_node_pivot_async(config.k, *gd, config.processElement);
                             }
                             else
                             {
@@ -688,7 +719,7 @@ int main(int argc, char **argv)
                                     Log(error, "WRONG PARTITION SIZE SELECTED\n");
                                 }
 
-                                //mohaclique.findKclqueIncremental_node_nobin_pivot_async(config.k, *gd, config.processElement);
+                                // mohaclique.findKclqueIncremental_node_nobin_pivot_async(config.k, *gd, config.processElement);
                             }
                         }
                     }
@@ -724,7 +755,7 @@ int main(int argc, char **argv)
                                     Log(error, "WRONG PARTITION SIZE SELECTED\n");
                                 }
 
-                                //mohaclique.findKclqueIncremental_edge_binary_async(config.k, *gd, config.processElement);
+                                // mohaclique.findKclqueIncremental_edge_binary_async(config.k, *gd, config.processElement);
                             }
                             else
                             {
@@ -753,10 +784,10 @@ int main(int argc, char **argv)
                                     Log(error, "WRONG PARTITION SIZE SELECTED\n");
                                 }
 
-                                //mohaclique.findKclqueIncremental_edge_async(config.k, *gd, config.processElement);
+                                // mohaclique.findKclqueIncremental_edge_async(config.k, *gd, config.processElement);
                             }
                         }
-                        else //Pivoting
+                        else // Pivoting
                         {
                             if (kcc.BinaryEncode)
                             {
@@ -785,7 +816,7 @@ int main(int argc, char **argv)
                                     Log(error, "WRONG PARTITION SIZE SELECTED\n");
                                 }
 
-                                //mohaclique.findKclqueIncremental_edge_pivot_async(config.k, *gd, config.processElement);
+                                // mohaclique.findKclqueIncremental_edge_pivot_async(config.k, *gd, config.processElement);
                             }
                             else
                             {
@@ -814,7 +845,7 @@ int main(int argc, char **argv)
                                     Log(error, "WRONG PARTITION SIZE SELECTED\n");
                                 }
 
-                                //mohaclique.findKclqueIncremental_edge_nobin_pivot_async(config.k, *gd, config.processElement);
+                                // mohaclique.findKclqueIncremental_edge_nobin_pivot_async(config.k, *gd, config.processElement);
                             }
                         }
                     }
@@ -824,7 +855,7 @@ int main(int argc, char **argv)
                     Log(info, "MOHA %d k-clique (%f teps)", mohaclique.count(), m / time);
                 }
 
-                //k++;
+                // k++;
             }
         }
     }
@@ -1023,7 +1054,7 @@ int main(int argc, char **argv)
         }
 
         execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), split_ptr.gdata());
-        total = CUBScanExclusive<uint, uint>(split_ptr.gdata(), split_ptr.gdata(), n, config.deviceId, 0, config.allocation);
+        uint total = CUBScanExclusive<uint, uint>(split_ptr.gdata(), split_ptr.gdata(), n, config.deviceId, 0, config.allocation);
         split_ptr.setSingle(n, total, true);
         execKernel((split_child<uint>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, *gd, tmp_row.gdata(), tmp_col.gdata(), split_col.gdata(), split_ptr.gdata());
         execKernel((split_inverse<uint>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, keep.gdata(), m);
@@ -1039,7 +1070,7 @@ int main(int argc, char **argv)
         }
 
         execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), split_ptr.gdata());
-        uint total = CUBScanExclusive<uint, uint>(split_ptr.gdata(), split_ptr.gdata(), n, config.deviceId, 0, config.allocation);
+        total = CUBScanExclusive<uint, uint>(split_ptr.gdata(), split_ptr.gdata(), n, config.deviceId, 0, config.allocation);
         split_ptr.setSingle(n, total, true);
         execKernel((split_parent<uint>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, *gd, tmp_row.gdata(), tmp_col.gdata(), split_col.gdata(), split_ptr.gdata());
         execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), split_ptr.gdata());
@@ -1201,13 +1232,13 @@ int main(int argc, char **argv)
 
     if (config.mt == KTRUSS)
     {
-        //The problem with Ktruss that it physically changes the graph structure due to stream compaction !!
+        // The problem with Ktruss that it physically changes the graph structure due to stream compaction !!
         graph::COOCSRGraph_d<uint> *gd;
-        to_csrcoo_device(g, gd, config.deviceId, unified); //got to device !!
+        to_csrcoo_device(g, gd, config.deviceId, unified); // got to device !!
 
         //#define VLDB2020
 #ifdef VLDB2020
-        //We need unified to do stream compaction
+        // We need unified to do stream compaction
         graph::GPUArray<int> output("KT Output", AllocationTypeEnum::unified, m / 2, config.deviceId);
         graph::BmpGpu<uint> bmp(config.deviceId);
         bmp.getEidAndEdgeList(g); // CPU
@@ -1240,7 +1271,7 @@ int main(int argc, char **argv)
 
 #define OUR_NEW_KTRUSS
 #ifdef OUR_NEW_KTRUSS
-        //We need to change the graph representation
+        // We need to change the graph representation
         graph::GPUArray<uint> rowIndex("Half Row Index", AllocationTypeEnum::unified, m / 2, config.deviceId),
             colIndex("Half Col Index", AllocationTypeEnum::unified, m / 2, config.deviceId),
             EID("EID", AllocationTypeEnum::unified, m, config.deviceId),
@@ -1291,7 +1322,7 @@ int main(int argc, char **argv)
         std::vector<EdgeTy<uint>> patEdges;
         std::vector<EdgeTy<uint>> patFileEdges;
 
-        while (patFile.get_edges(patFileEdges, 100))
+        while (patFile.get_edges(patFileEdges, 10 * 10))
         {
             patEdges.insert(patEdges.end(), patFileEdges.begin(), patFileEdges.end());
         }
@@ -1310,69 +1341,137 @@ int main(int argc, char **argv)
         patG.rowInd->cdata() = patCsrcoo.row_ind();
         patG.colInd->cdata() = patCsrcoo.col_ind();
 
-        // graph::CSRCOO<uint> temp_csrcoo = graph::CSRCOO<uint>::from_edgelist(edges, lowerTriangular);
-        // uint n1 = csrcoo.num_rows();
-        // uint m1 = csrcoo.nnz();
+// if (true)
+// Degree or degeneracy based orientation
+// mohacore.getNodeDegree(*gd);
+#ifdef false
+        graph::COOCSRGraph_d<uint> *gsplit = (graph::COOCSRGraph_d<uint> *)malloc(sizeof(graph::COOCSRGraph_d<uint>));
+        Timer degeneracy_time;
 
-        // graph::COOCSRGraph<uint> g;
-        // g.capacity = m1;
-        // g.numEdges = m1;
-        // g.numNodes = n1;
+        mohacore.findKcoreIncremental_async(3, 1000, *gd, 0, 0);
 
+        Log(info, "Degeneracy ordering time: %f s", degeneracy_time.elapsed());
+
+        Timer csr_recreation_time;
+
+        graph::GPUArray<uint>
+            split_col("Split Column", gpu, m, config.deviceId),
+            tmp_row("Temp Row", gpu, m / 2, config.deviceId),
+            tmp_col("Temp Column", gpu, m / 2, config.deviceId),
+            split_ptr("Split Pointer", gpu, n + 1, config.deviceId),
+            asc("ASC temp", AllocationTypeEnum::unified, m, config.deviceId);
+        graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, config.deviceId);
+
+        execKernel((init<uint, PeelType>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata(), mohacore.nodePriority.gdata());
+
+        graph::CubLarge<uint> s(config.deviceId);
+        if (m < INT_MAX)
+        {
+            CUBSelect(gd->rowInd, tmp_row.gdata(), keep.gdata(), m, config.deviceId);
+            CUBSelect(gd->colInd, tmp_col.gdata(), keep.gdata(), m, config.deviceId);
+        }
+        else
+        {
+            s.Select2(gd->rowInd, gd->colInd, tmp_row.gdata(), tmp_col.gdata(), keep.gdata(), m);
+        }
+
+        execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), split_ptr.gdata());
+        uint total = CUBScanExclusive<uint, uint>(split_ptr.gdata(), split_ptr.gdata(), n, config.deviceId, 0, config.allocation);
+        split_ptr.setSingle(n, total, true);
+        execKernel((split_child<uint>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, *gd, tmp_row.gdata(), tmp_col.gdata(), split_col.gdata(), split_ptr.gdata());
+        execKernel((split_inverse<uint>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, keep.gdata(), m);
+
+        if (m < INT_MAX)
+        {
+            CUBSelect(gd->rowInd, tmp_row.gdata(), keep.gdata(), m, config.deviceId);
+            CUBSelect(gd->colInd, tmp_col.gdata(), keep.gdata(), m, config.deviceId);
+        }
+        else
+        {
+            s.Select2(gd->rowInd, gd->colInd, tmp_row.gdata(), tmp_col.gdata(), keep.gdata(), m);
+        }
+
+        execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), split_ptr.gdata());
+        total = CUBScanExclusive<uint, uint>(split_ptr.gdata(), split_ptr.gdata(), n, config.deviceId, 0, config.allocation);
+        split_ptr.setSingle(n, total, true);
+        execKernel((split_parent<uint>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, *gd, tmp_row.gdata(), tmp_col.gdata(), split_col.gdata(), split_ptr.gdata());
+        execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), split_ptr.gdata());
+        execKernel((split_acc<uint>), ((n - 1) / 51200) + 1, 512, config.deviceId, false, *gd, split_ptr.gdata());
+
+        cudaDeviceSynchronize();
+        asc.freeGPU();
+        keep.freeGPU();
+        tmp_row.freeGPU();
+        tmp_col.freeGPU();
+
+        gsplit->numNodes = n;
+        gsplit->numEdges = m;
+        gsplit->capacity = m;
+        gsplit->rowPtr = gd->rowPtr;
+        gsplit->rowInd = gd->rowInd;
+        gsplit->colInd = split_col.gdata();
+        gsplit->splitPtr = split_ptr.gdata();
+        CUDA_RUNTIME(cudaFree(gd->colInd));
+
+        Log(info, "CSR Recreation time: %f s", csr_recreation_time.elapsed());
+#endif
         // Initialise subgraph matcher class
-        graph::SG_Match<uint> *sgm = new graph::SG_Match<uint>(config.mt, config.processBy, config.deviceId);
+        // graph::SG_Match<uint> *sgm = new graph::SG_Match<uint>(config.mt, config.processBy, config.deviceId);
 
         // Process template and count subgraphs
+
+        graph::SG_Match<uint> *sgm = new graph::SG_Match<uint>(config.mt, config.processBy, config.deviceId);
+        // sgm->run(*gd, patG);
         sgm->run(*gd, patG);
 
         // Clean up
-        //delete sgm;
+        // delete sgm;
     }
 
 #pragma region MyRegion
     ////Hashing tests
     ////More tests on GPUArray
-    //graph::GPUArray<uint> A("Test A: In", AllocationTypeEnum::cpuonly);
-    //graph::GPUArray<uint> B("Test B: In", AllocationTypeEnum::cpuonly);
+    // graph::GPUArray<uint> A("Test A: In", AllocationTypeEnum::cpuonly);
+    // graph::GPUArray<uint> B("Test B: In", AllocationTypeEnum::cpuonly);
 
-    //const uint inputSize = pow<int,int>(2, 18) - 1;
+    // const uint inputSize = pow<int,int>(2, 18) - 1;
     //
     //
-    //A.cdata() = new uint[inputSize];
-    //B.cdata() = new uint[inputSize];
+    // A.cdata() = new uint[inputSize];
+    // B.cdata() = new uint[inputSize];
 
-    //const int dimBlock = 512;
-    //const int dimGrid = (inputSize + (dimBlock)-1) / (dimBlock);
+    // const int dimBlock = 512;
+    // const int dimGrid = (inputSize + (dimBlock)-1) / (dimBlock);
 
-    //srand(220);
+    // srand(220);
 
-    //A.cdata()[0] = 1;
-    //B.cdata()[0] = 1;
-    //for (uint i = 1; i < inputSize; i++)
+    // A.cdata()[0] = 1;
+    // B.cdata()[0] = 1;
+    // for (uint i = 1; i < inputSize; i++)
     //{
     //	A.cdata()[i] = A.cdata()[i - 1] + (rand() % 13) + 1;
     //	B.cdata()[i] = B.cdata()[i - 1] + (rand() % 13) + 1;
-    //}
+    // }
 
-    //graph::Hashing::goldenSerialIntersectionCPU<uint>(A, B, inputSize);
+    // graph::Hashing::goldenSerialIntersectionCPU<uint>(A, B, inputSize);
 
-    //A.switch_to_gpu(0, inputSize);
-    //B.switch_to_gpu(0, inputSize);
+    // A.switch_to_gpu(0, inputSize);
+    // B.switch_to_gpu(0, inputSize);
 
-    //graph::Hashing::goldenBinaryGPU<uint>(A, B, inputSize);
+    // graph::Hashing::goldenBinaryGPU<uint>(A, B, inputSize);
 
     ////1-level hash with binary search for stash
-    //graph::Hashing::test1levelHashing<uint>(A, B, inputSize, 4);
+    // graph::Hashing::test1levelHashing<uint>(A, B, inputSize, 4);
 
     ////Non-stash hashing
-    //graph::Hashing::testHashNosStash<uint>(A, B, inputSize, 5);
+    // graph::Hashing::testHashNosStash<uint>(A, B, inputSize, 5);
 
     ////Store binary tree traversal: Now assume full binary tree
-    //vector<uint> treeSizes;
+    // vector<uint> treeSizes;
     //
-    //int maxInputSize;
-    //int levels = 1;
-    //for (int i = 1; i < 19; i++)
+    // int maxInputSize;
+    // int levels = 1;
+    // for (int i = 1; i < 19; i++)
     //{
     //	int v = pow<int, int>(2, i) - 1;
 
@@ -1385,19 +1484,19 @@ int main(int argc, char **argv)
     //		break;
     //}
 
-    //graph::GPUArray<Node> BT("Binary Traverasl", gpu, maxInputSize, 0);
-    //graph::GPUArray<uint> BTV("Binary Traverasl", gpu, maxInputSize, 0);
+    // graph::GPUArray<Node> BT("Binary Traverasl", gpu, maxInputSize, 0);
+    // graph::GPUArray<uint> BTV("Binary Traverasl", gpu, maxInputSize, 0);
     //
-    //int cl = 0;
-    //int totalElements = 1;
+    // int cl = 0;
+    // int totalElements = 1;
 
-    //int element0 = maxInputSize / 2;
-    //BT.cdata()[0].i = element0;
-    //BTV.cdata()[0] = B.cdata()[element0];
-    //BT.cdata()[0].l = 0;
-    //BT.cdata()[0].r = maxInputSize;
+    // int element0 = maxInputSize / 2;
+    // BT.cdata()[0].i = element0;
+    // BTV.cdata()[0] = B.cdata()[element0];
+    // BT.cdata()[0].l = 0;
+    // BT.cdata()[0].r = maxInputSize;
 
-    //while (totalElements < maxInputSize)
+    // while (totalElements < maxInputSize)
     //{
     //	int num_elem_lev = pow<int, int>(2, cl);
     //	int levelStartIndex = pow<int, int>(2, cl) - 1;
@@ -1430,20 +1529,20 @@ int main(int argc, char **argv)
     //	cl++;
     //}
 
-    //BTV.switch_to_gpu(0);
+    // BTV.switch_to_gpu(0);
 
-    //const auto startBST = stime();
-    //graph::GPUArray<uint> countBST("Test Binary Search Tree search: Out", AllocationTypeEnum::unified, 1, 0);
-    //graph::binary_search_bst_g<uint, 32> << <1, 32 >> > (countBST.gdata(), A.gdata(), inputSize, BTV.gdata(), inputSize);
-    //cudaDeviceSynchronize();
-    //double elapsedBST = elapsedSec(startBST);
-    //printf("BST Elapsed time = %f, Count = %u \n", elapsedBST, countBST.cdata()[0]);
+    // const auto startBST = stime();
+    // graph::GPUArray<uint> countBST("Test Binary Search Tree search: Out", AllocationTypeEnum::unified, 1, 0);
+    // graph::binary_search_bst_g<uint, 32> << <1, 32 >> > (countBST.gdata(), A.gdata(), inputSize, BTV.gdata(), inputSize);
+    // cudaDeviceSynchronize();
+    // double elapsedBST = elapsedSec(startBST);
+    // printf("BST Elapsed time = %f, Count = %u \n", elapsedBST, countBST.cdata()[0]);
 
-    //BTV.freeCPU();
-    //BTV.freeGPU();
+    // BTV.freeCPU();
+    // BTV.freeGPU();
 
-    //BT.freeCPU();
-    //BT.freeGPU();
+    // BT.freeCPU();
+    // BT.freeGPU();
 
     ////For weighted edges
     ////std::vector<WEdgeTy<uint, wtype>> wedges;
@@ -1454,7 +1553,7 @@ int main(int argc, char **argv)
 
 #pragma endregion
 
-    //A.freeGPU();
-    //B.freeGPU();
+    // A.freeGPU();
+    // B.freeGPU();
     return 0;
 }

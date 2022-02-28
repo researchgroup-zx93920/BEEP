@@ -27,7 +27,7 @@ do
     #echo -e "Template Path: $TEMP_PATH"
     echo -e "\n\n************* Processing Template $temp **************"
     # echo -e "symopt"
-    ./build/exe/src/main.cu.exe -g $GRAPH -o full -t $TEMP_PATH -w -d 3 -m $TASK -p $MODE #| grep -Ei "preprocessing|count|HD|LD"
+    ./build/exe/src/main.cu.exe -g $GRAPH -o full -t $TEMP_PATH -w 0 -d 3 -m $TASK -p $MODE #| grep -Ei "preprocessing|count|HD|LD"
     # echo -e "baseline"
     # /usr/bin/timeout $TIMEOUT ./build/exe/src/baseline.cu.exe -g $GRAPH -t $TEMP_PATH -d 3 -m $TASK -o full -p $MODE | grep -Ei "preprocessing|count"
 

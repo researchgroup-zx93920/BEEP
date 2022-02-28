@@ -1,7 +1,8 @@
 #!/bin/sh
 TASKS=(sgm)
-# GRAPHS=(com-orkut com-Friendter cit-Patents_adj com-youtube as-Skitter) # com-orkut com-Friendter) cit-Patents_adj
-GRAPHS=(com-lj)
+GRAPHS=(com-orkut cit-Patents_adj com-youtube as-Skitter) # com-orkut com-Friendter) cit-Patents_adj
+# GRAPHS=(as-Skitter)
+# GRAPHS=(cit-Patents_adj)
 # GRAPHS=(uci)
 # GRAPHS=(com-youtube com-lj cit-Patents_adj com-orkut com-Friendter)
 MODES=(node)

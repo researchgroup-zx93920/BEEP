@@ -2,6 +2,7 @@
 #pragma once
 
 #include "sgm_kernels.cuh"
+#include "utils.cuh"
 
 namespace graph
 {
@@ -15,8 +16,8 @@ namespace graph
 #include "../nauty/nauty.h"
 
     /*******************
-    * CLASS DEFINITION *
-    *******************/
+     * CLASS DEFINITION *
+     *******************/
     template <typename T>
     class SG_Match
     {
@@ -93,7 +94,7 @@ namespace graph
             {
                 current.count.gdata()[0] = 0;
             }
-            //Log(LogPriorityEnum::info, "Level: %d, curr: %d/%d", level, current.count.gdata()[0], bucket.count.gdata()[0]);
+            // Log(LogPriorityEnum::info, "Level: %d, curr: %d/%d", level, current.count.gdata()[0], bucket.count.gdata()[0]);
         }
 
     public:
@@ -149,33 +150,35 @@ namespace graph
             delete sym_nodes_ptr;
         }
 
-        void run(graph::COOCSRGraph_d<T> &dataGraph, graph::COOCSRGraph<T> &patGraph)
+        void run(graph::COOCSRGraph_d<T> dataGraph, graph::COOCSRGraph<T> &patGraph)
         {
             CUDA_RUNTIME(cudaSetDevice(dev_));
 
-            //CUDA_RUNTIME(cudaStreamCreate(&stream_));
-            //CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+            // CUDA_RUNTIME(cudaStreamCreate(&stream_));
+            // CUDA_RUNTIME(cudaStreamSynchronize(stream_));
 
             double time;
 
             Timer p;
 
             preprocess_query(patGraph);
-            // initialize(dataGraph, *oriented_dataGraph);
             initialize(dataGraph);
-            peel_data(dataGraph); //dataGraph transfers to unified memory here
+            peel_data(dataGraph); // dataGraph transfers to unified memory here
+            Degeneracy_orientation(dataGraph);
+            // print_graph(dataGraph);
+            initialize1(dataGraph);
 
-            graph::COOCSRGraph_d<T> *oriented_dataGraph;
-            orient_upper_tri(dataGraph, oriented_dataGraph);
+            // graph::COOCSRGraph_d<T> *oriented_dataGraph;
+            // orient_upper_tri(dataGraph, oriented_dataGraph);
             // print_graph(*oriented_dataGraph);
-            initialize1(*oriented_dataGraph);
+            // initialize1(*oriented_dataGraph);
             time = p.elapsed();
-            Log(info, "Preprocessing time: %f ms", time * 1000);
 
+            Log(info, "Preprocessing time: %f ms", time * 1000);
             printf("Undirected graph maxdegree: %lu\n", max_dDegree.gdata()[0]);
             printf("Directed graph maxdegree %lu\n", oriented_max_dDegree.gdata()[0]);
             Timer t;
-            count_subgraphs(dataGraph, *oriented_dataGraph);
+            count_subgraphs(dataGraph);
             time = t.elapsed();
             Log(info, "count time %f s", time);
         }
@@ -186,17 +189,22 @@ namespace graph
         void detect_symmetry();
         void check_unmat();
         // void initialize(graph::COOCSRGraph_d<T> &dataGraph, graph::COOCSRGraph_d<T> &oriented_dataGraph);
+        void peel_data(graph::COOCSRGraph_d<T> &dataGraph);
         void initialize(graph::COOCSRGraph_d<T> &dataGraph);
         void initialize1(graph::COOCSRGraph_d<T> &oriented_dataGraph);
-        void peel_data(graph::COOCSRGraph_d<T> &dataGraph);
-        void count_subgraphs(graph::COOCSRGraph_d<T> &dataGraph, graph::COOCSRGraph_d<T> &oriented_dataGraph);
-        void print_graph(graph::COOCSRGraph_d<T> &datagraph);
-        void orient_upper_tri(graph::COOCSRGraph_d<T> &datagraph, graph::COOCSRGraph_d<T> *&oriented_datagraph);
+        // lexicographic function.. to be combined
+        // void count_subgraphs(graph::COOCSRGraph_d<T> &dataGraph, graph::COOCSRGraph_d<T> &oriented_dataGraph);
+
+        // splitptr based function..
+        void count_subgraphs(graph::COOCSRGraph_d<T> &dataGraph);
+        void print_graph(graph::COOCSRGraph_d<T> &dataGraph);
+        void orient_upper_tri(graph::COOCSRGraph_d<T> &dataGraph, graph::COOCSRGraph_d<T> *&oriented_dataGraph);
+        void Degeneracy_orientation(graph::COOCSRGraph_d<T> &dataGraph);
     };
 
     /***********************
-    * FUNCTION DEFINITIONS *
-    ***********************/
+     * FUNCTION DEFINITIONS *
+     ***********************/
 
     template <typename T>
     void SG_Match<T>::preprocess_query(graph::COOCSRGraph<T> &query)
@@ -522,7 +530,7 @@ namespace graph
 
         oriented_nodeDegree.initialize("Edge Support", unified, oriented_dataGraph.numNodes, dev_);
         uint dimGridNodes = (oriented_dataGraph.numNodes + block_size - 1) / block_size;
-        execKernel((getNodeDegree_kernel<T, block_size>), dimGridNodes, block_size, dev_, false,
+        execKernel((getNodeDegree_split_kernel<T, block_size>), dimGridNodes, block_size, dev_, false,
                    oriented_nodeDegree.gdata(), oriented_dataGraph, oriented_max_dDegree.gdata());
 
         if (by_ == ByEdge)
@@ -579,7 +587,7 @@ namespace graph
             new_ptr.gdata()[dataGraph.numNodes] = total;
 
             // Select marked edges from ColInd
-            printf("Total value %u\n", total);
+            // printf("Total value %u\n", total);
             new_adj.initialize("New column index", unified, total, dev_);
             new_row.initialize("New row index", unified, total, dev_);
             if (dataGraph.numEdges < INT_MAX)
@@ -597,11 +605,11 @@ namespace graph
             swap_ele(dataGraph.rowPtr, new_ptr.gdata());
             swap_ele(dataGraph.colInd, new_adj.gdata());
             swap_ele(dataGraph.rowInd, new_row.gdata());
-            //printf("Edges removed: %d\n", dataGraph.numEdges - total);
+            // printf("Edges removed: %d\n", dataGraph.numEdges - total);
             dataGraph.numEdges = total;
 
             // Print Stats
-            //printf("Nodes filtered: %d\n", current_q.count.gdata()[0]);
+            // printf("Nodes filtered: %d\n", current_q.count.gdata()[0]);
 
             // Clean up
             keep.freeGPU();
@@ -622,9 +630,207 @@ namespace graph
                        dataGraph, edgeDegree.gdata(), max_eDegree.gdata());
         }
     }
+    /*
+        template <typename T>
+        void SG_Match<T>::count_subgraphs(graph::COOCSRGraph_d<T> &dataGraph, graph::COOCSRGraph_d<T> &oriented_dataGraph)
+        {
 
+            // graph::COOCSRGraph_d<T> *oriented_dataGraph;
+            // orient_upper_tri(dataGraph, oriented_dataGraph);
+            // // Log(debug, "oriented graph\n");
+
+            // Log(debug, "original graph Nodes: %u, Edges: %u\n", dataGraph.numNodes, dataGraph.numEdges);
+            // Log(debug, "Oriented graph Nodes: %u, Edges: %u\n", oriented_dataGraph.numNodes, oriented_dataGraph.numEdges);
+            // Initialise Kernel Dims
+            const auto block_size_LD = 128; // Block size for low degree nodes
+            const T partitionSize_LD = 8;
+            const T numPartitions_LD = block_size_LD / partitionSize_LD;
+            const auto block_size_HD = 1024; // Block size for high degree nodes
+            const T partitionSize_HD = 32;
+            const T numPartitions_HD = block_size_HD / partitionSize_HD;
+            const T bound_LD = 2048;
+            const T bound_HD = 32768 + 16384;
+            const uint dv = 32;
+            Log(debug, "Partition size: %u", partitionSize_LD);
+            // CUDA Initialise, gather runtime Info.
+            CUDAContext context;
+            T num_SMs = context.num_SMs;
+            T conc_blocks_per_SM_LD = context.GetConCBlocks(block_size_LD);
+            T conc_blocks_per_SM_HD = context.GetConCBlocks(block_size_HD);
+
+            // Initialise Arrays
+            GPUArray<T> d_bitmap_states("bmp bitmap stats", AllocationTypeEnum::gpu, num_SMs * conc_blocks_per_SM_LD, dev_);
+            cudaMemset(d_bitmap_states.gdata(), 0, num_SMs * conc_blocks_per_SM_LD * sizeof(T));
+            GPUArray<T> d_count_per_node("per node count", AllocationTypeEnum::gpu, dataGraph.numNodes, dev_);
+            cudaMemset(d_count_per_node.gdata(), 0, dataGraph.numNodes * sizeof(T));
+
+            // GPU Constant memory
+            cudaMemcpyToSymbol(KCCOUNT, &(query_sequence->N), sizeof(KCCOUNT));
+            cudaMemcpyToSymbol(LUNMAT, &(unmat_level), sizeof(LUNMAT));
+            // printf("LUNMAT %d\n", unmat_level);
+            cudaMemcpyToSymbol(MAXLEVEL, &max_qDegree, sizeof(MAXLEVEL));
+            cudaMemcpyToSymbol(MINLEVEL, &min_qDegree, sizeof(MINLEVEL));
+            cudaMemcpyToSymbol(QEDGE, &(query_edges->cdata()[0]), query_edges->N * sizeof(QEDGE[0]));
+            cudaMemcpyToSymbol(QEDGE_PTR, &(query_edge_ptr->cdata()[0]), query_edge_ptr->N * sizeof(QEDGE_PTR[0]));
+            cudaMemcpyToSymbol(SYMNODE, &(sym_nodes->cdata()[0]), sym_nodes->N * sizeof(SYMNODE[0]));
+            cudaMemcpyToSymbol(SYMNODE_PTR, &(sym_nodes_ptr->cdata()[0]), sym_nodes_ptr->N * sizeof(SYMNODE_PTR[0]));
+            cudaMemcpyToSymbol(QDEG, &(query_degree->cdata()[0]), query_degree->N * sizeof(QDEG[0]));
+
+            // Initialise Queueing
+            T todo = (by_ == ByEdge) ? dataGraph.numEdges : dataGraph.numNodes;
+            T span = bound_HD;
+            T level = 0;
+            T bucket_level_end_ = level;
+
+            // Ignore starting nodes with degree < max_qDegree.
+            if (by_ == ByEdge)
+                bucket_scan(edgeDegree, dataGraph.numEdges, level, max_qDegree, bucket_level_end_, current_q, bucket_q);
+            else
+                bucket_scan(nodeDegree, dataGraph.numNodes, level, max_qDegree, bucket_level_end_, current_q, bucket_q);
+            todo -= current_q.count.gdata()[0];
+            current_q.count.gdata()[0] = 0;
+            level = max_qDegree;
+            bucket_level_end_ = level;
+            span -= level;
+
+            // Loop over different buckets
+            while (todo > 0)
+            {
+                // Compute bucket
+                if (by_ == ByEdge)
+                    bucket_scan(edgeDegree, dataGraph.numEdges, level, span, bucket_level_end_, current_q, bucket_q);
+                else
+                    bucket_scan(nodeDegree, dataGraph.numNodes, level, span, bucket_level_end_, current_q, bucket_q);
+
+                if (current_q.count.gdata()[0] > 0)
+                {
+                    todo -= current_q.count.gdata()[0];
+
+                    // Array Sizes
+
+                    uint maxDeg = (by_ == ByEdge) ? oriented_max_eDegree.gdata()[0] : oriented_max_dDegree.gdata()[0]; // maxDeg from oriented dataGraph
+                    uint unoriented_maxDeg = (by_ == ByEdge) ? max_eDegree.gdata()[0] : max_dDegree.gdata()[0];
+                    // Log(debug, "max degree %lu\n", maxDeg);
+                    maxDeg = level + span < maxDeg ? level + span : maxDeg;
+                    uint64 numBlock = maxDeg >= bound_LD ? num_SMs * conc_blocks_per_SM_HD : num_SMs * conc_blocks_per_SM_LD;
+                    bool persistant = true;
+                    if (current_q.count.gdata()[0] < numBlock)
+                    {
+                        numBlock = current_q.count.gdata()[0];
+                        persistant = false;
+                    }
+
+                    uint num_divs = (maxDeg + dv - 1) / dv;
+                    uint64 level_size = numBlock * max_qDegree * num_divs;
+                    level_size *= (maxDeg >= bound_LD ? numPartitions_HD : numPartitions_LD);
+                    uint64 encode_size = numBlock * maxDeg * num_divs;
+                    uint64 orient_mask_size = numBlock * num_divs;
+
+                    uint64 asym_level_size = numBlock * 2 * unoriented_maxDeg * (maxDeg >= bound_LD ? numPartitions_HD : numPartitions_LD);
+                    // printf("Level Size = %llu, Encode Size = %llu\n", level_size, encode_size);
+                    GPUArray<T> node_be("Half Binary encoded data", AllocationTypeEnum::gpu, encode_size, dev_);
+
+                    GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
+                    GPUArray<T> orient_mask("Orientation mask", AllocationTypeEnum::gpu, orient_mask_size, dev_);
+
+                    GPUArray<T> asym_level("information for asymmetric levels", AllocationTypeEnum::gpu, asym_level_size, dev_);
+                    cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T));
+
+                    cudaMemset(current_level.gdata(), 0, level_size * sizeof(T));
+                    cudaMemset(orient_mask.gdata(), 0, orient_mask_size * sizeof(T));
+                    cudaMemset(asym_level.gdata(), 0XFFFFFFFF, asym_level_size * sizeof(T));
+
+                    // Constant memory
+                    if (maxDeg >= bound_LD)
+                    {
+                        cudaMemcpyToSymbol(NUMPART, &numPartitions_HD, sizeof(NUMPART));
+                        cudaMemcpyToSymbol(PARTSIZE, &partitionSize_HD, sizeof(PARTSIZE));
+                        cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM_HD), sizeof(CBPSM));
+                    }
+                    else
+                    {
+                        cudaMemcpyToSymbol(NUMPART, &numPartitions_LD, sizeof(NUMPART));
+                        cudaMemcpyToSymbol(PARTSIZE, &partitionSize_LD, sizeof(PARTSIZE));
+                        cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM_LD), sizeof(CBPSM));
+                    }
+                    cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
+                    cudaMemcpyToSymbol(MAXDEG, &maxDeg, sizeof(MAXDEG));
+                    cudaMemcpyToSymbol(UNDIRECTED_MAXDEG, &unoriented_maxDeg, sizeof(UNDIRECTED_MAXDEG));
+
+                    // Kernel Launch
+                    auto grid_block_size = current_q.count.gdata()[0];
+                    if (maxDeg >= bound_LD)
+                    {
+                        if (persistant)
+                        {
+                            execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size_HD, partitionSize_HD>), grid_block_size, block_size_HD, dev_, false,
+                                       counter.gdata(), d_count_per_node.gdata(),
+                                       dataGraph, oriented_dataGraph,
+                                       current_q.device_queue->gdata()[0],
+                                       current_level.gdata(), asym_level.gdata(),
+                                       d_bitmap_states.gdata(), node_be.gdata(),
+                                       orient_mask.gdata(),
+                                       by_ == ByNode);
+                        }
+                        else
+                        {
+                            execKernel((sgm_kernel_central_node_base_binary<T, block_size_HD, partitionSize_HD>), grid_block_size, block_size_HD, dev_, false,
+                                       counter.gdata(), d_count_per_node.gdata(),
+                                       dataGraph, oriented_dataGraph,
+                                       current_q.device_queue->gdata()[0],
+                                       current_level.gdata(), asym_level.gdata(),
+                                       node_be.gdata(), orient_mask.gdata(),
+                                       by_ == ByNode);
+                        }
+                    }
+                    else
+                    {
+                        if (persistant)
+                        {
+                            execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size_LD, partitionSize_LD>), grid_block_size, block_size_LD, dev_, false,
+                                       counter.gdata(), d_count_per_node.gdata(),
+                                       dataGraph, oriented_dataGraph,
+                                       current_q.device_queue->gdata()[0],
+                                       current_level.gdata(), asym_level.gdata(),
+                                       d_bitmap_states.gdata(), node_be.gdata(),
+                                       orient_mask.gdata(),
+                                       by_ == ByNode);
+                        }
+                        else
+                        {
+                            execKernel((sgm_kernel_central_node_base_binary<T, block_size_LD, partitionSize_LD>), grid_block_size, block_size_LD, dev_, false,
+                                       counter.gdata(), d_count_per_node.gdata(),
+                                       dataGraph, oriented_dataGraph,
+                                       current_q.device_queue->gdata()[0],
+                                       current_level.gdata(), asym_level.gdata(),
+                                       node_be.gdata(), orient_mask.gdata(),
+                                       by_ == ByNode);
+                        }
+                    }
+
+                    // Cleanup
+                    current_level.freeGPU();
+                    node_be.freeGPU();
+                    orient_mask.freeGPU();
+                    asym_level.freeGPU();
+                    asym_level.freeGPU();
+                    d_count_per_node.freeGPU();
+
+                    // Print bucket stats:
+                    std::cout << "Bucket levels: " << level << " to " << maxDeg
+                              << ", nodes/edges: " << current_q.count.gdata()[0]
+                              << ", Counter: " << counter.gdata()[0] << std::endl;
+                }
+                level += span;
+            }
+            std::cout << "------------- Counter = " << counter.gdata()[0] << "\n";
+
+            counter.freeGPU();
+            d_bitmap_states.freeGPU();
+        }
+    */
     template <typename T>
-    void SG_Match<T>::count_subgraphs(graph::COOCSRGraph_d<T> &dataGraph, graph::COOCSRGraph_d<T> &oriented_dataGraph)
+    void SG_Match<T>::count_subgraphs(graph::COOCSRGraph_d<T> &dataGraph)
     {
 
         // graph::COOCSRGraph_d<T> *oriented_dataGraph;
@@ -699,8 +905,9 @@ namespace graph
                 todo -= current_q.count.gdata()[0];
 
                 // Array Sizes
+                // maxDeg from oriented dataGraph
+                uint maxDeg = (by_ == ByEdge) ? oriented_max_eDegree.gdata()[0] : oriented_max_dDegree.gdata()[0];
 
-                uint maxDeg = (by_ == ByEdge) ? oriented_max_eDegree.gdata()[0] : oriented_max_dDegree.gdata()[0]; //maxDeg from oriented datagraph
                 uint unoriented_maxDeg = (by_ == ByEdge) ? max_eDegree.gdata()[0] : max_dDegree.gdata()[0];
                 // Log(debug, "max degree %lu\n", maxDeg);
                 maxDeg = level + span < maxDeg ? level + span : maxDeg;
@@ -718,14 +925,16 @@ namespace graph
                 uint64 encode_size = numBlock * maxDeg * num_divs;
                 uint64 orient_mask_size = numBlock * num_divs;
 
-                uint64 asym_level_size = numBlock * 2 * unoriented_maxDeg * (maxDeg >= bound_LD ? numPartitions_HD : numPartitions_LD);
-                //printf("Level Size = %llu, Encode Size = %llu\n", level_size, encode_size);
-                GPUArray<T> node_be("Temp level Counter", AllocationTypeEnum::gpu, encode_size, dev_);
+                uint64 asym_level_size = numBlock * 2 * (unoriented_maxDeg /*- maxDeg*/) * (maxDeg >= bound_LD ? numPartitions_HD : numPartitions_LD);
+                // printf("Level Size = %llu, Encode Size = %llu\n", level_size, encode_size);
+                GPUArray<T> node_be("Half Binary Encoded data", AllocationTypeEnum::gpu, encode_size, dev_);
+                GPUArray<T> node_be_full("Full Binary Encoded data", AllocationTypeEnum::gpu, encode_size, dev_);
                 GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
                 GPUArray<T> orient_mask("Orientation mask", AllocationTypeEnum::gpu, orient_mask_size, dev_);
 
                 GPUArray<T> asym_level("information for asymmetric levels", AllocationTypeEnum::gpu, asym_level_size, dev_);
                 cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T));
+                cudaMemset(node_be_full.gdata(), 0, encode_size * sizeof(T));
                 cudaMemset(current_level.gdata(), 0, level_size * sizeof(T));
                 cudaMemset(orient_mask.gdata(), 0, orient_mask_size * sizeof(T));
                 cudaMemset(asym_level.gdata(), 0XFFFFFFFF, asym_level_size * sizeof(T));
@@ -755,10 +964,10 @@ namespace graph
                     {
                         execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size_HD, partitionSize_HD>), grid_block_size, block_size_HD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(),
-                                   dataGraph, oriented_dataGraph,
+                                   dataGraph,
                                    current_q.device_queue->gdata()[0],
                                    current_level.gdata(), asym_level.gdata(),
-                                   d_bitmap_states.gdata(), node_be.gdata(),
+                                   d_bitmap_states.gdata(), node_be.gdata(), node_be_full.gdata(),
                                    orient_mask.gdata(),
                                    by_ == ByNode);
                     }
@@ -766,10 +975,10 @@ namespace graph
                     {
                         execKernel((sgm_kernel_central_node_base_binary<T, block_size_HD, partitionSize_HD>), grid_block_size, block_size_HD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(),
-                                   dataGraph, oriented_dataGraph,
+                                   dataGraph,
                                    current_q.device_queue->gdata()[0],
                                    current_level.gdata(), asym_level.gdata(),
-                                   node_be.gdata(), orient_mask.gdata(),
+                                   node_be.gdata(), node_be_full.gdata(), orient_mask.gdata(),
                                    by_ == ByNode);
                     }
                 }
@@ -779,10 +988,10 @@ namespace graph
                     {
                         execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size_LD, partitionSize_LD>), grid_block_size, block_size_LD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(),
-                                   dataGraph, oriented_dataGraph,
+                                   dataGraph,
                                    current_q.device_queue->gdata()[0],
                                    current_level.gdata(), asym_level.gdata(),
-                                   d_bitmap_states.gdata(), node_be.gdata(),
+                                   d_bitmap_states.gdata(), node_be.gdata(), node_be_full.gdata(),
                                    orient_mask.gdata(),
                                    by_ == ByNode);
                     }
@@ -790,10 +999,10 @@ namespace graph
                     {
                         execKernel((sgm_kernel_central_node_base_binary<T, block_size_LD, partitionSize_LD>), grid_block_size, block_size_LD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(),
-                                   dataGraph, oriented_dataGraph,
+                                   dataGraph,
                                    current_q.device_queue->gdata()[0],
                                    current_level.gdata(), asym_level.gdata(),
-                                   node_be.gdata(), orient_mask.gdata(),
+                                   node_be.gdata(), node_be_full.gdata(), orient_mask.gdata(),
                                    by_ == ByNode);
                     }
                 }
@@ -801,6 +1010,7 @@ namespace graph
                 // Cleanup
                 current_level.freeGPU();
                 node_be.freeGPU();
+                node_be_full.freeGPU();
                 orient_mask.freeGPU();
                 asym_level.freeGPU();
                 asym_level.freeGPU();
@@ -820,26 +1030,57 @@ namespace graph
     }
 
     template <typename T>
-    void SG_Match<T>::print_graph(graph::COOCSRGraph_d<T> &datagraph)
+    void SG_Match<T>::print_graph(graph::COOCSRGraph_d<T> &dataGraph)
     {
-        // graph::COOCSRGraph_d<T> datagraph = graph[0];
-        Log(info, "Printing graph as read");
-        Log(info, "num Nodes %lu", datagraph.numNodes);
-        for (T src = datagraph.rowInd[0]; src < datagraph.numNodes; src++)
-        {
 
-            T srcStart = datagraph.rowPtr[src];
-            T srcEnd = datagraph.rowPtr[src + 1];
-            // T src = datagraph.rowInd[srcStart];
+        Log(info, "Printing graph as read");
+        Log(info, "num Nodes %lu", dataGraph.numNodes);
+        graph::COOCSRGraph<uint> temp_g;
+        uint m = dataGraph.numEdges, n = dataGraph.numNodes;
+        temp_g.capacity = m;
+        temp_g.numEdges = m;
+        temp_g.numNodes = n;
+
+        uint *rp, *ri, *ci, *sp;
+        cudaMallocHost((void **)&rp, (n + 1) * sizeof(uint));
+        cudaMallocHost((void **)&ri, (m) * sizeof(uint));
+        cudaMallocHost((void **)&ci, (m) * sizeof(uint));
+        cudaMallocHost((void **)&sp, (n + 1) * sizeof(uint));
+
+        temp_g.rowPtr = new graph::GPUArray<uint>("Temp row ptr", AllocationTypeEnum::cpuonly);
+        temp_g.rowInd = new graph::GPUArray<uint>("Temp row indices", AllocationTypeEnum::cpuonly);
+        temp_g.colInd = new graph::GPUArray<uint>("Temp col indices", AllocationTypeEnum::cpuonly);
+
+        CUDA_RUNTIME(cudaMemcpy(rp, dataGraph.rowPtr, (n + 1) * sizeof(uint), cudaMemcpyKind::cudaMemcpyDeviceToHost));
+        CUDA_RUNTIME(cudaMemcpy(ri, dataGraph.rowInd, (m) * sizeof(uint), cudaMemcpyKind::cudaMemcpyDeviceToHost));
+        CUDA_RUNTIME(cudaMemcpy(ci, dataGraph.colInd, (m) * sizeof(uint), cudaMemcpyKind::cudaMemcpyDeviceToHost));
+        CUDA_RUNTIME(cudaMemcpy(sp, dataGraph.splitPtr, (n + 1) * sizeof(uint), cudaMemcpyKind::cudaMemcpyDeviceToHost));
+
+        temp_g.rowPtr->cdata() = rp;
+        temp_g.rowInd->cdata() = ri;
+        temp_g.colInd->cdata() = ci;
+
+        for (T src = temp_g.rowInd->cdata()[0]; src < temp_g.numNodes; src++)
+        {
+            // Log(debug, "code reached here %u\n", __LINE__);
+            T srcStart = sp[src];
+            T srcEnd = temp_g.rowPtr->cdata()[src + 1];
 
             printf("%lu\t: ", src);
             for (T j = srcStart; j < srcEnd; j++)
             {
-                printf("%lu, ", datagraph.colInd[j]);
+                printf("%lu, ", temp_g.colInd->cdata()[j]);
             }
             printf("\n");
+            // printf("\t%u\n", sp[src] - srcStart);
         }
         printf("\n");
+        printf("***end of graph***\n");
+        cudaFreeHost(rp);
+        cudaFreeHost(ri);
+        cudaFreeHost(ci);
+        cudaFreeHost(sp);
+        // graph::free_csrcoo_host(temp_g);
     }
 
     template <typename T>
@@ -917,6 +1158,70 @@ namespace graph
         og1.rowInd->cdata() = ri;
         og1.colInd->cdata() = ci;
 
-        to_csrcoo_device(og1, or_g, dev, gpu); //got to device !!
+        to_csrcoo_device(og1, or_g, dev, gpu); // got to device !!
+    }
+
+    template <typename T>
+    void SG_Match<T>::Degeneracy_orientation(graph::COOCSRGraph_d<T> &g)
+    {
+        T m = g.numEdges;
+        T n = g.numNodes;
+
+        graph::SingleGPU_Kcore<uint, PeelType> mohacore(dev_);
+        Timer degeneracy_time;
+        mohacore.findKcoreIncremental_async(3, 1000, g, 0, 0);
+        Log(info, "Degeneracy ordering time: %f s", degeneracy_time.elapsed());
+
+        Timer csr_recreation_time;
+        graph::GPUArray<uint>
+            split_col("Split Column", gpu, m, dev_),
+            tmp_row("Temp Row", gpu, m / 2, dev_),
+            tmp_col("Temp Column", gpu, m / 2, dev_),
+            split_ptr("Split Pointer", gpu, n + 1, dev_),
+            asc("ASC temp", AllocationTypeEnum::unified, m, dev_);
+        graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, dev_);
+        execKernel((init<uint, PeelType>), ((m - 1) / 51200) + 1, 512, dev_, false, g, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata(), mohacore.nodePriority.gdata());
+
+        graph::CubLarge<uint> s(dev_);
+        if (m < INT_MAX)
+        {
+            CUBSelect(g.rowInd, tmp_row.gdata(), keep.gdata(), m, dev_);
+            CUBSelect(g.colInd, tmp_col.gdata(), keep.gdata(), m, dev_);
+        }
+        else
+        {
+            s.Select2(g.rowInd, g.colInd, tmp_row.gdata(), tmp_col.gdata(), keep.gdata(), m);
+        }
+        execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, dev_, false, g.rowPtr, n, keep.gdata(), split_ptr.gdata());
+        uint total = CUBScanExclusive<uint, uint>(split_ptr.gdata(), split_ptr.gdata(), n, dev_, 0, AllocationTypeEnum::gpu);
+        split_ptr.setSingle(n, total, true);
+        execKernel((split_child<uint>), ((m - 1) / 51200) + 1, 512, dev_, false, g, tmp_row.gdata(), tmp_col.gdata(), split_col.gdata(), split_ptr.gdata());
+        execKernel((split_inverse<uint>), ((m - 1) / 51200) + 1, 512, dev_, false, keep.gdata(), m);
+        if (m < INT_MAX)
+        {
+            CUBSelect(g.rowInd, tmp_row.gdata(), keep.gdata(), m, dev_);
+            CUBSelect(g.colInd, tmp_col.gdata(), keep.gdata(), m, dev_);
+        }
+        else
+        {
+            s.Select2(g.rowInd, g.colInd, tmp_row.gdata(), tmp_col.gdata(), keep.gdata(), m);
+        }
+        execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, dev_, false, g.rowPtr, n, keep.gdata(), split_ptr.gdata());
+        total = CUBScanExclusive<uint, uint>(split_ptr.gdata(), split_ptr.gdata(), n, dev_, 0, AllocationTypeEnum::gpu);
+        split_ptr.setSingle(n, total, true);
+        execKernel((split_parent<uint>), ((m - 1) / 51200) + 1, 512, dev_, false, g, tmp_row.gdata(), tmp_col.gdata(), split_col.gdata(), split_ptr.gdata());
+        execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, dev_, false, g.rowPtr, n, keep.gdata(), split_ptr.gdata());
+        execKernel((split_acc<uint>), ((n - 1) / 51200) + 1, 512, dev_, false, g, split_ptr.gdata());
+
+        cudaDeviceSynchronize();
+        asc.freeGPU();
+        keep.freeGPU();
+        tmp_row.freeGPU();
+        tmp_col.freeGPU();
+        CUDA_RUNTIME(cudaFree(g.colInd));
+        g.colInd = split_col.gdata();
+        g.splitPtr = split_ptr.gdata();
+
+        Log(info, "CSR Recreation time: %f s", csr_recreation_time.elapsed());
     }
 }
