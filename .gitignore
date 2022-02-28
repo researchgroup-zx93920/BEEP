@@ -1,10 +1,8 @@
 cub/**
 nauty/**
-build/**
-build/exe/src/main.cu.exe
+build/exe/**
 *.exe
 *.o
-build/exe/src/main.cu.o
 .vscode/**
 tests/**
 scripts/racecheck.log
