@@ -17,7 +17,7 @@
 
 #include <cstdio>
 #include <string>
-//freestanding specific
+// freestanding specific
 
 #include "defs.cuh"
 #include "cuda.h"
@@ -47,6 +47,7 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort =
 	if (code != cudaSuccess)
 	{
 		fprintf(stderr, "GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
+
 		/*if (abort) */ exit(1);
 	}
 }
@@ -175,7 +176,7 @@ void MatrixStats(T nnz, T nr, T nc, T *csrRowPointers, T *csrColumns)
 	}
 
 	double mean = 1.0 * totalRow / nr;
-	//double sd = std::sqrt( (sq_sum / nr) - (mean * mean));
+	// double sd = std::sqrt( (sq_sum / nr) - (mean * mean));
 	double sd = 0;
 	for (uint64 i = 0; i < nr; i++)
 	{

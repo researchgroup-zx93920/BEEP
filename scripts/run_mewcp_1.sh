@@ -10,7 +10,7 @@ echo "ProcessBy: $MODE"
 echo "Task: $TASK"
 
 # TEMPLATES=(diamond) # fan4 wheel5 cq6m1 cq6) # cq7 cq8 cq9 cq10) 
-TEMPLATES=(cq6m1)
+TEMPLATES=(cq7m1 cq8m1)
 # TEMPLATES=(cq5m1 house pyramid fan3)
 #TEMPLATES=(cq6m1)
 #TEMPLATES=(cq7 cq8 cq9 wheel6 wheel7)
@@ -23,11 +23,12 @@ cd /home/almasri3/samiran/mewcp-gpu/
 
 for temp in ${TEMPLATES[@]};
 do
-    TEMP_PATH="/home/almasri3/samiran/dataset/template_graphs/mtx/${temp}_template.mtx"
+    # TEMP_PATH="/home/almasri3/samiran/dataset/template_graphs/mtx/${temp}_template.mtx"
+    TEMP_PATH="/home/almasri3/samiran/dataset/big_templates/mtx/${temp}_template.mtx"
     #echo -e "Template Path: $TEMP_PATH"
     echo -e "\n\n************* Processing Template $temp **************"
     # echo -e "symopt"
-    ./build/exe/src/main.cu.exe -g $GRAPH -o full -t $TEMP_PATH -w 0 -d 3 -m $TASK -p $MODE #| grep -Ei "preprocessing|count|HD|LD"
+    /usr/bin/timeout $TIMEOUT ./build/exe/src/main.cu.exe -g $GRAPH -o full -t $TEMP_PATH -w 0 -d 1 -m $TASK -p $MODE |grep -Ei "preprocessing|count|HD|LD"
     # echo -e "baseline"
     # /usr/bin/timeout $TIMEOUT ./build/exe/src/baseline.cu.exe -g $GRAPH -t $TEMP_PATH -d 3 -m $TASK -o full -p $MODE | grep -Ei "preprocessing|count"
 

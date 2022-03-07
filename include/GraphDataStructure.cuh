@@ -22,11 +22,10 @@ namespace graph
         T numNodes;
         T numEdges;
         T capacity;
-
         T *rowPtr;
         T *rowInd;
         T *colInd;
-        T *splitPtr; //ptr to split parents and children
+        T *splitPtr; // ptr to split parents and children
     };
 
     template <typename T>

@@ -21,8 +21,8 @@ struct Config
 {
 
     const char *srcGraph;
-    const char *dstGraph; //for conversion
-    const char *patGraph; //for subgraph matching
+    const char *dstGraph; // for conversion
+    const char *patGraph; // for subgraph matching
     MAINTASK mt;
     bool printStats;
     int deviceId;
@@ -352,7 +352,7 @@ static Config parseArgs(int argc, char **argv)
 #ifndef __VS__
     int opt;
 
-    //printf("parsing configuration .... \n");
+    // printf("parsing configuration .... \n");
 
     while ((opt = getopt(argc, argv, "g:r:d:m:x:o:a:k:h:v:s:p:e:q:w:t:")) >= 0)
     {

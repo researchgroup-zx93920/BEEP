@@ -75,7 +75,7 @@ int main(int argc, char **argv)
 
     // CUDA_RUNTIME(cudaDeviceReset());
     Config config = parseArgs(argc, argv);
-
+    setbuf(stdout, NULL);
     printf("\033[0m");
     printf("Welcome ---------------------\n");
     printConfig(config);
@@ -154,10 +154,9 @@ int main(int argc, char **argv)
     g.numEdges = m;
     g.numNodes = n;
 
-    // No Allocation
-    g.rowPtr = new graph::GPUArray<uint>("Row pointer", AllocationTypeEnum::noalloc, n + 1, config.deviceId, true);
-    g.rowInd = new graph::GPUArray<uint>("Src Index", AllocationTypeEnum::noalloc, m, config.deviceId, true);
-    g.colInd = new graph::GPUArray<uint>("Dst Index", AllocationTypeEnum::noalloc, m, config.deviceId, true);
+    g.rowPtr = new graph::GPUArray<uint>("Row pointer", AllocationTypeEnum::gpu, n + 1, config.deviceId, true);
+    g.rowInd = new graph::GPUArray<uint>("Src Index", AllocationTypeEnum::gpu, m, config.deviceId, true);
+    g.colInd = new graph::GPUArray<uint>("Dst Index", AllocationTypeEnum::gpu, m, config.deviceId, true);
 
     uint *rp, *ri, *ci;
     cudaMallocHost((void **)&rp, (n + 1) * sizeof(uint));
@@ -169,11 +168,8 @@ int main(int argc, char **argv)
     CUDA_RUNTIME(cudaMemcpy(ci, csrcoo.col_ind(), (m) * sizeof(uint), cudaMemcpyKind::cudaMemcpyHostToHost));
 
     g.rowPtr->cdata() = rp;
-    g.rowPtr->setAlloc(cpuonly);
     g.rowInd->cdata() = ri;
-    g.rowInd->setAlloc(cpuonly);
     g.colInd->cdata() = ci;
-    g.colInd->setAlloc(cpuonly);
 
     Log(info, "Read graph time: %f s", read_graph_timer.elapsed());
 
@@ -181,26 +177,43 @@ int main(int argc, char **argv)
     Timer total_timer;
 
     graph::COOCSRGraph_d<uint> *gd = (graph::COOCSRGraph_d<uint> *)malloc(sizeof(graph::COOCSRGraph_d<uint>));
-    g.rowPtr->switch_to_gpu(config.deviceId);
 
     gd->numNodes = g.numNodes;
     gd->numEdges = g.numEdges;
     gd->capacity = g.capacity;
+
+    size_t mf, ma;
+    g.rowPtr->switch_to_gpu(config.deviceId, g.numNodes + 1);
+    cudaDeviceSynchronize();
+    Log(debug, "Moved rowPtr to device memory\n");
+    cudaMemGetInfo(&mf, &ma);
+    std::cout << "free: " << mf << " total: " << ma << std::endl;
     gd->rowPtr = g.rowPtr->gdata();
-
-    if (!config.isSmall || g.numEdges > 500000000)
+    if ((!config.isSmall || g.numEdges > 5E08) && !(config.mt == GRAPH_MATCH || config.mt == GRAPH_COUNT))
     {
-
+        Log(debug, "code Reached in big graphs!\n");
         gd->rowInd = g.rowInd->cdata();
         gd->colInd = g.colInd->cdata();
     }
     else
     {
-        g.rowInd->switch_to_gpu(config.deviceId);
-        g.colInd->switch_to_gpu(config.deviceId);
+        g.rowInd->switch_to_gpu(config.deviceId, g.numEdges);
+        cudaDeviceSynchronize();
+        Log(debug, "Moved rowIndices to device memory\n");
+        cudaMemGetInfo(&mf, &ma);
+        std::cout << "free: " << mf << " total: " << ma << std::endl;
+        g.colInd->switch_to_gpu(config.deviceId, g.numEdges);
+        cudaDeviceSynchronize();
+        Log(debug, "Moved colIndices to device memory");
+        cudaMemGetInfo(&mf, &ma);
+        std::cout << "free: " << mf << " total: " << ma << std::endl;
         gd->rowInd = g.rowInd->gdata();
         gd->colInd = g.colInd->gdata();
     }
+    Log(debug, "Moved graph to device memory\n");
+    cudaFreeHost(rp);
+    cudaFreeHost(ri);
+    cudaFreeHost(ci);
     // double total = total_timer.elapsed();
     Log(info, "Transfer Time: %f s", total_timer.elapsed());
     // printf("value at 97: %u\n", g.colInd->cdata()[97]);
@@ -1341,80 +1354,9 @@ int main(int argc, char **argv)
         patG.rowInd->cdata() = patCsrcoo.row_ind();
         patG.colInd->cdata() = patCsrcoo.col_ind();
 
-// if (true)
-// Degree or degeneracy based orientation
-// mohacore.getNodeDegree(*gd);
-#ifdef false
-        graph::COOCSRGraph_d<uint> *gsplit = (graph::COOCSRGraph_d<uint> *)malloc(sizeof(graph::COOCSRGraph_d<uint>));
-        Timer degeneracy_time;
+        // if (true)
+        // Degree or degeneracy based orientation
 
-        mohacore.findKcoreIncremental_async(3, 1000, *gd, 0, 0);
-
-        Log(info, "Degeneracy ordering time: %f s", degeneracy_time.elapsed());
-
-        Timer csr_recreation_time;
-
-        graph::GPUArray<uint>
-            split_col("Split Column", gpu, m, config.deviceId),
-            tmp_row("Temp Row", gpu, m / 2, config.deviceId),
-            tmp_col("Temp Column", gpu, m / 2, config.deviceId),
-            split_ptr("Split Pointer", gpu, n + 1, config.deviceId),
-            asc("ASC temp", AllocationTypeEnum::unified, m, config.deviceId);
-        graph::GPUArray<bool> keep("Keep temp", AllocationTypeEnum::unified, m, config.deviceId);
-
-        execKernel((init<uint, PeelType>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, *gd, asc.gdata(), keep.gdata(), mohacore.nodeDegree.gdata(), mohacore.nodePriority.gdata());
-
-        graph::CubLarge<uint> s(config.deviceId);
-        if (m < INT_MAX)
-        {
-            CUBSelect(gd->rowInd, tmp_row.gdata(), keep.gdata(), m, config.deviceId);
-            CUBSelect(gd->colInd, tmp_col.gdata(), keep.gdata(), m, config.deviceId);
-        }
-        else
-        {
-            s.Select2(gd->rowInd, gd->colInd, tmp_row.gdata(), tmp_col.gdata(), keep.gdata(), m);
-        }
-
-        execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), split_ptr.gdata());
-        uint total = CUBScanExclusive<uint, uint>(split_ptr.gdata(), split_ptr.gdata(), n, config.deviceId, 0, config.allocation);
-        split_ptr.setSingle(n, total, true);
-        execKernel((split_child<uint>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, *gd, tmp_row.gdata(), tmp_col.gdata(), split_col.gdata(), split_ptr.gdata());
-        execKernel((split_inverse<uint>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, keep.gdata(), m);
-
-        if (m < INT_MAX)
-        {
-            CUBSelect(gd->rowInd, tmp_row.gdata(), keep.gdata(), m, config.deviceId);
-            CUBSelect(gd->colInd, tmp_col.gdata(), keep.gdata(), m, config.deviceId);
-        }
-        else
-        {
-            s.Select2(gd->rowInd, gd->colInd, tmp_row.gdata(), tmp_col.gdata(), keep.gdata(), m);
-        }
-
-        execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), split_ptr.gdata());
-        total = CUBScanExclusive<uint, uint>(split_ptr.gdata(), split_ptr.gdata(), n, config.deviceId, 0, config.allocation);
-        split_ptr.setSingle(n, total, true);
-        execKernel((split_parent<uint>), ((m - 1) / 51200) + 1, 512, config.deviceId, false, *gd, tmp_row.gdata(), tmp_col.gdata(), split_col.gdata(), split_ptr.gdata());
-        execKernel((warp_detect_deleted_edges<uint>), (32 * n + 128 - 1) / 128, 128, config.deviceId, false, gd->rowPtr, n, keep.gdata(), split_ptr.gdata());
-        execKernel((split_acc<uint>), ((n - 1) / 51200) + 1, 512, config.deviceId, false, *gd, split_ptr.gdata());
-
-        cudaDeviceSynchronize();
-        asc.freeGPU();
-        keep.freeGPU();
-        tmp_row.freeGPU();
-        tmp_col.freeGPU();
-
-        gsplit->numNodes = n;
-        gsplit->numEdges = m;
-        gsplit->capacity = m;
-        gsplit->rowPtr = gd->rowPtr;
-        gsplit->rowInd = gd->rowInd;
-        gsplit->colInd = split_col.gdata();
-        gsplit->splitPtr = split_ptr.gdata();
-        CUDA_RUNTIME(cudaFree(gd->colInd));
-
-        Log(info, "CSR Recreation time: %f s", csr_recreation_time.elapsed());
-#endif
         // Initialise subgraph matcher class
         // graph::SG_Match<uint> *sgm = new graph::SG_Match<uint>(config.mt, config.processBy, config.deviceId);
 
@@ -1422,6 +1364,7 @@ int main(int argc, char **argv)
 
         graph::SG_Match<uint> *sgm = new graph::SG_Match<uint>(config.mt, config.processBy, config.deviceId);
         // sgm->run(*gd, patG);
+        printf("code initiates sgm->run\n");
         sgm->run(*gd, patG);
 
         // Clean up
