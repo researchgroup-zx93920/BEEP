@@ -132,7 +132,7 @@ namespace graph
 			_at = at;
 		}
 
-		void switch_to_gpu(int devId = 0, size_t size = 0) //copies from cpu to GPU (doesn't delete data on CPU)
+		void switch_to_gpu(int devId = 0, size_t size = 0) // copies from cpu to GPU (doesn't delete data on CPU)
 		{
 			if (_at == AllocationTypeEnum::cpuonly)
 			{
@@ -144,7 +144,7 @@ namespace graph
 				CUDA_RUNTIME(cudaMalloc(&gpu_data, N * sizeof(T)));
 				CUDA_RUNTIME(cudaMemcpy(gpu_data, cpu_data, N * sizeof(T), cudaMemcpyKind::cudaMemcpyHostToDevice));
 			}
-			else if (_at == AllocationTypeEnum::gpu) //memory is already allocated
+			else if (_at == AllocationTypeEnum::gpu) // memory is already allocated
 			{
 				if (size > N)
 				{
@@ -170,7 +170,7 @@ namespace graph
 				CUDA_RUNTIME(cudaMallocManaged(&gpu_data, N * sizeof(T)));
 				CUDA_RUNTIME(cudaMemcpy(gpu_data, cpu_data, N * sizeof(T), cudaMemcpyKind::cudaMemcpyHostToDevice));
 			}
-			else if (_at == AllocationTypeEnum::gpu) //memory is already allocated
+			else if (_at == AllocationTypeEnum::gpu) // memory is already allocated
 			{
 				// printf("it's on gpu\n");
 				if (size > N)

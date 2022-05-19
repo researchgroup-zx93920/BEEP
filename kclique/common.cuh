@@ -12,7 +12,7 @@ __constant__ uint NUMPART;
 __constant__ uint MAXLEVEL;
 __constant__ uint NUMDIVS;
 __constant__ uint CBPSM;
-__constant__ uint UNDIRECTED_MAXDEG;
+__constant__ uint ORIENTED_MAXDEG;
 
 ///////////////////////////// Global ////////////////////////////////////////////
 template <typename T, int BLOCK_DIM_X>

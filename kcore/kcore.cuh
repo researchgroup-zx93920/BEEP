@@ -294,14 +294,14 @@ namespace graph
 		int dev_;
 		cudaStream_t stream_;
 
-		//Outputs:
-		//Max k of a complete ktruss kernel
+		// Outputs:
+		// Max k of a complete ktruss kernel
 		int k;
 
-		//Percentage of deleted edges for a specific k
+		// Percentage of deleted edges for a specific k
 		float percentage_deleted_k;
 
-		//Same Function for any comutation
+		// Same Function for any comutation
 		void bucket_scan(
 			GPUArray<PeelT> nodeDegree, T node_num, int level,
 			GraphQueue<T, bool> &current,
@@ -341,7 +341,7 @@ namespace graph
 			{
 				current.count.setSingle(0, 0, true);
 			}
-			//Log(LogPriorityEnum::info, "Level: %d, curr: %d/%d", level, current.count.gdata()[0], bucket.count.gdata()[0]);
+			// Log(LogPriorityEnum::info, "Level: %d, curr: %d/%d", level, current.count.gdata()[0], bucket.count.gdata()[0]);
 		}
 
 		void AscendingGpu(int n, GPUArray<T> &identity_arr_asc)
@@ -361,7 +361,7 @@ namespace graph
 		{
 			static bool shrink_first_time = true;
 			if (shrink_first_time)
-			{ //shrink first time, allocate the buffers
+			{ // shrink first time, allocate the buffers
 				shrink_first_time = false;
 				Timer alloc_timer;
 				new_adj.initialize("New Adj", gpu, new_edge_num * 2, dev_);
@@ -378,7 +378,7 @@ namespace graph
 
 			uint total = CUBScanExclusive<uint, uint>(new_offset.gdata(), new_offset.gdata(), n);
 			new_offset.gdata()[n] = total;
-			//assert(total == new_edge_num * 2);
+			// assert(total == new_edge_num * 2);
 			cudaDeviceSynchronize();
 
 			swap_ele(rowPtr, new_offset.gdata());
@@ -420,13 +420,13 @@ namespace graph
 										const size_t nodeOffset = 0, const size_t edgeOffset = 0)
 		{
 			CUDA_RUNTIME(cudaSetDevice(dev_));
-			constexpr int dimBlock = 64; //For edges and nodes
+			constexpr int dimBlock = 64; // For edges and nodes
 
-			GPUArray<BCTYPE> processed; //isDeleted
+			GPUArray<BCTYPE> processed; // isDeleted
 
 			int level = 0;
 			int bucket_level_end_ = level;
-			//Lets apply queues and buckets
+			// Lets apply queues and buckets
 			graph::GraphQueue<T, bool> bucket_q;
 			bucket_q.Create(gpu, g.numNodes, dev_);
 
@@ -461,7 +461,7 @@ namespace graph
 				CUDA_RUNTIME(cudaGetLastError());
 				cudaDeviceSynchronize();
 
-				//1 bucket fill
+				// 1 bucket fill
 				bucket_scan(nodeDegree, todo_original, level, current_q, identity_arr_asc, bucket_q, bucket_level_end_);
 
 				int iterations = 0;
@@ -503,13 +503,13 @@ namespace graph
 					iterations++;
 					priority++;
 				}
-				//printf("Level %d took %d iterations \n", level, iterations);
+				// printf("Level %d took %d iterations \n", level, iterations);
 				level++;
 
 				// if(level == 4)
 				// 	break;
 			}
-
+			Log(debug, "total priority: %d", priority);
 			processed.freeGPU();
 			current_q.free();
 			next_q.free();
@@ -518,7 +518,7 @@ namespace graph
 
 			k = level;
 
-			//printf("Max Core = %d\n", k - 1);
+			// printf("Max Core = %d\n", k - 1);
 		}
 
 		uint findKtrussIncremental_sync(int kmin, int kmax, TcBase<T> *tcCounter, EidGraph_d<T> &g, int *reverseIndex, EncodeDataType *bitMap, const size_t nodeOffset = 0, const size_t edgeOffset = 0)

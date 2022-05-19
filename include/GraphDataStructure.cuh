@@ -1,6 +1,7 @@
 #pragma once
 #include "cub_wrappers.cuh"
 #include "CSRCOO.cuh"
+#include "CGArray.cuh"
 
 namespace graph
 {
@@ -25,7 +26,8 @@ namespace graph
         T *rowPtr;
         T *rowInd;
         T *colInd;
-        T *splitPtr; // ptr to split parents and children
+        T *splitPtr;        // ptr to split parents and children
+        T *oriented_colInd; // row ptr sorted by degeneracy priority
     };
 
     template <typename T>

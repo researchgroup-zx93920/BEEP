@@ -5,4 +5,4 @@ build/exe/**
 *.o
 .vscode/**
 tests/**
-scripts/racecheck.log
+scripts/**

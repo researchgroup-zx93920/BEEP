@@ -1,5 +1,5 @@
 #pragma once
-
+#define QUEUE_SIZE 1024
 /////////////////////////////////////////// Latest Kernels ///////////////////////////////////////////////////
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE = 32>
@@ -11,7 +11,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		unsigned short *current_level,
 		T *levelStats)
 {
-	//will be removed later
+	// will be removed later
 	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
 	constexpr T warpsPerBlock = BLOCK_DIM_X / 32;
 	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
@@ -45,7 +45,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 
 	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
 	{
-		//block things
+		// block things
 		if (threadIdx.x == 0)
 		{
 			T src = current.queue[i];
@@ -56,7 +56,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		T partMask = CPARTSIZE == 32 ? 0xFFFFFFFF : (1 << CPARTSIZE) - 1;
 		partMask = partMask << ((wx % (32 / CPARTSIZE)) * CPARTSIZE);
 		__syncthreads();
-		//warp loop
+		// warp loop
 		for (unsigned long long j = wx; j < srcLen; j += numPartitions)
 		{
 
@@ -149,7 +149,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 
 				if (lx == 0)
 				{
-					//current_node_index[0] = finalIndex;
+					// current_node_index[0] = finalIndex;
 					current_node_index[wx] = startIndex;
 					level_prev_index[wx][l[wx] - 2] = current_node_index[wx] + 1;
 					level_index[wx][l[wx] - 2]++;
@@ -184,7 +184,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 							clique_count[wx] += warpCountIn;
 						else if ((l[wx] + 1 < KCCOUNT) /*&& ((l[wx] + warpCountIn) >= KCCOUNT)*/)
 						{
-							//if(warpCountIn >= KCCOUNT - l[wx])
+							// if(warpCountIn >= KCCOUNT - l[wx])
 							{
 								(l[wx])++;
 								(new_level[wx])++;
@@ -230,7 +230,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			if (lx == 0)
 			{
 				atomicAdd(counter, clique_count[wx]);
-				//cpn[current.queue[i]] = clique_count[wx];
+				// cpn[current.queue[i]] = clique_count[wx];
 			}
 		}
 	}
@@ -280,7 +280,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		T *adj_enc,
 		T *im_level)
 {
-	//will be removed later
+	// will be removed later
 	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
 	constexpr T warpsPerBlock = BLOCK_DIM_X / 32;
 	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
@@ -316,7 +316,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 
 	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
 	{
-		//block things
+		// block things
 		if (threadIdx.x == 0)
 		{
 			src = current.queue[i];
@@ -343,7 +343,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		}
 
 		__syncthreads();
-		//compact: simpler than cub
+		// compact: simpler than cub
 		for (T j = wx; j < srcLen; j += numPartitions)
 		{
 			if (lx == 0)
@@ -360,9 +360,9 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			}
 		}
 
-		__syncthreads(); //Done encoding
+		__syncthreads(); // Done encoding
 
-		//warp loop
+		// warp loop
 		for (T j = wx; j < srcLen; j += numPartitions)
 		{
 
@@ -425,7 +425,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 				T startIndex = level_prev_index[wx][l[wx] - 2];
 				if (lx == 0)
 				{
-					//current_node_index[0] = finalIndex;
+					// current_node_index[0] = finalIndex;
 					current_node_index[wx] = startIndex;
 					level_prev_index[wx][l[wx] - 2] = current_node_index[wx] + 1;
 					level_index[wx][l[wx] - 2]++;
@@ -435,9 +435,9 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 
 				__syncwarp(partMask);
 
-				//assert(current_node_index[wx] < subgraph_counters[j]);
+				// assert(current_node_index[wx] < subgraph_counters[j]);
 				uint64 warpCountIn = 0;
-				const T dst = im[(l[wx] - 2) * srcLen + current_node_index[wx]]; //encode[srcLen*j +  current_node_index[wx]];
+				const T dst = im[(l[wx] - 2) * srcLen + current_node_index[wx]]; // encode[srcLen*j +  current_node_index[wx]];
 				const T dstStart = 0;
 				const T dstLen = subgraph_counters[dst];
 
@@ -456,7 +456,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 							clique_count[wx] += level_count[wx][l[wx] - 1];
 						else if ((l[wx] + 1 < KCCOUNT) /*&& ((l[wx] + warpCountIn) >= KCCOUNT)*/)
 						{
-							//if(warpCountIn >= KCCOUNT - l[wx])
+							// if(warpCountIn >= KCCOUNT - l[wx])
 							{
 								(l[wx])++;
 								(new_level[wx])++;
@@ -486,7 +486,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			if (lx == 0)
 			{
 				atomicAdd(counter, clique_count[wx]);
-				//cpn[current.queue[i]] = clique_count[wx];
+				// cpn[current.queue[i]] = clique_count[wx];
 			}
 		}
 	}
@@ -498,7 +498,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 	}
 }
 
-//come back
+// come back
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE = 32>
 __launch_bounds__(BLOCK_DIM_X, 16)
 	__global__ void kckernel_edge_block_warp_count(
@@ -509,7 +509,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		T *levelStats,
 		T *adj_tri)
 {
-	//will be removed later
+	// will be removed later
 	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
 	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
 	const size_t lx = threadIdx.x % CPARTSIZE;
@@ -542,7 +542,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 
 	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
 	{
-		//block things
+		// block things
 		if (threadIdx.x == 0)
 		{
 			src = g.rowInd[current.queue[i]];
@@ -579,7 +579,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		if (KCCOUNT == 3 && threadIdx.x == 0)
 			atomicAdd(counter, scounter);
 
-		//warp loop
+		// warp loop
 		for (T j = wx; j < scounter; j += numPartitions)
 		{
 			for (T k = lx; k < 10; k += CPARTSIZE)
@@ -593,7 +593,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			{
 				T src2 = tri[j];
 
-				//reinitialize with respect to the triangle now
+				// reinitialize with respect to the triangle now
 				src2Start[wx] = g.rowPtr[src2];
 				src2Len[wx] = g.rowPtr[src2 + 1] - src2Start[wx];
 
@@ -685,7 +685,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 
 				if (lx == 0)
 				{
-					//current_node_index[0] = finalIndex;
+					// current_node_index[0] = finalIndex;
 					current_node_index[wx] = startIndex;
 					level_prev_index[wx][l[wx] - 3] = current_node_index[wx] + 1;
 					level_index[wx][l[wx] - 3]++;
@@ -695,11 +695,11 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 				__syncwarp(partMask);
 
 				uint64 warpCountIn = 0;
-				const T dst = (refIndex[wx])[current_node_index[wx]]; //g.colInd[current_node_index[wx] + refIndex[wx]];
+				const T dst = (refIndex[wx])[current_node_index[wx]]; // g.colInd[current_node_index[wx] + refIndex[wx]];
 				const T dstStart = g.rowPtr[dst];
 				const T dstLen = g.rowPtr[dst + 1] - dstStart;
 
-				//bool limit = ((l[wx] - 3 + level_count[wx][l[wx] - 4]) >= KCCOUNT) && (dstLen >= KCCOUNT - l[wx]);
+				// bool limit = ((l[wx] - 3 + level_count[wx][l[wx] - 4]) >= KCCOUNT) && (dstLen >= KCCOUNT - l[wx]);
 
 				if (dstLen >= KCCOUNT - l[wx])
 				{
@@ -720,7 +720,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 							clique_count[wx] += warpCountIn;
 						else if ((l[wx] + 1 < KCCOUNT) /*&& ((l[wx] + warpCountIn) >= KCCOUNT)*/)
 						{
-							//if(warpCountIn >= KCCOUNT - l[wx])
+							// if(warpCountIn >= KCCOUNT - l[wx])
 							{
 								(l[wx])++;
 								(new_level[wx])++;
@@ -766,7 +766,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			if (lx == 0)
 			{
 				atomicAdd(counter, clique_count[wx]);
-				//cpn[current.queue[i]] = clique_count[wx];
+				// cpn[current.queue[i]] = clique_count[wx];
 			}
 		}
 
@@ -792,7 +792,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		T *adj_tri)
 {
 
-	//will be removed later
+	// will be removed later
 	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
 	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
 	const size_t lx = threadIdx.x % CPARTSIZE;
@@ -827,7 +827,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 
 	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
 	{
-		//block things
+		// block things
 		if (threadIdx.x == 0)
 		{
 			src = g.rowInd[current.queue[i]];
@@ -869,7 +869,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		}
 
 		__syncthreads();
-		//compact: simpler than cub
+		// compact: simpler than cub
 		for (T j = wx; j < scounter; j += numPartitions)
 		{
 			if (lx == 0)
@@ -886,12 +886,12 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			}
 		}
 
-		__syncthreads(); //Done encoding
+		__syncthreads(); // Done encoding
 
 		if (KCCOUNT == 3 && threadIdx.x == 0)
 			atomicAdd(counter, scounter);
 
-		//warp loop
+		// warp loop
 		for (T j = wx; j < scounter; j += numPartitions)
 		{
 			for (T k = lx; k < 10; k += CPARTSIZE)
@@ -963,7 +963,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 
 				if (lx == 0)
 				{
-					//current_node_index[0] = finalIndex;
+					// current_node_index[0] = finalIndex;
 					current_node_index[wx] = startIndex;
 					level_prev_index[wx][l[wx] - 3] = current_node_index[wx] + 1;
 					level_index[wx][l[wx] - 3]++;
@@ -975,7 +975,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 				uint64 warpCountIn = 0;
 				const T dst = encode[scounter * j + current_node_index[wx]];
 
-				//bool limit = ((l[wx] - 3 + level_count[wx][l[wx] - 4]) >= KCCOUNT) && (dstLen >= KCCOUNT - l[wx]);
+				// bool limit = ((l[wx] - 3 + level_count[wx][l[wx] - 4]) >= KCCOUNT) && (dstLen >= KCCOUNT - l[wx]);
 
 				if (subgraph_counters[dst] >= KCCOUNT - l[wx])
 				{
@@ -996,7 +996,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 							clique_count[wx] += warpCountIn;
 						else if ((l[wx] + 1 < KCCOUNT) /*&& ((l[wx] + warpCountIn) >= KCCOUNT)*/)
 						{
-							//if(warpCountIn >= KCCOUNT - l[wx])
+							// if(warpCountIn >= KCCOUNT - l[wx])
 							{
 								(l[wx])++;
 								(new_level[wx])++;
@@ -1040,7 +1040,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			if (lx == 0)
 			{
 				atomicAdd(counter, clique_count[wx]);
-				//cpn[current.queue[i]] = clique_count[wx];
+				// cpn[current.queue[i]] = clique_count[wx];
 			}
 		}
 
@@ -1054,7 +1054,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 	}
 }
 
-//No partition
+// No partition
 template <typename T, uint BLOCK_DIM_X>
 __launch_bounds__(BLOCK_DIM_X, 16)
 	__global__ void kckernel_edge_warp_binary_count(
@@ -1070,7 +1070,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		T *adj_enc,
 		T *adj_tri)
 {
-	//will be removed later
+	// will be removed later
 	const T gwx = (BLOCK_DIM_X * blockIdx.x + threadIdx.x) / 32;
 	constexpr T warpsPerBlock = BLOCK_DIM_X / 32;
 	const int wx = threadIdx.x / 32; // which warp in thread block
@@ -1113,7 +1113,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			T src = g.rowInd[current.queue[i]];
 			srcStart[wx] = g.rowPtr[src];
 			srcLen[wx] = g.rowPtr[src + 1] - srcStart[wx];
-			//printf("src = %u, srcLen = %u\n", src, srcLen);
+			// printf("src = %u, srcLen = %u\n", src, srcLen);
 		}
 		else if (lx == 1)
 		{
@@ -1148,7 +1148,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			atomicAdd(counter, scounter[wx]);
 
 		__syncwarp(mm);
-		//Encode
+		// Encode
 		for (unsigned long long j = 0; j < scounter[wx]; j++)
 		{
 			for (unsigned long long k = lx; k < num_divs_local[wx]; k += 32)
@@ -1161,7 +1161,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 																		  &encode[wx][j * num_divs_local[wx]]);
 		}
 
-		__syncwarp(mm); //Done encoding
+		__syncwarp(mm); // Done encoding
 		level_offset[wx] = sm_id * conc_blocks_per_SM * (warpsPerBlock * num_divs[wx] * 7) + levelPtr * (warpsPerBlock * num_divs[wx] * 7);
 		T *cl = &current_level[level_offset[wx] + wx * (num_divs[wx] * 7)];
 
@@ -1182,7 +1182,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			{
 				cl[k] = 0x00;
 			}
-			//get warp count ??
+			// get warp count ??
 			uint64 warpCount = 0;
 			for (unsigned long long k = lx; k < num_divs_local[wx]; k += 32)
 			{
@@ -1201,7 +1201,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			__syncwarp(mm);
 			while (level_count[wx][l[wx] - 4] > level_index[wx][l[wx] - 4])
 			{
-				//First Index
+				// First Index
 				T *from = l[wx] == 4 ? &(encode[wx][num_divs_local[wx] * j]) : &(cl[num_divs_local[wx] * (l[wx] - 4)]);
 				T *to = &(cl[num_divs_local[wx] * (l[wx] - 3)]);
 				T maskBlock = level_prev_index[wx][l[wx] - 4] / 32;
@@ -1222,7 +1222,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 				}
 
 				__syncwarp(mm);
-				//Intersect
+				// Intersect
 				uint64 warpCount = 0;
 				for (T k = lx; k < num_divs_local[wx]; k += 32)
 				{
@@ -1243,7 +1243,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 						level_prev_index[wx][l[wx] - 4] = 0;
 					}
 
-					//Readjust
+					// Readjust
 					while (l[wx] > 4 && level_index[wx][l[wx] - 4] >= level_count[wx][l[wx] - 4])
 					{
 						(l[wx])--;
@@ -1254,7 +1254,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			if (lx == 0)
 			{
 				atomicAdd(counter, clique_count[wx]);
-				//cpn[current.queue[i]] = clique_count[wx];
+				// cpn[current.queue[i]] = clique_count[wx];
 			}
 
 			__syncwarp();
@@ -1282,7 +1282,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 
 	)
 {
-	//will be removed later
+	// will be removed later
 	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
 	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
 	const int lx = threadIdx.x % CPARTSIZE;
@@ -1317,7 +1317,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 
 	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
 	{
-		//block things
+		// block things
 		if (threadIdx.x == 0)
 		{
 			T src = g.rowInd[current.queue[i]];
@@ -1332,7 +1332,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			tc = 0;
 		}
 
-		//get tri list: by block :!!
+		// get tri list: by block :!!
 		__syncthreads();
 		graph::block_count_and_set_tri<BLOCK_DIM_X, T>(&g.colInd[srcStart], srcLen, &g.colInd[src2Start], src2Len,
 													   tri, &scounter);
@@ -1349,7 +1349,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			atomicAdd(counter, scounter);
 
 		__syncthreads();
-		//Encode
+		// Encode
 		T partMask = (1 << CPARTSIZE) - 1;
 		partMask = partMask << ((wx % (32 / CPARTSIZE)) * CPARTSIZE);
 		for (T j = wx; j < scounter; j += numPartitions)
@@ -1364,14 +1364,14 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 																					 &encode[j * num_divs_local]);
 		}
 
-		__syncthreads(); //Done encoding
+		__syncthreads(); // Done encoding
 
 		if (lx == 0)
 			wtc[wx] = atomicAdd(&(tc), 1);
 		__syncwarp(partMask);
 
 		while (wtc[wx] < scounter)
-		//for (unsigned long long j = wx; j < scounter; j += numPartitions)
+		// for (unsigned long long j = wx; j < scounter; j += numPartitions)
 		{
 			T j = wtc[wx];
 			/*level_offset[wx]*/ T aa = sm_id * CBPSM * (numPartitions * NUMDIVS * 8) + levelPtr * (numPartitions * NUMDIVS * 8);
@@ -1379,7 +1379,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			if (lx < 8)
 			{
 				level_count[wx][lx] = 0;
-				//level_index[wx][lx] = 0;
+				// level_index[wx][lx] = 0;
 				level_prev_index[wx][lx] = 0;
 			}
 			if (lx == 0)
@@ -1388,7 +1388,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 				clique_count[wx] = 0;
 			}
 
-			//get warp count ??
+			// get warp count ??
 			uint64 warpCount = 0;
 			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 			{
@@ -1401,13 +1401,13 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			else if (lx == 0 && KCCOUNT > 4 && warpCount >= KCCOUNT - 3)
 			{
 				level_count[wx][l[wx] - 4] = warpCount;
-				//level_index[wx][l[wx] - 4] = 0;
+				// level_index[wx][l[wx] - 4] = 0;
 				level_prev_index[wx][l[wx] - 4] = 0;
 			}
 			__syncwarp(partMask);
 			while (level_count[wx][l[wx] - 4] > 0 /*level_index[wx][l[wx] - 4]*/)
 			{
-				//First Index
+				// First Index
 				T *from = l[wx] == 4 ? &(encode[num_divs_local * j]) : &(cl[num_divs_local * (l[wx] - 4)]);
 				T *to = &(cl[num_divs_local * (l[wx] - 3)]);
 				T maskBlock = level_prev_index[wx][l[wx] - 4] / 32;
@@ -1424,11 +1424,11 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 				if (lx == 0)
 				{
 					level_prev_index[wx][l[wx] - 4] = newIndex + 1;
-					//level_index[wx][l[wx] - 4]++;
+					// level_index[wx][l[wx] - 4]++;
 					level_count[wx][l[wx] - 4]--;
 				}
 
-				//Intersect
+				// Intersect
 				uint64 warpCount = 0;
 				for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 				{
@@ -1445,12 +1445,12 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 					{
 						(l[wx])++;
 						level_count[wx][l[wx] - 4] = warpCount;
-						//level_index[wx][l[wx] - 4] = 0;
+						// level_index[wx][l[wx] - 4] = 0;
 						level_prev_index[wx][l[wx] - 4] = 0;
 					}
 
-					//Readjust
-					while (l[wx] > 4 && level_count[wx][l[wx] - 4] <= 0) //level_index[wx][l[wx] - 4] >= level_count[wx][l[wx] - 4])
+					// Readjust
+					while (l[wx] > 4 && level_count[wx][l[wx] - 4] <= 0) // level_index[wx][l[wx] - 4] >= level_count[wx][l[wx] - 4])
 					{
 						(l[wx])--;
 					}
@@ -1460,7 +1460,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			if (lx == 0)
 			{
 				atomicAdd(counter, clique_count[wx]);
-				//cpn[current.queue[i]] = clique_count[wx];
+				// cpn[current.queue[i]] = clique_count[wx];
 			}
 
 			__syncwarp(partMask);
@@ -1478,7 +1478,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 	}
 }
 
-//Not good, so much global memory
+// Not good, so much global memory
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X, 16)
 	__global__ void kckernel_edge_block_warp_binary_count_o_global(
@@ -1494,7 +1494,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		T *level_count_global,
 		T *level_prev_index_global)
 {
-	//will be removed later
+	// will be removed later
 	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
 	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
 	const int lx = threadIdx.x % CPARTSIZE;
@@ -1537,7 +1537,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 
 	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
 	{
-		//block things
+		// block things
 		if (threadIdx.x == 0)
 		{
 			T src = g.rowInd[current.queue[i]];
@@ -1577,7 +1577,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			atomicAdd(counter, scounter);
 
 		__syncthreads();
-		//Encode
+		// Encode
 		T partMask = (1 << CPARTSIZE) - 1;
 		partMask = partMask << ((wx % (32 / CPARTSIZE)) * CPARTSIZE);
 		// T mm = (1 << scounter) - 1;
@@ -1594,27 +1594,27 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 																					 &encode[j * num_divs_local]);
 		}
 
-		__syncthreads(); //Done encoding
+		__syncthreads(); // Done encoding
 
 		if (lx == 0)
 			wtc[wx] = atomicAdd(&(tc), 1);
 		__syncwarp(partMask);
 
 		while (wtc[wx] < scounter)
-		//for (unsigned long long j = wx; j < scounter; j += numPartitions)
+		// for (unsigned long long j = wx; j < scounter; j += numPartitions)
 		{
 			T j = wtc[wx];
 			level_offset[wx] = sm_id * CBPSM * (numPartitions * NUMDIVS * 8) + levelPtr * (numPartitions * NUMDIVS * 8);
 			T *cl = &current_level[level_offset[wx] + wx * (NUMDIVS * 8)];
 			if (lx < 8)
 			{
-				//level_count[wx][lx] = 0;
+				// level_count[wx][lx] = 0;
 				level_count[spp * wx + lx] = 0;
 
-				//level_index[wx][lx] = 0;
+				// level_index[wx][lx] = 0;
 				level_index[spp * wx + lx] = 0;
 
-				//level_prev_index[wx][lx] = 0;
+				// level_prev_index[wx][lx] = 0;
 				level_prev_index[spp * wx + lx] = 0;
 			}
 			if (lx == 0)
@@ -1623,7 +1623,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 				clique_count[wx] = 0;
 			}
 
-			//get warp count ??
+			// get warp count ??
 			uint64 warpCount = 0;
 			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 			{
@@ -1642,7 +1642,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			__syncwarp(partMask);
 			while (level_count[spp * wx + l[wx] - 4] > level_index[spp * wx + l[wx] - 4])
 			{
-				//First Index
+				// First Index
 				T *from = l[wx] == 4 ? &(encode[num_divs_local * j]) : &(cl[num_divs_local * (l[wx] - 4)]);
 				T *to = &(cl[num_divs_local * (l[wx] - 3)]);
 				T maskBlock = level_prev_index[spp * wx + l[wx] - 4] / 32;
@@ -1662,7 +1662,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 					level_index[spp * wx + l[wx] - 4]++;
 				}
 
-				//Intersect
+				// Intersect
 				uint64 warpCount = 0;
 				for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 				{
@@ -1686,7 +1686,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 						level_prev_index[spp * wx + l[wx] - 4] = 0;
 					}
 
-					//Readjust
+					// Readjust
 					while (l[wx] > 4 && level_index[spp * wx + l[wx] - 4] >= level_count[spp * wx + l[wx] - 4])
 					{
 						(l[wx])--;
@@ -1697,7 +1697,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			if (lx == 0)
 			{
 				atomicAdd(counter, clique_count[wx]);
-				//cpn[current.queue[i]] = clique_count[wx];
+				// cpn[current.queue[i]] = clique_count[wx];
 			}
 
 			__syncwarp(partMask);
@@ -1773,7 +1773,7 @@ __device__ __forceinline__ uint64 explore_branch_o(uint start_level, uint num_di
 				level_prev_index[l[wx] - start_level] = 0;
 			}
 
-			//Readjust
+			// Readjust
 			while (l[wx] > start_level && level_index[l[wx] - start_level] >= level_count[l[wx] - start_level])
 			{
 				(l[wx])--;
@@ -1786,7 +1786,7 @@ __device__ __forceinline__ uint64 explore_branch_o(uint start_level, uint num_di
 	return globalCount;
 }
 
-//very bad: sync_shfl is very low performance !!
+// very bad: sync_shfl is very low performance !!
 template <typename T, uint CPARTSIZE, uint numPartitions>
 __device__ __forceinline__ uint64 explore_branch_sync(uint start_level, uint num_divs_local, uint *l, uint partMask,
 													  T startEncodeIndex, T *encode, T *cl, T *level_count, T *level_index, T *level_prev_index)
@@ -1844,7 +1844,7 @@ __device__ __forceinline__ uint64 explore_branch_sync(uint start_level, uint num
 
 		__syncwarp(partMask);
 
-		//Readjust
+		// Readjust
 		while (ll > start_level && level_index[ll - start_level] >= level_count[ll - start_level])
 		{
 			(ll)--;
@@ -1913,7 +1913,7 @@ __device__ __forceinline__ uint64 explore_branch(KCTask<T> *task, T *queue_encod
 				level_prev_index[ll[wx] - l] = 0;
 			}
 
-			//Readjust
+			// Readjust
 			while (ll[wx] > l && level_index[ll[wx] - l] >= level_count[ll[wx] - l])
 			{
 				(ll[wx])--;
@@ -1937,13 +1937,13 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		T *levelStats,
 		T *adj_enc,
 		T *adj_tri,
-		//simt::atomic<KCTask<T>, simt::thread_scope_device> *queue_data
+		// simt::atomic<KCTask<T>, simt::thread_scope_device> *queue_data
 		KCTask<T> *queue_data,
 		T *queue_encode)
 {
 	__shared__ T queue_count;
 
-	//will be removed later
+	// will be removed later
 	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
 	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
 	const size_t lx = threadIdx.x % CPARTSIZE;
@@ -1976,13 +1976,13 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 
 	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
 	{
-		//block things
+		// block things
 		if (threadIdx.x == 0)
 		{
 			T src = g.rowInd[current.queue[i]];
 			srcStart = g.rowPtr[src];
 			srcLen = g.rowPtr[src + 1] - srcStart;
-			//printf("src = %u, srcLen = %u\n", src, srcLen);
+			// printf("src = %u, srcLen = %u\n", src, srcLen);
 		}
 		else if (threadIdx.x == 1)
 		{
@@ -2021,7 +2021,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			atomicAdd(counter, scounter);
 
 		__syncthreads();
-		//Encode
+		// Encode
 		T partMask = (1 << CPARTSIZE) - 1;
 		partMask = partMask << ((wx % (32 / CPARTSIZE)) * CPARTSIZE);
 		for (unsigned long long j = wx; j < scounter; j += numPartitions)
@@ -2037,7 +2037,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 																					 &encode[j * num_divs_local]);
 		}
 
-		__syncthreads(); //Done encoding
+		__syncthreads(); // Done encoding
 		level_offset[wx] = sm_id * CBPSM * (numPartitions * NUMDIVS * 7) + levelPtr * (numPartitions * NUMDIVS * 7);
 		T *cl = &current_level[level_offset[wx] + wx * (NUMDIVS * 7)];
 		KCTask<T> *queue_data_block = &(queue_data[sm_id * CBPSM * (QUEUE_SIZE) + levelPtr * (QUEUE_SIZE)]);
@@ -2046,10 +2046,10 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		// 	wtc[wx] = atomicAdd(&(tc), 1);
 		// __syncwarp(partMask);
 
-		//while(wtc[wx] < scounter)
+		// while(wtc[wx] < scounter)
 		for (unsigned long long j = wx; j < scounter; j += numPartitions)
 		{
-			//T j = wtc[wx];
+			// T j = wtc[wx];
 			if (lx < 7)
 			{
 				level_count[wx][lx] = 0;
@@ -2062,7 +2062,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 				clique_count[wx] = 0;
 			}
 
-			//get warp count ??
+			// get warp count ??
 			uint64 warpCount = 0;
 			for (unsigned long long k = lx; k < num_divs_local; k += CPARTSIZE)
 			{
@@ -2086,7 +2086,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			// 	atomicAdd(counter, wc); //clique_count[wx] = wc;
 			while (level_count[wx][l[wx] - 4] > level_index[wx][l[wx] - 4])
 			{
-				//First Index
+				// First Index
 				T *from = l[wx] == 4 ? &(encode[num_divs_local * j]) : &(cl[num_divs_local * (l[wx] - 4)]);
 				T *to = &(cl[num_divs_local * (l[wx] - 3)]);
 				T maskBlock = level_prev_index[wx][l[wx] - 4] / 32;
@@ -2106,7 +2106,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 					level_index[wx][l[wx] - 4]++;
 				}
 
-				//Intersect
+				// Intersect
 				uint64 warpCount = 0;
 				for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 				{
@@ -2148,7 +2148,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 						// }
 					}
 
-					//Readjust
+					// Readjust
 					while (l[wx] > 4 && level_index[wx][l[wx] - 4] >= level_count[wx][l[wx] - 4])
 					{
 						(l[wx])--;
@@ -2159,7 +2159,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			if (lx == 0)
 			{
 				atomicAdd(counter, clique_count[wx] == 1 ? 0 : 1);
-				//cpn[current.queue[i]] = clique_count[wx];
+				// cpn[current.queue[i]] = clique_count[wx];
 			}
 
 			__syncwarp(partMask);
@@ -2169,7 +2169,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			// __syncwarp(partMask);
 		}
 		__syncthreads();
-		//dequeue simply
+		// dequeue simply
 
 		T limit = (queue_count > QUEUE_SIZE) ? QUEUE_SIZE : queue_count;
 		for (unsigned long long j = wx; j < limit; j += numPartitions)
@@ -2178,13 +2178,13 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			uint64 wc = explore_branch<T, CPARTSIZE, numPartitions>(&t, queue_encode_block, num_divs_local, partMask,
 																	encode, cl, level_count[wx], level_index[wx], level_prev_index[wx], j);
 			if (lx == 0)
-				atomicAdd(counter, wc); //clique_count[wx] = wc;
+				atomicAdd(counter, wc); // clique_count[wx] = wc;
 		}
 
 		__syncthreads();
 	}
 
-	//search in the queue
+	// search in the queue
 
 	__syncthreads();
 	if (threadIdx.x == 0)
@@ -2213,7 +2213,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		T *level_tmp,
 		unsigned long long *nCR)
 {
-	//will be removed later
+	// will be removed later
 	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
 	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
 	const size_t lx = threadIdx.x % CPARTSIZE;
@@ -2253,14 +2253,14 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
 	{
 		__syncthreads();
-		//block things
+		// block things
 		if (threadIdx.x == 0)
 		{
 			src = current.queue[i];
 			srcStart = g.rowPtr[src];
 			srcLen = g.rowPtr[src + 1] - srcStart;
 
-			//printf("src = %u, srcLen = %u\n", src, srcLen);
+			// printf("src = %u, srcLen = %u\n", src, srcLen);
 
 			num_divs_local = (srcLen + 32 - 1) / 32;
 			encode_offset = sm_id * CBPSM * (MAXDEG * NUMDIVS) + levelPtr * (MAXDEG * NUMDIVS);
@@ -2275,7 +2275,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			level_index = &level_index_g[level_item_offset /*+ wx*MAXDEG*/];
 			level_prev_index = &level_prev_g[level_item_offset /*+ wx*MAXDEG*/];
 			rsize = &level_r[level_item_offset /*+ wx*MAXDEG*/]; // will be removed
-			drop = &level_d[level_item_offset /*+ wx*MAXDEG*/];	 //will be removed
+			drop = &level_d[level_item_offset /*+ wx*MAXDEG*/];	 // will be removed
 
 			level_count[0] = 0;
 			level_prev_index[0] = 0;
@@ -2292,7 +2292,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			lastMask_ii = (1 << (srcLen & 0x1F)) - 1;
 		}
 		__syncthreads();
-		//Encode Clear
+		// Encode Clear
 
 		for (T j = wx; j < srcLen; j += numPartitions)
 		{
@@ -2302,7 +2302,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			}
 		}
 		__syncthreads();
-		//Full Encode
+		// Full Encode
 		for (T j = wx; j < srcLen; j += numPartitions)
 		{
 			// if(current.queue[i] == 40 && lx == 0)
@@ -2311,9 +2311,9 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 																						  &g.colInd[g.rowPtr[g.colInd[srcStart + j]]], g.rowPtr[g.colInd[srcStart + j] + 1] - g.rowPtr[g.colInd[srcStart + j]],
 																						  j, num_divs_local, encode);
 		}
-		__syncthreads(); //Done encoding
+		__syncthreads(); // Done encoding
 
-		//Find the first pivot
+		// Find the first pivot
 		if (lx == 0)
 		{
 			maxCount[wx] = 0;
@@ -2352,7 +2352,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		}
 		__syncthreads();
 
-		//Prepare the Possible and Intersection Encode Lists
+		// Prepare the Possible and Intersection Encode Lists
 		uint64 warpCount = 0;
 
 		for (T j = threadIdx.x; j < num_divs_local && maxIntersection > 0; j += BLOCK_DIM_X)
@@ -2369,7 +2369,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		}
 		__syncthreads();
 
-		//Explore the tree
+		// Explore the tree
 		while ((level_count[l - 2] > level_index[l - 2]))
 		{
 			T maskBlock = level_prev_index[l - 2] / 32;
@@ -2397,19 +2397,19 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 					drop[l - 1] = drop[l - 2] + 1;
 			}
 			__syncthreads();
-			//assert(level_prev_index[l - 2] == newIndex + 1);
+			// assert(level_prev_index[l - 2] == newIndex + 1);
 
 			if (rsize[l - 1] - drop[l - 1] > KCCOUNT)
 			{
 				__syncthreads();
-				//printf("Stop Here, %u %u\n", rsize[l-1], drop[l-1]);
+				// printf("Stop Here, %u %u\n", rsize[l-1], drop[l-1]);
 				if (threadIdx.x == 0)
 				{
 					T c = rsize[l - 1] - KCCOUNT;
 					unsigned long long ncr = nCR[drop[l - 1] * 401 + c];
 					atomicAdd(counter, ncr /*rsize[l-1]*/);
 
-					//printf, go back
+					// printf, go back
 					while (l > 2 && level_index[l - 2] >= level_count[l - 2])
 					{
 						(l)--;
@@ -2425,20 +2425,20 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 				for (T k = threadIdx.x; k < num_divs_local; k += BLOCK_DIM_X)
 				{
 					to[k] = from[k] & encode[newIndex * num_divs_local + k];
-					//remove previous pivots from here
+					// remove previous pivots from here
 					to[k] = to[k] & ((maskBlock < k) ? ~pl[num_divs_local * (l - 2) + k] : ((maskBlock > k) ? 0xFFFFFFFF : sameBlockMask));
 				}
 				if (lx == 0)
 				{
 					partition_set[wx] = false;
-					maxCount[wx] = srcLen + 1; //make it shared !!
+					maxCount[wx] = srcLen + 1; // make it shared !!
 					maxIndex[wx] = 0;
 				}
 				__syncthreads();
 				//////////////////////////////////////////////////////////////////////
-				//Now new pivot generation, then check to extend to new level or not
+				// Now new pivot generation, then check to extend to new level or not
 
-				//T limit = (srcLen + numPartitions -1)/numPartitions;
+				// T limit = (srcLen + numPartitions -1)/numPartitions;
 				for (T j = wx; j < /*numPartitions*limit*/ srcLen; j += numPartitions)
 				{
 					uint64 warpCount = 0;
@@ -2454,7 +2454,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 						if (lx == 0 && maxCount[wx] == srcLen + 1)
 						{
 							partition_set[wx] = true;
-							path_more_explore = true; //shared, unsafe, but okay
+							path_more_explore = true; // shared, unsafe, but okay
 							maxCount[wx] = warpCount;
 							maxIndex[wx] = j;
 						}
@@ -2478,7 +2478,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 							unsigned long long ncr = nCR[drop[l - 1] * 401 + c];
 							atomicAdd(counter, ncr /*rsize[l-1]*/);
 						}
-						//printf, go back
+						// printf, go back
 						while (l > 2 && level_index[l - 2] >= level_count[l - 2])
 						{
 							(l)--;
@@ -2558,7 +2558,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		T *level_tmp,
 		unsigned long long *nCR)
 {
-	//will be removed later
+	// will be removed later
 	constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
 	const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block
 	const size_t lx = threadIdx.x % CPARTSIZE;
@@ -2592,7 +2592,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 
 	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
 	{
-		//block things
+		// block things
 		if (threadIdx.x == 0)
 		{
 			src = g.rowInd[current.queue[i]];
@@ -2617,7 +2617,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 			level_index = &level_index_g[level_item_offset /*+ wx*MAXDEG*/];
 			level_prev_index = &level_prev_g[level_item_offset /*+ wx*MAXDEG*/];
 			rsize = &level_r[level_item_offset /*+ wx*MAXDEG*/]; // will be removed
-			drop = &level_d[level_item_offset /*+ wx*MAXDEG*/];	 //will be removed
+			drop = &level_d[level_item_offset /*+ wx*MAXDEG*/];	 // will be removed
 
 			level_count[0] = 0;
 			level_prev_index[0] = 0;
@@ -2649,7 +2649,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		// 	atomicAdd(counter, scounter);
 
 		__syncthreads();
-		//Encode Clear
+		// Encode Clear
 		for (T j = wx; j < scounter; j += numPartitions)
 		{
 			for (T k = lx; k < num_divs_local; k += CPARTSIZE)
@@ -2659,14 +2659,14 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		}
 		__syncthreads();
 
-		//Full Encode
+		// Full Encode
 		for (T j = wx; j < scounter; j += numPartitions)
 		{
 			graph::warp_sorted_count_and_encode_full<WARPS_PER_BLOCK, T, true, CPARTSIZE>(tri, scounter,
 																						  &g.colInd[g.rowPtr[tri[j]]], g.rowPtr[tri[j] + 1] - g.rowPtr[tri[j]],
 																						  j, num_divs_local, encode);
 		}
-		__syncthreads(); //Done encoding
+		__syncthreads(); // Done encoding
 
 		if (lx == 0)
 		{
@@ -2677,7 +2677,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		}
 		__syncthreads();
 
-		//Find the first pivot
+		// Find the first pivot
 		for (T j = wx; j < scounter; j += numPartitions)
 		{
 			uint64 warpCount = 0;
@@ -2707,7 +2707,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 		}
 		__syncthreads();
 
-		//Prepare the Possible and Intersection Encode Lists
+		// Prepare the Possible and Intersection Encode Lists
 		uint64 warpCount = 0;
 		for (T j = threadIdx.x; j < num_divs_local && maxIntersection > 0; j += BLOCK_DIM_X)
 		{
@@ -2749,19 +2749,19 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 					drop[l - 2] = drop[l - 3] + 1;
 			}
 			__syncthreads();
-			//assert(level_prev_index[l - 2] == newIndex + 1);
+			// assert(level_prev_index[l - 2] == newIndex + 1);
 
 			if (rsize[l - 2] - drop[l - 2] > KCCOUNT)
 			{
 				__syncthreads();
-				//printf("Stop Here, %u %u\n", rsize[l-1], drop[l-1]);
+				// printf("Stop Here, %u %u\n", rsize[l-1], drop[l-1]);
 				if (threadIdx.x == 0)
 				{
 					T c = rsize[l - 2] - KCCOUNT;
 					unsigned long long ncr = nCR[drop[l - 2] * 401 + c];
 					atomicAdd(counter, ncr /*rsize[l-1]*/);
 
-					//printf, go back
+					// printf, go back
 					while (l > 3 && level_index[l - 3] >= level_count[l - 3])
 					{
 						(l)--;
@@ -2777,20 +2777,20 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 				for (T k = threadIdx.x; k < num_divs_local; k += BLOCK_DIM_X)
 				{
 					to[k] = from[k] & encode[newIndex * num_divs_local + k];
-					//remove previous pivots from here
+					// remove previous pivots from here
 					to[k] = to[k] & ((maskBlock < k) ? ~pl[num_divs_local * (l - 3) + k] : ((maskBlock > k) ? 0xFFFFFFFF : sameBlockMask));
 				}
 				if (lx == 0)
 				{
 					partition_set[wx] = false;
-					maxCount[wx] = scounter + 1; //make it shared !!
+					maxCount[wx] = scounter + 1; // make it shared !!
 					maxIndex[wx] = 0;
 				}
 				__syncthreads();
 				//////////////////////////////////////////////////////////////////////
-				//Now new pivot generation, then check to extend to new level or not
+				// Now new pivot generation, then check to extend to new level or not
 
-				//T limit = (srcLen + numPartitions -1)/numPartitions;
+				// T limit = (srcLen + numPartitions -1)/numPartitions;
 				for (T j = wx; j < /*numPartitions*limit*/ scounter; j += numPartitions)
 				{
 					uint64 warpCount = 0;
@@ -2806,7 +2806,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 						if (lx == 0 && maxCount[wx] == scounter + 1)
 						{
 							partition_set[wx] = true;
-							path_more_explore = true; //shared, unsafe, but okay
+							path_more_explore = true; // shared, unsafe, but okay
 							maxCount[wx] = warpCount;
 							maxIndex[wx] = j;
 						}
@@ -2830,7 +2830,7 @@ __launch_bounds__(BLOCK_DIM_X, 16)
 							unsigned long long ncr = nCR[drop[l - 2] * 401 + c];
 							atomicAdd(counter, ncr /*rsize[l-1]*/);
 						}
-						//printf, go back
+						// printf, go back
 						while (l > 3 && level_index[l - 3] >= level_count[l - 3])
 						{
 							(l)--;

@@ -104,7 +104,7 @@ __global__ void init(graph::COOCSRGraph_d<T> g, T *asc, bool *keep)
         const T srcLen = srcStop - srcStart;
 
         keep[i] = (dstLen < srcLen || ((dstLen == srcLen) && src < dst)); // Some simple graph orientation
-        //src[i] < dst[i];
+        // src[i] < dst[i];
         asc[i] = i;
     }
 }
@@ -256,7 +256,7 @@ __global__ void createHashStartBin(graph::COOCSRGraph_d<T> g, T *hashPointer, T 
     }
 }
 
-//Overloaded form Ktruss
+// Overloaded form Ktruss
 template <typename T>
 __global__ void warp_detect_deleted_edges(
     T *rowPtr, T numRows,
@@ -303,12 +303,12 @@ __global__ void InitEid(T numEdges, T *asc, T *newSrc, T *newDst, T *rowPtr, T *
 
     for (uint i = ptx; i < numEdges; i += blockDim.x * gridDim.x)
     {
-        //i : is the new index of the edge !!
+        // i : is the new index of the edge !!
         T srcnode = newSrc[i];
         T dstnode = newDst[i];
 
         T olduV = asc[i];
-        T oldUv = getEdgeId(rowPtr, colInd, dstnode, srcnode); //Search for it please !!
+        T oldUv = getEdgeId(rowPtr, colInd, dstnode, srcnode); // Search for it please !!
 
         eid[olduV] = i;
         eid[oldUv] = i;
@@ -352,9 +352,9 @@ void CountTrianglesHash(int deviceId, const int divideConstant, graph::TcBase<T>
 
     const T minRowLen = 256;
     const T maxRowLen = 3200 * 1024;
-    const int cNumBins = 512; //not used
+    const int cNumBins = 512; // not used
 
-    //Construct
+    // Construct
 
     graph::GPUArray<uint> htp("hash table pointer", AllocationTypeEnum::unified, g->numNodes + 1, deviceId);
     graph::GPUArray<uint> htd("hash table", AllocationTypeEnum::gpu, numEdges - edgeOffset, deviceId);
@@ -374,7 +374,7 @@ void CountTrianglesHash(int deviceId, const int divideConstant, graph::TcBase<T>
     hts.setAll(0, true);
     execKernel(createHashStartBin, (g->numNodes + 128 - 1) / 128, 128, deviceId, false, *g, htp.gdata(), hts.gdata(), minRowLen, maxRowLen, divideConstant);
 
-    //Mode data to hash tables
+    // Mode data to hash tables
     for (int i = 0; i < gH.numNodes; i++)
     {
         const uint s = gH.rowPtr->cdata()[i];
@@ -428,18 +428,18 @@ template <typename T>
 void ConstructTriList(graph::GPUArray<T> &triIndex, graph::GPUArray<T> &triPointer, graph::TcBase<T> *tc, graph::GPUArray<T> rowPtr, graph::GPUArray<T> rowInd, graph::GPUArray<T> colInd,
                       const size_t numEdges, const size_t numRows, const size_t edgeOffset = 0, ProcessingElementEnum kernelType = Thread)
 {
-    //Count triangle
+    // Count triangle
     tc->count_async(rowPtr, rowInd, colInd, numEdges, edgeOffset, kernelType, 0);
     tc->sync();
     uint tcount = tc->count();
 
-    //Create memory just for reduction
+    // Create memory just for reduction
     graph::GPUArray<uint> temp = graph::GPUArray<uint>("temp reduction", unified, numEdges, 0);
 
     tc->count_per_edge_async(temp, rowPtr, rowInd, colInd, numEdges, edgeOffset, kernelType, 0);
     tc->sync();
 
-    //Scan
+    // Scan
     triPointer = graph::GPUArray<uint>("TriPointer", unified, numEdges + 1, 0);
     void *d_temp_storage = NULL;
     size_t temp_storage_bytes = 0;
@@ -474,7 +474,7 @@ void ConstructTriList(graph::GPUArray<T> &triIndex, graph::GPUArray<T> &triPoint
             printf("\n");
     }*/
 
-    //Extra Check
+    // Extra Check
     /*temp.copytocpu(0);
     triPointer.copytocpu(0);
     printf("%u\n", triPointer.cdata()[numEdges - 1]);
@@ -548,4 +548,31 @@ __global__ void split_parent(graph::COOCSRGraph_d<T> g, T *tmp_row, T *tmp_col, 
         const T dst = tmp_col[i];
         split_col[g.rowPtr[src] + (i - split_ptr[src])] = dst;
     }
+}
+
+__global__ void print_array(uint size, uint *data)
+{
+    for (int i = 0; i < size; i++)
+    {
+        printf("%u,\t", data[i]);
+    }
+    printf("\n");
+}
+
+__global__ void print_graph(graph::COOCSRGraph_d<uint> dataGraph)
+{
+    printf("Printing graph from device\n");
+    printf("testing rowInd: %u\n", dataGraph.rowInd[0]);
+    for (uint src = dataGraph.rowInd[0]; src < dataGraph.numNodes; src++)
+    {
+        uint srcStart = dataGraph.rowPtr[src];
+        uint srcEnd = dataGraph.rowPtr[src + 1];
+        printf("%u\t: ", src);
+        for (uint j = srcStart; j < srcEnd; j++)
+        {
+            printf("%u, ", dataGraph.colInd[j]);
+        }
+        printf("\n");
+    }
+    printf("\n");
 }

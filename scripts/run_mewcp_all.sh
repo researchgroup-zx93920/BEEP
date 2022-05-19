@@ -1,10 +1,11 @@
 #!/bin/sh
 TASKS=(sgm)
-# GRAPHS=(cit-Patents_adj com-youtube com-orkut as-Skitter) # cit-Patents_adj
-# GRAPHS=(com-Friendter)
-GRAPHS=(as-Skitter)
-# GRAPHS=(com-youtube)
+# GRAPHS=(cit-Patents_adj com-youtube com-orkut as-Skitter) # 
+# GRAPHS=(com-youtube com-dblp com-lj soc-pokec com-orkut as-Skitter cit-Patents_adj)
+# GRAPHS=(tina)
 # GRAPHS=(com-youtube com-lj cit-Patents_adj com-orkut com-Friendter)
+GRAPHS=(soc-pokec)
+
 MODES=(node)
 for task in ${TASKS[@]}
 do
@@ -12,8 +13,8 @@ for temp in ${GRAPHS[@]};
 do
 for mode in ${MODES[@]};
 do
-    TEMP_PATH="../../dataset/gbin/${temp}.bel"
-    # TEMP_PATH="../../dataset/template_graphs/gbin/${temp}.bel"
+    TEMP_PATH="/home/almasri3/samiran/dataset/gbin/${temp}.bel"
+    # TEMP_PATH="/home/almasri3/samiran/dataset/template_graphs/gbin/${temp}.bel"
     # TEMP_PATH="../tests/${temp}.bel"
     #TEMP_PATH="../dataset/RGG/rgg_n_2_${temp}_s0.bel"
     echo -e "\n\n************* Processing Data Graph $temp **************"
