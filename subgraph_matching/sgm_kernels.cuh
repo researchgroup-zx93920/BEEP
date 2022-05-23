@@ -203,6 +203,12 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 				// lx, partMask,num_divs_local, newIndex[wx], l[wx],
 				// 	to, cl, level_prev_index[wx], encode);
 #endif
+				compute_intersection_ic<T, CPARTSIZE, true>(
+					warpCount, icount[wx], offset[wx], srcSplit - srcStart,
+					lx, partMask, num_divs_local, newIndex[wx], l[wx],
+					to, cl, level_prev_index[wx], encode);
+#endif
+
 #else
 #ifdef REUSE
 				compute_intersection_reuse<T, CPARTSIZE, true>(
