@@ -1,10 +1,10 @@
 #!/bin/sh
 TASKS=(sgm)
-GRAPHS=(cit-Patents_adj com-youtube com-orkut as-Skitter) # 
-# GRAPHS=(com-youtube com-dblp com-lj soc-pokec com-orkut as-Skitter cit-Patents_adj)
+# GRAPHS=(cit-Patents_adj com-youtube com-orkut as-Skitter) # 
+# GRAPHS=(com-youtube com-lj com-orkut as-Skitter cit-Patents_adj)
 # GRAPHS=(tina)
 # GRAPHS=(com-youtube com-lj cit-Patents_adj com-orkut com-Friendter)
-# GRAPHS=(soc-pokec)
+GRAPHS=(com-dblp)
 
 MODES=(node)
 for task in ${TASKS[@]}

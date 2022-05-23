@@ -4,10 +4,11 @@
 #include "../kclique/kckernels.cuh"
 #define IC_COUNT
 // #define DEGENERACY
-// #define DEGREE
+#define DEGREE
+#define REUSE
 // #define LEX
 
-// #define SYMOPT
+#define SYMOPT
 
 const uint DEPTH = 10;
 
@@ -20,6 +21,10 @@ __constant__ uint QDEG[DEPTH];
 
 __constant__ uint SYMNODE[DEPTH * (DEPTH - 1) / 2];
 __constant__ uint SYMNODE_PTR[DEPTH + 1];
+
+__constant__ uint QREUSE[DEPTH];
+__constant__ bool QREUSABLE[DEPTH];
+__constant__ uint REUSE_PTR[DEPTH];
 
 template <typename T>
 struct triplet
@@ -77,6 +82,7 @@ __device__ __forceinline__ T set_mask(T idx, T partition)
     else
         return 0;
 }
+
 template <typename T, uint CPARTSIZE, bool MAT>
 __device__ __forceinline__ void compute_intersection_orient(
     uint64 &wc, T len,
@@ -197,6 +203,102 @@ __device__ __forceinline__ void compute_intersection_ic(
 #endif
         wc += __popc(to[threadIdx.x]);                        // counts number of set bits
         cl[(lvl - 1) * num_divs_local + k] = to[threadIdx.x]; // saves candidates list in cl
+    }
+    reduce_part<T, CPARTSIZE>(partMask, wc);
+}
+
+template <typename T, uint CPARTSIZE, bool MAT>
+__device__ __forceinline__ void compute_intersection_ic_reuse(
+    uint64 &wc, uint64 &icount, T &offset, T len,
+    const size_t lx, const T partMask,
+    const T num_divs_local, const T maskIdx, const T lvl,
+    T *to, T *cl, T *reuse, const T *level_prev_index, T *encode)
+{
+    wc = 0;
+    to[threadIdx.x] = 0x00;
+#ifdef SYMOPT
+    if (lx == 1)
+    {
+        offset = 0;
+        for (T sym_idx = SYMNODE_PTR[lvl]; sym_idx < SYMNODE_PTR[lvl + 1]; sym_idx++)
+        {
+            offset = max(offset, level_prev_index[SYMNODE[sym_idx]] - 1);
+        }
+    }
+    __syncwarp(partMask);
+#endif
+    if (offset > 0)
+    {
+        for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+        {
+
+            to[threadIdx.x] = cl[k] & unset_mask(maskIdx, k);
+
+            if (QREUSE[lvl] > 0)
+            {
+                to[threadIdx.x] &= reuse[QREUSE[lvl] * num_divs_local + k];
+                atomicAdd(&icount, 1);
+            }
+            // Compute Intersection
+            for (T q_idx = REUSE_PTR[lvl]; q_idx < QEDGE_PTR[lvl + 1]; q_idx++)
+            {
+                to[threadIdx.x] &= encode[(level_prev_index[QEDGE[q_idx]] - 1) * num_divs_local + k];
+                atomicAdd(&icount, 1);
+            }
+
+            if (QREUSABLE[lvl])
+            {
+                reuse[lvl * num_divs_local + k] = to[threadIdx.x];
+                atomicAdd(&icount, 1);
+            }
+
+            // Remove Redundancies
+#ifdef SYMOPT
+            to[threadIdx.x] &= ~get_mask(offset, k);
+            atomicAdd(&icount, 1);
+#else
+            for (T sym_idx = SYMNODE_PTR[lvl]; sym_idx < SYMNODE_PTR[lvl + 1]; sym_idx++)
+            {
+                if (!MAT && SYMNODE[sym_idx] == lvl - 1)
+                    continue;
+                if (SYMNODE[sym_idx] > 0)
+                {
+                    to[threadIdx.x] &= ~(get_mask(level_prev_index[SYMNODE[sym_idx]] - 1, k));
+                    atomicAdd(&icount, 1);
+                }
+            }
+#endif
+            wc += __popc(to[threadIdx.x]);                        // counts number of set bits
+            cl[(lvl - 1) * num_divs_local + k] = to[threadIdx.x]; // saves candidates list in cl
+        }
+    }
+    else
+    {
+        for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+        {
+
+            to[threadIdx.x] = cl[k] & unset_mask(maskIdx, k);
+
+            if (QREUSE[lvl] > 0)
+            {
+                to[threadIdx.x] &= reuse[QREUSE[lvl] * num_divs_local + k];
+                atomicAdd(&icount, 1);
+            }
+            // Compute Intersection
+            for (T q_idx = REUSE_PTR[lvl]; q_idx < QEDGE_PTR[lvl + 1]; q_idx++)
+            {
+                to[threadIdx.x] &= encode[(level_prev_index[QEDGE[q_idx]] - 1) * num_divs_local + k];
+                atomicAdd(&icount, 1);
+            }
+
+            if (QREUSABLE[lvl])
+            {
+                reuse[lvl * num_divs_local + k] = to[threadIdx.x];
+                atomicAdd(&icount, 1);
+            }
+            wc += __popc(to[threadIdx.x]);                        // counts number of set bits
+            cl[(lvl - 1) * num_divs_local + k] = to[threadIdx.x]; // saves candidates list in cl
+        }
     }
     reduce_part<T, CPARTSIZE>(partMask, wc);
 }
