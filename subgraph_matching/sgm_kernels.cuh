@@ -7,7 +7,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 	uint64 *counter, T *cpn, uint64 *intersection_count,
 	const graph::COOCSRGraph_d<T> &g,
 	const graph::GraphQueue_d<T, bool> current,
-	T *current_level,
+	T *current_level, T *reuse_stats,
 	T *adj_enc)
 {
 	// will be removed later
@@ -28,7 +28,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 	__shared__ uint64 icount[numPartitions];
 #endif
 
-	__shared__ T num_divs_local, *level_offset, *encode;
+	__shared__ T num_divs_local, *level_offset, *encode, *reuse_offset;
 	__shared__ T to[BLOCK_DIM_X], newIndex[numPartitions];
 
 	for (unsigned long long i = blockIdx.x; i < (unsigned long long)current.count[0]; i += gridDim.x)
@@ -49,6 +49,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			encode = &adj_enc[encode_offset]; /*srcStart[wx]*/
 
 			level_offset = &current_level[orient_offset * (numPartitions * MAXLEVEL)];
+			reuse_offset = &reuse_stats[orient_offset * (numPartitions * MAXLEVEL)];
 		}
 #ifdef IC_COUNT
 		if (lx == 0)
@@ -85,6 +86,8 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 				continue;
 
 			T *cl = level_offset + wx * (NUMDIVS * MAXLEVEL);
+			T *reuse = reuse_offset + wx * (NUMDIVS * MAXLEVEL);
+
 			for (T k = lx; k < DEPTH; k += CPARTSIZE)
 			{
 				level_count[wx][k] = 0;
@@ -150,6 +153,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 					SYMNODE[SYMNODE_PTR[l[wx] + 1] - 1] == l[wx] - 1)
 					warpCount /= 2;
 			}
+
 			if (lx == 0)
 			{
 				if (l[wx] == KCCOUNT - LUNMAT) // If reached last level
@@ -188,10 +192,18 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 				__syncwarp(partMask);
 
 #ifdef IC_COUNT
-				compute_intersection_ic<T, CPARTSIZE, true>(
-					warpCount, icount[wx], offset[wx], srcSplit - srcStart, lx, partMask, num_divs_local, newIndex[wx], l[wx],
-					to, cl, level_prev_index[wx], encode);
+				compute_intersection_ic_reuse<T, CPARTSIZE, true>(
+					warpCount, icount[wx], offset[wx], srcSplit - srcStart,
+					lx, partMask, num_divs_local, newIndex[wx], l[wx],
+					to, cl, reuse, level_prev_index[wx], encode);
+
+				// compute_intersection_ic<T, CPARTSIZE, true>(
+				// 	warpCount, icount[wx], offset[wx], srcSplit - srcStart,
+				// lx, partMask,num_divs_local, newIndex[wx], l[wx],
+				// 	to, cl, level_prev_index[wx], encode);
+
 #else
+
 				compute_intersection_orient<T, CPARTSIZE, true>(
 					warpCount, srcSplit - srcStart, lx, partMask, num_divs_local, newIndex[wx], l[wx],
 					to, cl, level_prev_index[wx], encode);
@@ -216,6 +228,8 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 						SYMNODE[SYMNODE_PTR[l[wx] + 2] - 1] == l[wx])
 						warpCount /= 2;
 				}
+
+				// unsetting to avoid repeats not needed
 
 				if (lx == 0)
 				{
@@ -262,7 +276,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byEdge(
 	uint64 *counter,
 	const graph::COOCSRGraph_d<T> g,
 	const graph::GraphQueue_d<T, bool> current,
-	T *current_level,
+	T *current_level, T *reuse,
 	T *adj_enc)
 {
 	// will be removed later
@@ -530,16 +544,16 @@ __launch_bounds__(BLOCK_DIM_X)
 		uint64 *counter, T *cpn, uint64 *intersection_count,
 		const graph::COOCSRGraph_d<T> g,
 		const graph::GraphQueue_d<T, bool> current,
-		T *current_level,
+		T *current_level, T *reuse,
 		T *adj_enc,
 		const bool byNode)
 {
 	if (byNode)
 		sgm_kernel_central_node_function_byNode<T, BLOCK_DIM_X, CPARTSIZE>(blockIdx.x,
-																		   counter, cpn, intersection_count, g, current, current_level, adj_enc);
+																		   counter, cpn, intersection_count, g, current, current_level, reuse, adj_enc);
 	else
 		sgm_kernel_central_node_function_byEdge<T, BLOCK_DIM_X, CPARTSIZE>(blockIdx.x,
-																		   counter, g, current, current_level, adj_enc);
+																		   counter, g, current, current_level, reuse, adj_enc);
 }
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
@@ -548,7 +562,7 @@ __launch_bounds__(BLOCK_DIM_X)
 		uint64 *counter, T *cpn, uint64 *intersection_count,
 		const graph::COOCSRGraph_d<T> g,
 		const graph::GraphQueue_d<T, bool> current,
-		T *current_level,
+		T *current_level, T *reuse,
 		T *levelStats,
 		T *adj_enc,
 		const bool byNode)
@@ -570,10 +584,10 @@ __launch_bounds__(BLOCK_DIM_X)
 
 	if (byNode)
 		sgm_kernel_central_node_function_byNode<T, BLOCK_DIM_X, CPARTSIZE>((sm_id * CBPSM) + levelPtr,
-																		   counter, cpn, intersection_count, g, current, current_level, adj_enc);
+																		   counter, cpn, intersection_count, g, current, current_level, reuse, adj_enc);
 	else
 		sgm_kernel_central_node_function_byEdge<T, BLOCK_DIM_X, CPARTSIZE>((sm_id * CBPSM) + levelPtr,
-																		   counter, g, current, current_level, adj_enc);
+																		   counter, g, current, current_level, reuse, adj_enc);
 
 	__syncthreads();
 

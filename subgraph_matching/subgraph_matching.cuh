@@ -35,6 +35,10 @@ namespace graph
         GPUArray<uint> *query_edge_ptr;
         GPUArray<uint> *sym_nodes;
         GPUArray<uint> *sym_nodes_ptr;
+        GPUArray<uint> *reuse_level;
+        GPUArray<bool> *q_reusable;
+        GPUArray<uint> *reuse_ptr;
+
         uint min_qDegree, max_qDegree;
         uint unmat_level;
 
@@ -108,6 +112,9 @@ namespace graph
             query_edge_ptr = new GPUArray<uint>("Query edge ptr", cpuonly);
             sym_nodes = new GPUArray<uint>("Symmetrical nodes", cpuonly);
             sym_nodes_ptr = new GPUArray<uint>("Symmetrical node pointer", cpuonly);
+            reuse_level = new GPUArray<uint>("Reuse info", cpuonly);
+            q_reusable = new GPUArray<bool>("Is reusable", cpuonly);
+            reuse_ptr = new GPUArray<uint>("Reuse ptr", cpuonly);
 
             counter.initialize("Temp level Counter", unified, 1, dev_);
             max_dDegree.initialize("Temp Degree", unified, 1, dev_);
@@ -147,6 +154,15 @@ namespace graph
 
             sym_nodes_ptr->freeCPU();
             delete sym_nodes_ptr;
+
+            reuse_level->freeCPU();
+            delete reuse_level;
+
+            q_reusable->freeCPU();
+            delete q_reusable;
+
+            reuse_ptr->freeCPU();
+            delete reuse_ptr;
         }
 
         void run(graph::COOCSRGraph_d<T> dataGraph, graph::COOCSRGraph<T> &patGraph)
@@ -162,31 +178,37 @@ namespace graph
 
             preprocess_query(patGraph);
             Log(debug, "Parsing template succesful");
+
+            detect_reuse(patGraph); // returns no info if reuse is not defined in config
+            Log(debug, "detecting reuse succesful");
+
             initialize(dataGraph);
             Log(debug, "Initializing datagraph succesful");
+
             peel_data(dataGraph); // dataGraph transfers to unified memory here
             Log(debug, "datagraph peeling succesful");
-// Degeneracy_orientation(dataGraph);
-// Log(debug, "orientation succesfull\n");
+            // Degeneracy_orientation(dataGraph);
+            // Log(debug, "orientation succesfull\n");
 #ifdef DEGENERACY
             Log(info, "Degeneracy Ordering");
             degeneracy_ordering(dataGraph);
-#elif DEGREE
+#elif defined(DEGREE)
             Log(info, "Degree Ordering");
             degree_ordering(dataGraph);
 #else
             Log(info, "lexicographic Ordering");
             lexicographic_ordering(dataGraph);
 #endif
-            Log(debug, "orientation succesfull");
+            Log(debug, "orientation/ordering succesfull");
+
             initialize1(dataGraph);
             Log(debug, "initialize 1 succesfull");
             // print_graph(dataGraph);
             time = p.elapsed();
 
             Log(info, "Preprocessing time: %f ms", time * 1000);
-            Log(debug, "Undirected graph maxdegree: %lu\n", max_dDegree.gdata()[0]);
-            Log(debug, "Directed graph maxdegree %lu\n", oriented_max_dDegree.gdata()[0]);
+            Log(debug, "Undirected graph maxdegree: %lu", max_dDegree.gdata()[0]);
+            Log(debug, "Directed graph maxdegree %lu", oriented_max_dDegree.gdata()[0]);
             Timer t;
             count_subgraphs(dataGraph);
             time = t.elapsed();
@@ -197,16 +219,20 @@ namespace graph
         // Function declarations. Definitions outside class.
         void preprocess_query(graph::COOCSRGraph<T> &query);
         void detect_symmetry();
+        void detect_reuse(graph::COOCSRGraph<T> &query);
         void check_unmat();
+
         void peel_data(graph::COOCSRGraph_d<T> &dataGraph);
         void initialize(graph::COOCSRGraph_d<T> &dataGraph);
         void initialize1(graph::COOCSRGraph_d<T> &oriented_dataGraph);
         void count_subgraphs(graph::COOCSRGraph_d<T> &dataGraph);
-        void print_graph(graph::COOCSRGraph_d<T> &dataGraph);
+
         void degeneracy_orientation(graph::COOCSRGraph_d<T> &dataGraph);
         void degeneracy_ordering(graph::COOCSRGraph_d<T> &g);
         void degree_ordering(graph::COOCSRGraph_d<T> &g);
         void lexicographic_ordering(graph::COOCSRGraph_d<T> &g);
+
+        void print_graph(graph::COOCSRGraph_d<T> &dataGraph);
     };
 
     /***********************
@@ -464,6 +490,100 @@ namespace graph
     }
 
     template <typename T>
+    void SG_Match<T>::detect_reuse(graph::COOCSRGraph<T> &query)
+    {
+        T numNodes = query.numNodes;
+        reuse_level->allocate_cpu(numNodes);
+        q_reusable->allocate_cpu(numNodes);
+        reuse_ptr->allocate_cpu(numNodes);
+
+        reuse_level->setAll(0, false);
+        q_reusable->setAll(false, false);
+        reuse_ptr->setAll(0, false);
+
+        const T wrows = numNodes - 2;
+        const T wsize = wrows * wrows;
+        // GPUArray<T> w("weights", AllocationTypeEnum::cpuonly, wsize, dev_);
+        // w.setAll(0, false);
+        uint *w = new uint[wsize];
+        std::fill(w, w + wsize, 0);
+
+        Log(debug, "reached here");
+
+        // build W
+        for (uint i = 2; i < numNodes; i++)
+        {
+            uint *A = &query_edges->cdata()[query_edge_ptr->cdata()[i]];
+            uint A_len = query_edge_ptr->cdata()[i + 1] - query_edge_ptr->cdata()[i];
+            for (int j = 2; j < i; j++)
+            {
+                uint *B = &query_edges->cdata()[query_edge_ptr->cdata()[j]];
+                uint B_len = query_edge_ptr->cdata()[j + 1] - query_edge_ptr->cdata()[j];
+                uint Ahead = 2, Bhead = 2; // since everything is connected to zero
+                while (Ahead < A_len && Bhead < B_len)
+                {
+                    if (A[Ahead] < B[Bhead])
+                        Ahead++;
+                    else if (A[Ahead] > B[Bhead])
+                        Bhead++;
+                    else
+                    {
+                        w[(i - 2) * wrows + j - 2] = w[(i - 2) * wrows + j - 2] + 1;
+                        Ahead++;
+                        Bhead++;
+                    }
+                }
+            }
+        }
+        Log(debug, "Reached line %d", __LINE__);
+// Find max W
+#ifdef REUSE
+        for (uint i = 0; i < numNodes; i++)
+        {
+            uint max = 0, maxid = 0;
+            for (uint j = 2; j < i; j++)
+            {
+                if (max < w[(i - 2) * wrows + j - 2])
+                {
+                    max = w[(i - 2) * wrows + j - 2];
+                    maxid = j;
+                }
+            }
+            if (max > 0)
+            {
+                q_reusable->cdata()[maxid] = true;
+                reuse_level->cdata()[i] = maxid;
+                reuse_ptr->cdata()[i] = query_edge_ptr->cdata()[i] + max + 2;
+            }
+            else
+            {
+                reuse_ptr->cdata()[i] = query_edge_ptr->cdata()[i + 1];
+            }
+        }
+        Log(debug, "Reached line %d", __LINE__);
+#endif
+        for (uint i = 0; i < numNodes; i++)
+        {
+            if (reuse_level->cdata()[i] == 0)
+                reuse_ptr->cdata()[i] = query_edge_ptr->cdata()[i] + 1;
+        }
+
+        Log(critical, "ID: Reusable: Reuse:\n");
+        for (int i = 0; i < numNodes; i++)
+        {
+            Log(critical, "%d\t %u\t %u", i, q_reusable->cdata()[i], reuse_level->cdata()[i]);
+        }
+        Log(info, "ID: qedge_ptr: Reuse ptr: qedge_ptr_end");
+        for (uint i = 0; i < numNodes; i++)
+        {
+            Log(info, "%u,\t %u,\t %u,\t %u", i, query_edge_ptr->cdata()[i], reuse_ptr->cdata()[i], query_edge_ptr->cdata()[i + 1]);
+        }
+
+        // cleanup
+        delete[] w;
+    }
+
+    template <typename T>
     void SG_Match<T>::check_unmat()
     {
         // For now we only check for last two levels to be unmat
@@ -671,6 +791,10 @@ namespace graph
         cudaMemcpyToSymbol(SYMNODE_PTR, &(sym_nodes_ptr->cdata()[0]), sym_nodes_ptr->N * sizeof(SYMNODE_PTR[0]));
         cudaMemcpyToSymbol(QDEG, &(query_degree->cdata()[0]), query_degree->N * sizeof(QDEG[0]));
 
+        cudaMemcpyToSymbol(QREUSE, &(reuse_level->cdata()[0]), reuse_level->N * sizeof(uint));
+        cudaMemcpyToSymbol(QREUSABLE, &(q_reusable->cdata()[0]), q_reusable->N * sizeof(bool));
+        cudaMemcpyToSymbol(REUSE_PTR, &(reuse_ptr->cdata()[0]), reuse_ptr->N * sizeof(uint));
+
         // Initialise Queueing
         T todo = (by_ == ByEdge) ? dataGraph.numEdges : dataGraph.numNodes;
         T span = bound_HD;
@@ -725,9 +849,11 @@ namespace graph
                 Log(debug, "Level Size = %llu, Encode Size = %llu", level_size, encode_size);
                 GPUArray<T> node_be("Binary Encoded data", AllocationTypeEnum::gpu, encode_size, dev_);
                 GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
+                GPUArray<T> reuse("Intersection storage for reuse", AllocationTypeEnum::gpu, level_size, dev_);
 
                 cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T));
                 cudaMemset(current_level.gdata(), 0, level_size * sizeof(T));
+                cudaMemset(reuse.gdata(), 0, level_size * sizeof(T));
 
                 // Constant memory
                 if (maxDeg >= bound_LD)
@@ -758,7 +884,7 @@ namespace graph
                                    grid_block_size, block_size_HD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(), intersection_count.gdata(),
                                    dataGraph, current_q.device_queue->gdata()[0],
-                                   current_level.gdata(), d_bitmap_states.gdata(),
+                                   current_level.gdata(), reuse.gdata(), d_bitmap_states.gdata(),
                                    node_be.gdata(),
                                    by_ == ByNode);
                     }
@@ -768,7 +894,7 @@ namespace graph
                                    grid_block_size, block_size_HD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(), intersection_count.gdata(),
                                    dataGraph, current_q.device_queue->gdata()[0],
-                                   current_level.gdata(),
+                                   current_level.gdata(), reuse.gdata(),
                                    node_be.gdata(),
                                    by_ == ByNode);
                     }
@@ -781,7 +907,7 @@ namespace graph
                                    grid_block_size, block_size_LD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(), intersection_count.gdata(),
                                    dataGraph, current_q.device_queue->gdata()[0],
-                                   current_level.gdata(), d_bitmap_states.gdata(),
+                                   current_level.gdata(), reuse.gdata(), d_bitmap_states.gdata(),
                                    node_be.gdata(),
                                    by_ == ByNode);
                     }
@@ -791,7 +917,7 @@ namespace graph
                                    grid_block_size, block_size_LD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(), intersection_count.gdata(),
                                    dataGraph, current_q.device_queue->gdata()[0],
-                                   current_level.gdata(),
+                                   current_level.gdata(), reuse.gdata(),
                                    node_be.gdata(),
                                    by_ == ByNode);
                     }
@@ -802,6 +928,7 @@ namespace graph
                 current_level.freeGPU();
                 node_be.freeGPU();
                 d_count_per_node.freeGPU();
+                reuse.freeGPU();
 
                 // Print bucket stats:
                 std::cout << "Bucket levels: " << level << " to " << maxDeg
@@ -1027,4 +1154,5 @@ namespace graph
         CUDA_RUNTIME(cudaMalloc(&g.oriented_colInd, m * sizeof(T)));
         CUDA_RUNTIME(cudaMemcpy(g.oriented_colInd, g.colInd, m * sizeof(T), cudaMemcpyDeviceToDevice));
     }
+
 }

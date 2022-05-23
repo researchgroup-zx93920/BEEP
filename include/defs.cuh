@@ -24,7 +24,7 @@ using WEdgeTy = std::tuple<NodeTy, NodeTy, WeightTy>;
 #define BITMAP_SCALE (1 << BITMAP_SCALE_LOG) /*#bits in the first-level bitmap indexed by 1 bit in the second-level bitmap*/
 
 #define __VERBOSE__
-// #define __DEBUG__
+#define __DEBUG__
 //#define __VS__ //visual studio debug
 
 // Enums
