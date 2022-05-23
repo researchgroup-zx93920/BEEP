@@ -1,7 +1,7 @@
 NVCC = nvcc
 TARGET_EXEC ?= a.out
 
-BUILD_DIR ?= ./buildr
+BUILD_DIR ?= ./buildsr
 SRC_DIRS ?= ./src
 INC_DIRS ?= 
 EXE_DIR ?= $(BUILD_DIR)/exec

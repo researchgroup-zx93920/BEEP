@@ -13,7 +13,7 @@ MODE=$3
 # TEMPLATES=(cq5m1 house pyramid fan3 cq6m1)
 # TEMPLATES=(tri diamond cq4 cq5m1 cq5 house pyramid fan3 cq6m1 cq6)
 # TEMPLATES=(pyramid fan3)
-TEMPLATES=(cq6m1)
+TEMPLATES=(cq5m1)
 # TEMPLATES=(tri)
 TIMEOUT=6000
 
