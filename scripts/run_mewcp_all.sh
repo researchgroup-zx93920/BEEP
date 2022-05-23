@@ -4,6 +4,7 @@ TASKS=(sgm)
 # GRAPHS=(com-youtube com-lj com-orkut as-Skitter cit-Patents_adj)
 # GRAPHS=(tina)
 # GRAPHS=(com-youtube com-lj cit-Patents_adj com-orkut com-Friendter)
+# GRAPHS=(soc-pokec)
 GRAPHS=(com-dblp)
 
 MODES=(node)
