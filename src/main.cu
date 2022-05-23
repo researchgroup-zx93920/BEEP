@@ -16,7 +16,7 @@
 #include "../triangle_counting/TcSerial.cuh"
 #include "../triangle_counting/TcBinary.cuh"
 #include "../triangle_counting/TcVariablehash.cuh"
-#include "../triangle_counting/TcNvgraph.cuh"
+// #include "../triangle_counting/TcNvgraph.cuh"
 #include "../include/CSRCOO.cuh"
 #include "../triangle_counting/testHashing.cuh"
 #include "../triangle_counting/TcBmp.cuh"
@@ -442,7 +442,7 @@ int main(int argc, char **argv)
         printf("Tiled Count = %lu, time = %f\n", *c.gdata(), ms / 1e3);*/
 
         // Count traingles binary-search: Thread or Warp
-        uint step = m;
+        /*uint step = m;
         uint st = 0;
         uint ee = st + step; // st + 2;
         graph::TcBase<uint> *tcb = new graph::TcBinary<uint>(config.deviceId, ee, n);
@@ -502,16 +502,17 @@ int main(int argc, char **argv)
 
             CountTriangles<uint>("NVGRAPH", config.deviceId, config.allocation, tcNV, gd, ee);
 
-            /*if (serialTc != binaryTc)
-                break;*/
+            if (serialTc != binaryTc)
+                break;
             st += step;
             ee += step;
 
             printf("------------------------------\n");
 
             break;
-        }
+        }*/
     }
+    
     else if (config.mt == CROSSDECOMP)
     {
         // Update Please
