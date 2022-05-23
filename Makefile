@@ -17,9 +17,9 @@ DEPS := $(OBJS:.o=.d)
 #INCL_DIRS := $(shell find $(INC_DIRS) -type d) ./include $(FREESTAND_DIR)/include 
 INCL_DIRS := #./include $(FREESTAND_DIR)/include 
 INC_FLAGS := $(addprefix -I,$(INCL_DIRS))
-LDFLAGS := -L./nauty/ -l:nauty.a -lnvgraph
+LDFLAGS := -L./nauty/ -l:nauty.a
 CPPFLAGS ?= $(INC_FLAGS) -g -Wall -pthread -MMD -MP -shared -fPIC -std=c++11 -O3 -mavx -ftree-vectorize -fopt-info-vec
-CUDAFLAGS = $(INC_FLAGS) -g -w -lineinfo -std=c++11 -O3 -DCUDA -DNOT_IMPL -arch=sm_70 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_70,code=compute_70 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_75,code=compute_75
+CUDAFLAGS = $(INC_FLAGS) -g -w -lineinfo -std=c++11 -O3 -DCUDA -DNOT_IMPL -arch=sm_86 -gencode=arch=compute_86,code=sm_86 -gencode=arch=compute_86,code=compute_86
 CUDADEBUGFLAGS = $(INC_DIRS) -g -w -G -std=c++11 -DCUDA -DNOT_IMPL -arch=sm_70 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_70,code=compute_70
 
 all: objs release_exes
