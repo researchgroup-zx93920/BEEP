@@ -9,7 +9,7 @@
 // #define LEX
 
 #define SYMOPT
-#define REUSE
+// #define REUSE
 
 const uint DEPTH = 10;
 

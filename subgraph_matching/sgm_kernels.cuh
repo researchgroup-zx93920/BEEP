@@ -209,7 +209,6 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 					to, cl, level_prev_index[wx], encode);
 #endif
 
-#else
 #ifdef REUSE
 				compute_intersection_reuse<T, CPARTSIZE, true>(
 					warpCount, offset[wx], lx, partMask,
@@ -222,7 +221,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 					to, cl, level_prev_index[wx], encode);
 
 #endif
-#endif
+
 				if (l[wx] + 1 == KCCOUNT - LUNMAT && LUNMAT == 1)
 				{
 					// 	uint64 tmpCount;

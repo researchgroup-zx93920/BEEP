@@ -14,7 +14,7 @@ for temp in ${GRAPHS[@]};
 do
 for mode in ${MODES[@]};
 do
-    TEMP_PATH="/u/samiran2/dataset/gbin/${temp}.bel"
+    TEMP_PATH="~/dataset/gbin/${temp}.bel"
     # TEMP_PATH="../tests/${temp}.bel"
     #TEMP_PATH="../dataset/RGG/rgg_n_2_${temp}_s0.bel"
     echo -e "\n\n************* Processing Data Graph $temp **************"

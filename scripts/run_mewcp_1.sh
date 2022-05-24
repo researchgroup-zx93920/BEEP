@@ -12,9 +12,9 @@ MODE=$3
 # TEMPLATES=(cq7m1 cq8m1)
 # TEMPLATES=(cq5m1 house pyramid fan3 cq6m1)
 # TEMPLATES=(tri diamond cq4 cq5m1 cq5 house pyramid fan3 cq6m1 fan4 wheel5 cq6)
-TEMPLATES=(cq7m1 cq7 cq8m1 cq8 cq9m1 cq9)
+# TEMPLATES=(cq7m1 cq7 cq8m1 cq8 cq9m1 cq9)
 # TEMPLATES=(fan4 wheel5)
-# TEMPLATES=(tri)
+TEMPLATES=(cq5m1)
 TIMEOUT=6000
 
 cd ../
@@ -26,8 +26,8 @@ do
     #echo -e "Template Path: $TEMP_PATH"
     echo -e "************* Processing Template $temp **************"
     # echo -e "symopt"
-    /usr/bin/timeout $TIMEOUT ./buildD/exe/src/main.cu.exe -g $GRAPH -o full -t $TEMP_PATH -d 3 -m $TASK -p $MODE |grep -Ei "preprocessing|count|HD|LD"
+    # /usr/bin/timeout $TIMEOUT ./buildD/exe/src/main.cu.exe -g $GRAPH -o full -t $TEMP_PATH -d 3 -m $TASK -p $MODE |grep -Ei "preprocessing|count|HD|LD"
     /usr/bin/timeout $TIMEOUT ./buildDS/exe/src/main.cu.exe -g $GRAPH -o full -t $TEMP_PATH -d 3 -m $TASK -p $MODE |grep -Ei "preprocessing|count|HD|LD"
-    /usr/bin/timeout $TIMEOUT ./buildDR/exe/src/main.cu.exe -g $GRAPH -o full -t $TEMP_PATH -d 3 -m $TASK -p $MODE |grep -Ei "preprocessing|count|HD|LD"
-    /usr/bin/timeout $TIMEOUT ./buildDSR/exe/src/main.cu.exe -g $GRAPH -o full -t $TEMP_PATH -d 3 -m $TASK -p $MODE |grep -Ei "preprocessing|count|HD|LD"
+    # /usr/bin/timeout $TIMEOUT ./buildDR/exe/src/main.cu.exe -g $GRAPH -o full -t $TEMP_PATH -d 3 -m $TASK -p $MODE |grep -Ei "preprocessing|count|HD|LD"
+    # /usr/bin/timeout $TIMEOUT ./buildDSR/exe/src/main.cu.exe -g $GRAPH -o full -t $TEMP_PATH -d 3 -m $TASK -p $MODE |grep -Ei "preprocessing|count|HD|LD"
 done
