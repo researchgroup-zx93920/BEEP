@@ -22,20 +22,7 @@
 #include "defs.cuh"
 #include "cuda.h"
 #include <cuda_runtime_api.h>
-
 #include "../cub/cub.cuh"
-
-// #include <simt/cstdint>
-// #include <simt/cstddef>
-// #include <simt/climits>
-// #include <simt/ratio>
-// #include <simt/chrono>
-// #include <simt/limits>
-// #include <simt/type_traits>
-// #include <simt/atomic>
-// #include <simt/barrier>
-// #include <simt/latch>
-// #include <simt/semaphore>
 
 #define CUDA_RUNTIME(ans)                     \
 	{                                         \

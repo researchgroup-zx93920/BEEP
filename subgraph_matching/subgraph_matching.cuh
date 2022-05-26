@@ -1,6 +1,7 @@
 #pragma once
 
-#include "sgm_kernels.cuh"
+#include "sgm_kernelsHD.cuh"
+#include "sgm_kernelsLD.cuh"
 #include "thrust/sort.h"
 
 namespace graph
@@ -763,7 +764,7 @@ namespace graph
         const auto block_size_HD = 1024; // Block size for high degree nodes
         const T partitionSize_HD = 32;
         const T numPartitions_HD = block_size_HD / partitionSize_HD;
-        const T bound_LD = 2048;
+        const T bound_LD = 1024;
         const T bound_HD = 32768 + 16384;
         const uint dv = 32;
         Log(debug, "Partition size: %u", partitionSize_LD);
@@ -900,10 +901,12 @@ namespace graph
                     }
                 }
                 else
-                {
+                { // Low degree nodes processed here
+
                     if (persistant)
                     {
-                        execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size_LD, partitionSize_LD>),
+                        printf("This kernel is launched\n");
+                        execKernel((sgm_kernel_central_node_base_binary_persistant_LD<T, block_size_LD, partitionSize_LD>),
                                    grid_block_size, block_size_LD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(), intersection_count.gdata(),
                                    dataGraph, current_q.device_queue->gdata()[0],
@@ -913,7 +916,7 @@ namespace graph
                     }
                     else
                     {
-                        execKernel((sgm_kernel_central_node_base_binary<T, block_size_LD, partitionSize_LD>),
+                        execKernel((sgm_kernel_central_node_base_binary_LD<T, block_size_LD, partitionSize_LD>),
                                    grid_block_size, block_size_LD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(), intersection_count.gdata(),
                                    dataGraph, current_q.device_queue->gdata()[0],

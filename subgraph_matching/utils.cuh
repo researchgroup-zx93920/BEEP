@@ -43,9 +43,9 @@ struct comparePriority
     __host__ __device__ bool operator()(const triplet<T> i, const triplet<T> j) const
     {
         if (ASCENDING)
-            return (i.priority > j.priority);
-        else
             return (i.priority < j.priority);
+        else
+            return (i.priority > j.priority);
     }
 };
 
@@ -400,6 +400,55 @@ __device__ __forceinline__ void compute_intersection_reuse(
     reduce_part<T, CPARTSIZE>(partMask, wc);
 }
 
+template <typename T, uint CPARTSIZE, uint BLOCK_DIM_X, bool MAT>
+__device__ __forceinline__ void compute_intersection_reuse_SM(
+    uint64 &wc, T &offset, const size_t lx, const T partMask,
+    const T num_divs_local, const T maskIdx, const T lvl,
+    T *to, T *cl, T reuse_SM[][BLOCK_DIM_X], const T *level_prev_index, const T *encode)
+{
+    wc = 0;
+#ifdef SYMOPT
+    if (lx == 1)
+    {
+        offset = 0;
+        for (T sym_idx = SYMNODE_PTR[lvl]; sym_idx < SYMNODE_PTR[lvl + 1]; sym_idx++)
+        {
+            offset = max(offset, level_prev_index[SYMNODE[sym_idx]] - 1);
+        }
+    }
+    __syncwarp(partMask);
+#endif
+    for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+    {
+        to[threadIdx.x] = cl[k] & unset_mask(maskIdx, k);
+        if (QREUSE[lvl] > 0)
+            to[threadIdx.x] &= reuse_SM[QREUSE[lvl] - 3][threadIdx.x];
+
+        // Compute Intersection
+        for (T q_idx = REUSE_PTR[lvl]; q_idx < QEDGE_PTR[lvl + 1]; q_idx++)
+            to[threadIdx.x] &= encode[(level_prev_index[QEDGE[q_idx]] - 1) * num_divs_local + k];
+
+        if (QREUSABLE[lvl])
+            reuse_SM[lvl - 3][threadIdx.x] = to[threadIdx.x];
+
+// Remove Redundancies
+#ifdef SYMOPT
+        to[threadIdx.x] &= ~get_mask(offset, k);
+#else
+        for (T sym_idx = SYMNODE_PTR[lvl]; sym_idx < SYMNODE_PTR[lvl + 1]; sym_idx++)
+        {
+            if (!MAT && SYMNODE[sym_idx] == lvl - 1)
+                continue;
+            if (SYMNODE[sym_idx] > 0)
+                to[threadIdx.x] &= ~(get_mask(level_prev_index[SYMNODE[sym_idx]] - 1, k));
+        }
+#endif
+        wc += __popc(to[threadIdx.x]);                        // counts number of set bits
+        cl[(lvl - 1) * num_divs_local + k] = to[threadIdx.x]; // saves candidates list in cl
+    }
+    reduce_part<T, CPARTSIZE>(partMask, wc);
+}
+
 template <typename T>
 __global__ void remove_edges_connected_to_node(
     const graph::COOCSRGraph_d<T> g,
@@ -511,7 +560,7 @@ __global__ void set_priority(graph::COOCSRGraph_d<T> g, T *priority)
     if (ptx < g.numEdges)
     {
         const T src = g.rowInd[ptx], dst = g.colInd[ptx];
-        bool keep = (priority[src] == priority[dst]) ? (src < dst) : (priority[src] > priority[dst]);
+        bool keep = (priority[src] == priority[dst]) ? (src < dst) : (priority[src] < priority[dst]);
         if (!ASCENDING)
             keep = !keep;
         if (!keep)
