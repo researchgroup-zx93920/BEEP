@@ -1,6 +1,6 @@
 cub/**
 nauty/**
-build/exe/**
+build*/**
 *.exe
 *.o
 .vscode/**

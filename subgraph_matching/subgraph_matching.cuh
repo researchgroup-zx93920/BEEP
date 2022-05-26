@@ -797,7 +797,7 @@ namespace graph
 
         // Initialise Queueing
         T todo = (by_ == ByEdge) ? dataGraph.numEdges : dataGraph.numNodes;
-        T span = bound_HD;
+        T span = bound_LD; // enables hybrid parallelism
         T level = 0;
         T bucket_level_end_ = level;
 
@@ -923,7 +923,7 @@ namespace graph
                     }
                 }
                 double time = a.elapsed();
-                Log(info, "kernel time %f s", time);
+
                 // Cleanup
                 current_level.freeGPU();
                 node_be.freeGPU();
@@ -934,8 +934,12 @@ namespace graph
                 std::cout << "Bucket levels: " << level << " to " << maxDeg
                           << ", nodes/edges: " << current_q.count.gdata()[0]
                           << ", Counter: " << counter.gdata()[0] << std::endl;
+                Log(info, "kernel time %f s", time);
             }
             level += span;
+            span = bound_HD;
+
+            // change ordering here
         }
 
         std::cout << "------------- Counter = " << counter.gdata()[0] << "\n";
@@ -1100,7 +1104,7 @@ namespace graph
         graph::GPUArray<triplet<T>> triplet_array("Array paired with partitions to ", unified, m, dev_);
         execKernel((map_and_gen_triplet_array<T>), gridSize, blockSize, dev_, false, triplet_array.gdata(), g, mohacore.nodePriority.gdata());
 
-        thrust::stable_sort(thrust::device, triplet_array.gdata(), triplet_array.gdata() + m, comparePriority<T>());
+        thrust::stable_sort(thrust::device, triplet_array.gdata(), triplet_array.gdata() + m, comparePriority<T, true>());
         thrust::stable_sort(thrust::device, triplet_array.gdata(), triplet_array.gdata() + m, comparePartition<T>());
         CUDA_RUNTIME(cudaDeviceSynchronize()); // sorts entries with
 
@@ -1123,12 +1127,25 @@ namespace graph
         CUDA_RUNTIME(cudaMallocManaged((void **)&g.splitPtr, n * sizeof(T)));
         CUDA_RUNTIME(cudaMemcpy(g.splitPtr, g.rowPtr, n * sizeof(T), cudaMemcpyDeviceToDevice));
 
-        execKernel((set_priority<T>), edge_gridSize, blockSize, dev_, false, g, nodeDegree.gdata()); // get split ptr data
-
+        // if there is only one central node and 1 symmetric node:
         graph::GPUArray<triplet<T>> triplet_array("Array paired with partitions to ", unified, m, dev_);
-        execKernel((map_and_gen_triplet_array<T>), edge_gridSize, blockSize, dev_, false, triplet_array.gdata(), g, nodeDegree.gdata());
+        T symcount = sym_nodes_ptr->cdata()[query_sequence->N];
+        Log(debug, "test single symmetry %d", symcount);
+        symcount = 10;
+        if (symcount > 1)
+        {
+            execKernel((set_priority<T, true>), edge_gridSize, blockSize, dev_, false, g, nodeDegree.gdata()); // get split ptr data
+            execKernel((map_and_gen_triplet_array<T>), edge_gridSize, blockSize, dev_, false, triplet_array.gdata(), g, nodeDegree.gdata());
 
-        thrust::stable_sort(thrust::device, triplet_array.gdata(), triplet_array.gdata() + m, comparePriority<T>());
+            thrust::stable_sort(thrust::device, triplet_array.gdata(), triplet_array.gdata() + m, comparePriority<T, true>());
+        }
+        else
+        {
+            execKernel((set_priority<T, false>), edge_gridSize, blockSize, dev_, false, g, nodeDegree.gdata()); // get split ptr data
+            execKernel((map_and_gen_triplet_array<T>), edge_gridSize, blockSize, dev_, false, triplet_array.gdata(), g, nodeDegree.gdata());
+            thrust::stable_sort(thrust::device, triplet_array.gdata(), triplet_array.gdata() + m, comparePriority<T, false>());
+        }
+
         thrust::stable_sort(thrust::device, triplet_array.gdata(), triplet_array.gdata() + m, comparePartition<T>());
         CUDA_RUNTIME(cudaDeviceSynchronize());
 
