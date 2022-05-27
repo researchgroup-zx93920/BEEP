@@ -2,13 +2,13 @@
 #include "../include/GraphDataStructure.cuh"
 #include "../kclique/common.cuh"
 #include "../kclique/kckernels.cuh"
-// #define IC_COUNT
+#define IC_COUNT
 
 // #define DEGENERACY
 #define DEGREE
 // #define LEX
 
-// #define SYMOPT
+#define SYMOPT
 #define REUSE
 
 const uint DEPTH = 10;
