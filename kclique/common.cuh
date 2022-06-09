@@ -13,6 +13,7 @@ __constant__ uint MAXLEVEL;
 __constant__ uint NUMDIVS;
 __constant__ uint CBPSM;
 __constant__ uint ORIENTED_MAXDEG;
+__constant__ uint FIRST_SYM_LEVEL;
 
 ///////////////////////////// Global ////////////////////////////////////////////
 template <typename T, int BLOCK_DIM_X>

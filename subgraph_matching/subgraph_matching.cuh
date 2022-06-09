@@ -41,7 +41,7 @@ namespace graph
         GPUArray<uint> *reuse_ptr;
 
         uint min_qDegree, max_qDegree;
-        uint unmat_level;
+        uint unmat_level, first_sym_level;
 
         // Processed data graph info
         GPUArray<uint64> counter;
@@ -536,7 +536,19 @@ namespace graph
                 }
             }
         }
-        Log(debug, "Reached line %d", __LINE__);
+
+        // first symmetric level
+        for (uint i = 1; i < numNodes + 1; i++)
+        {
+            if (sym_nodes_ptr->cdata()[i] > 0)
+            {
+                first_sym_level = i;
+                break;
+            }
+        }
+        Log(debug, "First symmetric level: %u", first_sym_level);
+        cudaMemcpyToSymbol(FIRST_SYM_LEVEL, &first_sym_level, sizeof(uint));
+
 // Find max W
 #ifdef REUSE
         for (uint i = 0; i < numNodes; i++)
@@ -561,7 +573,6 @@ namespace graph
                 reuse_ptr->cdata()[i] = query_edge_ptr->cdata()[i + 1];
             }
         }
-        Log(debug, "Reached line %d", __LINE__);
 #endif
         for (uint i = 0; i < numNodes; i++)
         {
@@ -879,8 +890,10 @@ namespace graph
                 auto grid_block_size = current_q.count.gdata()[0];
                 if (maxDeg >= bound_LD)
                 {
+
                     if (persistant)
                     {
+                        Log(critical, "kernel in line %u launched", __LINE__ + 1);
                         execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size_HD, partitionSize_HD>),
                                    grid_block_size, block_size_HD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(), intersection_count.gdata(),
@@ -891,6 +904,7 @@ namespace graph
                     }
                     else
                     {
+                        Log(critical, "kernel in line %u launched", __LINE__ + 1);
                         execKernel((sgm_kernel_central_node_base_binary<T, block_size_HD, partitionSize_HD>),
                                    grid_block_size, block_size_HD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(), intersection_count.gdata(),
@@ -905,8 +919,9 @@ namespace graph
 
                     if (persistant)
                     {
+                        Log(critical, "kernel in line %u launched", __LINE__ + 1);
                         printf("This kernel is launched\n");
-                        execKernel((sgm_kernel_central_node_base_binary_persistant_LD<T, block_size_LD, partitionSize_LD>),
+                        execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size_LD, partitionSize_LD>),
                                    grid_block_size, block_size_LD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(), intersection_count.gdata(),
                                    dataGraph, current_q.device_queue->gdata()[0],
@@ -916,7 +931,8 @@ namespace graph
                     }
                     else
                     {
-                        execKernel((sgm_kernel_central_node_base_binary_LD<T, block_size_LD, partitionSize_LD>),
+                        Log(critical, "kernel in line %u launched", __LINE__ + 1);
+                        execKernel((sgm_kernel_central_node_base_binary<T, block_size_LD, partitionSize_LD>),
                                    grid_block_size, block_size_LD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(), intersection_count.gdata(),
                                    dataGraph, current_q.device_queue->gdata()[0],
@@ -1134,7 +1150,7 @@ namespace graph
         graph::GPUArray<triplet<T>> triplet_array("Array paired with partitions to ", unified, m, dev_);
         T symcount = sym_nodes_ptr->cdata()[query_sequence->N];
         Log(debug, "test single symmetry %d", symcount);
-        symcount = 10;
+        symcount = 1;
         if (symcount > 1)
         {
             execKernel((set_priority<T, true>), edge_gridSize, blockSize, dev_, false, g, nodeDegree.gdata()); // get split ptr data

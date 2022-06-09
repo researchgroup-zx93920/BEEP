@@ -98,6 +98,9 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			{
 				l[wx] = 3; // i.e. at level 2	l[wx] is +1 at all places
 				sg_count[wx] = 0;
+#ifdef IC_COUNT
+				icount[wx] = 0;
+#endif
 				level_prev_index[wx][0] = srcSplit - srcStart + 1;
 				level_prev_index[wx][1] = j + 1;
 			}
