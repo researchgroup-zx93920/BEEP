@@ -109,8 +109,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			{
 				cl[k] = get_mask(srcLen, k) & unset_mask(j, k); // unset mask returns all ones except at bit j
 																// if (j == 32 * (srcLen / 32) + 1)
-				// atomicAdd(&icount[wx], 1);
-				if (QEDGE_PTR[3] - QEDGE_PTR[2] == 2) // i.e. if connected to both nodes at level 0 and 1
+				if (QEDGE_PTR[3] - QEDGE_PTR[2] == 2)			// i.e. if connected to both nodes at level 0 and 1
 					to[threadIdx.x] = encode[j * num_divs_local + k];
 				else
 					to[threadIdx.x] = cl[k]; // if only connected to central node, everything is a candidate.
@@ -133,27 +132,28 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			}
 			reduce_part<T, CPARTSIZE>(partMask, warpCount);
 
-			if (l[wx] == KCCOUNT - LUNMAT && LUNMAT == 1)
-			{
-				// uint64 tmpCount;
-				// compute_intersection<T, CPARTSIZE, false>(
-				// 	tmpCount, lx, partMask, num_divs_local, j, l[wx], to, cl, level_prev_index[wx], encode);
-				// warpCount *= tmpCount;
+			/*if (l[wx] == KCCOUNT - LUNMAT && LUNMAT == 1)
+						{
+							// uint64 tmpCount;
+							// compute_intersection<T, CPARTSIZE, false>(
+							// 	tmpCount, lx, partMask, num_divs_local, j, l[wx], to, cl, level_prev_index[wx], encode);
+							// warpCount *= tmpCount;
 
-				// tmpCount = 0;
-				// for (T k = lx; k < num_divs_local; k += CPARTSIZE)
-				// {
-				// 	tmpCount += __popc(cl[num_divs_local + k] & cl[2 * num_divs_local + k]);
-				// }
-				// reduce_part<T, CPARTSIZE>(partMask, tmpCount);
+							// tmpCount = 0;
+							// for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+							// {
+							// 	tmpCount += __popc(cl[num_divs_local + k] & cl[2 * num_divs_local + k]);
+							// }
+							// reduce_part<T, CPARTSIZE>(partMask, tmpCount);
 
-				// warpCount -= tmpCount;
+							// warpCount -= tmpCount;
 
-				// if (SYMNODE_PTR[l[wx] + 1] > SYMNODE_PTR[l[wx]] &&
-				// 	SYMNODE[SYMNODE_PTR[l[wx] + 1] - 1] == l[wx] - 1)
-				// 	warpCount /= 2;
-			}
-
+							// if (SYMNODE_PTR[l[wx] + 1] > SYMNODE_PTR[l[wx]] &&
+							// 	SYMNODE[SYMNODE_PTR[l[wx] + 1] - 1] == l[wx] - 1)
+							// 	warpCount /= 2;
+						}
+			*/
+			
 			if (lx == 0)
 			{
 				if (l[wx] == KCCOUNT - LUNMAT) // If reached last level
@@ -203,7 +203,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 					lx, partMask, num_divs_local, newIndex[wx], l[wx],
 					to, cl, level_prev_index[wx], encode);
 #endif
-#endif
+#else
 
 #ifdef REUSE
 				compute_intersection_reuse<T, CPARTSIZE, true>(
@@ -217,7 +217,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 					to, cl, level_prev_index[wx], encode);
 
 #endif
-
+#endif
 				if (l[wx] + 1 == KCCOUNT - LUNMAT && LUNMAT == 1)
 				{
 					// 	uint64 tmpCount;

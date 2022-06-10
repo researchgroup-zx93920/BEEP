@@ -756,6 +756,7 @@ namespace graph
         GPUArray<uint64> intersection_count;
         intersection_count.initialize("Temp level Counter", unified, 1, dev_);
         intersection_count.setSingle(0, 0, false);
+        Log(info, "Intersection count initialized %lu", intersection_count.gdata()[0]);
 
         // Initialise Kernel Dims
         const auto block_size_LD = 1024; // Block size for low degree nodes
@@ -881,6 +882,7 @@ namespace graph
                 {
                     if (persistant)
                     {
+                        printf("kernel in line %u is launched\n", __LINE__);
                         execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size_HD, partitionSize_HD>),
                                    grid_block_size, block_size_HD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(), intersection_count.gdata(),
@@ -891,6 +893,7 @@ namespace graph
                     }
                     else
                     {
+                        printf("kernel in line %u is launched\n", __LINE__);
                         execKernel((sgm_kernel_central_node_base_binary<T, block_size_HD, partitionSize_HD>),
                                    grid_block_size, block_size_HD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(), intersection_count.gdata(),
@@ -901,12 +904,11 @@ namespace graph
                     }
                 }
                 else
-                { // Low degree nodes processed here
-
+                {
                     if (persistant)
                     {
-                        printf("This kernel is launched\n");
-                        execKernel((sgm_kernel_central_node_base_binary_persistant_LD<T, block_size_LD, partitionSize_LD>),
+                        printf("kernel in line %u is launched\n", __LINE__);
+                        execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size_LD, partitionSize_LD>),
                                    grid_block_size, block_size_LD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(), intersection_count.gdata(),
                                    dataGraph, current_q.device_queue->gdata()[0],
@@ -916,7 +918,8 @@ namespace graph
                     }
                     else
                     {
-                        execKernel((sgm_kernel_central_node_base_binary_LD<T, block_size_LD, partitionSize_LD>),
+                        printf("kernel in line %u is launched\n", __LINE__);
+                        execKernel((sgm_kernel_central_node_base_binary<T, block_size_LD, partitionSize_LD>),
                                    grid_block_size, block_size_LD, dev_, false,
                                    counter.gdata(), d_count_per_node.gdata(), intersection_count.gdata(),
                                    dataGraph, current_q.device_queue->gdata()[0],
@@ -925,6 +928,7 @@ namespace graph
                                    by_ == ByNode);
                     }
                 }
+                
                 double time = a.elapsed();
 
                 // Cleanup
@@ -942,11 +946,15 @@ namespace graph
             level += span;
             span = bound_HD;
 
+            std::cout << "------------- Intersection count = " << intersection_count.gdata()[0] << "\n";
             // change ordering here
+            // for (int i = 0; i < dataGraph.numNodes; i++)
+            //     printf("src: %u\t count: %u\n", current_q.device_queue->gdata()[i], d_count_per_node.gdata()[i]);
         }
 
         std::cout << "------------- Counter = " << counter.gdata()[0] << "\n";
         std::cout << "------------- Intersection count = " << intersection_count.gdata()[0] << "\n";
+
         counter.freeGPU();
         intersection_count.freeGPU();
         d_bitmap_states.freeGPU();
