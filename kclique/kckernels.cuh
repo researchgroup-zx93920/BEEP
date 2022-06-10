@@ -258,7 +258,8 @@ __global__ void get_max_degree(graph::COOCSRGraph_d<T> g, T *edgePtr, T *maxDegr
 		T srcDeg = g.rowPtr[src + 1] - g.rowPtr[src];
 		T dstDeg = g.rowPtr[dst + 1] - g.rowPtr[dst];
 
-		degree = srcDeg > dstDeg ? srcDeg : dstDeg;
+		// degree = srcDeg > dstDeg ? srcDeg : dstDeg;
+		degree = srcDeg;
 		edgePtr[gtid] = degree;
 	}
 

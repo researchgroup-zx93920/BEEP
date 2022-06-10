@@ -591,3 +591,13 @@ __global__ void set_priority_l(graph::COOCSRGraph_d<T> g)
         }
     }
 }
+
+template <typename T>
+__global__ void map_src(T *mapped, const graph::GraphQueue_d<T, bool> current, const graph::COOCSRGraph_d<T> g)
+{
+    uint i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < current.count[0])
+    {
+        mapped[i] = g.rowInd[current.queue[i]];
+    }
+}
