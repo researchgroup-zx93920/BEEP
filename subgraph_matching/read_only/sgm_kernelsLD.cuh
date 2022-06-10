@@ -272,12 +272,16 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode_LD(
             if (lx == 0)
             {
                 atomicAdd(counter, sg_count[wx]);
+                atomicAdd(&cpn[src], sg_count[wx]);
 #ifdef IC_COUNT
                 atomicAdd(intersection_count, icount[wx]);
 #endif
             }
             __syncwarp(partMask);
         }
+        __syncthreads();
+        if (threadIdx.x == 0)
+            printf("Src: %u\t count:%u\n", src, cpn[src]);
         __syncthreads();
     }
 }
@@ -542,7 +546,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byEdge_LD(
             if (lx == 0)
             {
                 atomicAdd(counter, sg_count[wx]);
-                // cpn[current.queue[i]] = sg_count[wx];
+                // atomicAdd(&cpn[current.queue[i]], sg_count[wx]);
             }
             __syncwarp(partMask);
         }

@@ -758,6 +758,7 @@ namespace graph
         GPUArray<uint64> intersection_count;
         intersection_count.initialize("Temp level Counter", unified, 1, dev_);
         intersection_count.setSingle(0, 0, false);
+        Log(info, "Intersection count initialized %lu", intersection_count.gdata()[0]);
 
         Timer t;
         // Initialise Kernel Dims
