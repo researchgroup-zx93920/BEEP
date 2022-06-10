@@ -1,9 +1,12 @@
 cub/**
 nauty/**
 build*/**
+perf*/**
 *.exe
 *.o
 .vscode/**
 tests/**
 scripts/**
 *.tar.gz
+*.zip
+icount_execs/**

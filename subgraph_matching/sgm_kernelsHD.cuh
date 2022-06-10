@@ -1,5 +1,6 @@
 #pragma once
 #include "utils.cuh"
+#include "config.cuh"
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
@@ -58,6 +59,10 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			offset[wx] = 0;
 		}
 #endif
+		if (lx == 0)
+		{
+			sg_count[wx] = 0;
+		}
 		__syncthreads();
 
 		// Encode
@@ -97,10 +102,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			if (lx == 1)
 			{
 				l[wx] = 3; // i.e. at level 2	l[wx] is +1 at all places
-				sg_count[wx] = 0;
-#ifdef IC_COUNT
-				icount[wx] = 0;
-#endif
+				// sg_count[wx] = 0;
 				level_prev_index[wx][0] = srcSplit - srcStart + 1;
 				level_prev_index[wx][1] = j + 1;
 			}
@@ -270,14 +272,14 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 				}
 				__syncwarp(partMask);
 			}
-			if (lx == 0)
-			{
-				atomicAdd(counter, sg_count[wx]);
-#ifdef IC_COUNT
-				atomicAdd(intersection_count, icount[wx]);
-#endif
-			}
 			__syncwarp(partMask);
+		}
+		if (lx == 0)
+		{
+			atomicAdd(counter, sg_count[wx]);
+#ifdef IC_COUNT
+			atomicAdd(intersection_count, icount[wx]);
+#endif
 		}
 		__syncthreads();
 	}

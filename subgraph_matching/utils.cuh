@@ -1,15 +1,8 @@
 #pragma once
+#include "config.cuh"
 #include "../include/GraphDataStructure.cuh"
 #include "../kclique/common.cuh"
 #include "../kclique/kckernels.cuh"
-#define IC_COUNT
-
-// #define DEGENERACY
-#define DEGREE
-// #define LEX
-
-#define SYMOPT
-#define REUSE
 
 const uint DEPTH = 10;
 
@@ -57,6 +50,19 @@ struct comparePartition
         return (i.partition < j.partition);
     }
 };
+
+template <typename T>
+__host__ void get_max_blocks(const T Degree, T &blocks, const uint num_divs, const uint depth)
+{
+    cudaDeviceSynchronize();
+    size_t total, free;
+    cudaMemGetInfo(&free, &total);
+    size_t encode = (size_t)Degree * num_divs * sizeof(T);
+    size_t mask = (size_t)num_divs * sizeof(T);
+    size_t level = 80 * (2048 / BLOCK_SIZE_LD) * depth * num_divs * (BLOCK_SIZE_LD / PARTITION_SIZE_LD) * sizeof(T);
+    size_t mem_per_block = encode + mask;
+    blocks = (T)((free * 0.90 - level) / mem_per_block);
+}
 
 template <typename T>
 __device__ __forceinline__ T get_mask(T idx, T partition)
