@@ -8,8 +8,8 @@
 #define DEGREE
 // #define LEX
 
-// #define SYMOPT
-// #define REUSE
+#define SYMOPT
+#define REUSE
 
 const uint DEPTH = 10;
 

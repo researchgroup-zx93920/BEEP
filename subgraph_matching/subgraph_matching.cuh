@@ -1152,6 +1152,7 @@ namespace graph
         }
         else
         {
+            Log(critical, "Using Decreasing priority");
             execKernel((set_priority<T, false>), edge_gridSize, blockSize, dev_, false, g, nodeDegree.gdata()); // get split ptr data
             execKernel((map_and_gen_triplet_array<T>), edge_gridSize, blockSize, dev_, false, triplet_array.gdata(), g, nodeDegree.gdata());
             thrust::stable_sort(thrust::device, triplet_array.gdata(), triplet_array.gdata() + m, comparePriority<T, false>());
