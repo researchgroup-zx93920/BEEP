@@ -28,6 +28,13 @@ struct triplet
     T priority;
 };
 
+template <typename T>
+struct mapping
+{
+    T src;
+    T srcHead;
+};
+
 // Unary method to compare two cells of a cost matrix
 
 template <typename T, bool ASCENDING>
@@ -593,11 +600,19 @@ __global__ void set_priority_l(graph::COOCSRGraph_d<T> g)
 }
 
 template <typename T>
-__global__ void map_src(T *mapped, const graph::GraphQueue_d<T, bool> current, const graph::COOCSRGraph_d<T> g)
+__global__ void map_src(mapping<T> *mapped, const graph::GraphQueue_d<T, bool> current, const T *scan, const T *degree)
 {
-    uint i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < current.count[0])
+    __shared__ T src, srcLen, start;
+    if (threadIdx.x == 0)
     {
-        mapped[i] = g.rowInd[current.queue[i]];
+        src = current.queue[blockIdx.x];
+        srcLen = degree[src];
+        start = (blockIdx.x > 0) ? scan[blockIdx.x - 1] : 0;
+    }
+    __syncthreads();
+    for (T i = threadIdx.x; i < srcLen; i += blockDim.x)
+    {
+        mapped[start + i].src = src;
+        mapped[start + i].srcHead = start;
     }
 }

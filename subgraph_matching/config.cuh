@@ -14,4 +14,6 @@
 #define BLOCK_SIZE_LD 1024
 #define PARTITION_SIZE_LD 32
 
-#define CUTOFF 2048
+#define CUTOFF 768
+#define SCHEDULING true
+// #define SCHEDULING false

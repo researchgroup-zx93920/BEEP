@@ -207,6 +207,7 @@ namespace graph
 
             Timer t;
 
+            // print_graph(dataGraph);
             count_subgraphs(dataGraph);
 
             time = t.elapsed();
@@ -226,6 +227,7 @@ namespace graph
         void count_subgraphs(graph::COOCSRGraph_d<T> &dataGraph);
 
         void degree_ordering(graph::COOCSRGraph_d<T> &g);
+        void print_graph(graph::COOCSRGraph_d<T> &dataGraph);
     };
 
     /***********************
@@ -812,7 +814,6 @@ namespace graph
         span -= level;
 
         // Loop over different buckets
-
         bool first = true;
         while (todo > 0)
         {
@@ -820,13 +821,6 @@ namespace graph
             bucket_scan(nodeDegree, dataGraph.numNodes, level, span, bucket_level_end_, current_nq, bucket_nq);
             Log(debug, " bucket_level_end: %u, level: %u", bucket_level_end_, level);
 
-            if (!first)
-            {
-                bucket_level_end_ -= span;
-                Log(debug, " bucket_level_end: %u, level: %u", bucket_level_end_, level);
-                bucket_scan(edgeDegree, dataGraph.numEdges, level, span, bucket_level_end_, current_eq, bucket_eq);
-                // Log(debug, "Line #%u: bucket_level_end: %u, level: %u", __LINE__, bucket_level_end_, level);
-            }
             if (current_nq.count.gdata()[0] > 0)
             {
                 uint maxDeg = (by_ == ByEdge) ? max_eDegree.gdata()[0] : max_dDegree.gdata()[0];
@@ -842,20 +836,20 @@ namespace graph
                 Log(critical, "Free memory: %f GB, Total Memory: %f GB", (free * 1.0) / (1024 * 1024 * 1024), (total * 1.0) / (1024 * 1024 * 1024));
 
                 double time1 = t.elapsed_and_reset();
-                if (!first)
-                    current_nq.key_sort_ascending(current_nq.device_queue->gdata()->queue);
-                current_nq.map_n_key_sort(nodeDegree.gdata());
+
+                if (!first || SCHEDULING)
+                    current_nq.map_n_key_sort(nodeDegree.gdata());
+
+                GPUArray<mapping<T>> src_mapping;
                 if (!first)
                 {
-                    Degree_Scan.initialize("Inclusive Sum scan for edge per block grid", unified, current_nq.count.gdata()[0], dev_);
+                    uint count = current_nq.count.gdata()[0]; // grid size for encoding kernel
+                    Degree_Scan.initialize("Inclusive Sum scan for edge per block grid", unified, count, dev_);
                     Degree_Scan.setAll(0, current_nq.count.gdata()[0]);
                     current_nq.i_scan(Degree_Scan.gdata(), nodeDegree.gdata());
-                    uint len = current_eq.count.gdata()[0];
-                    GPUArray<T> src_mapping("mapping eq with sources", unified, len, dev_);
-                    execKernel((map_src<T>), (len + 255) / 256, 256, dev_, false, src_mapping.gdata(), current_eq.device_queue->gdata()[0], dataGraph);
-                    current_eq.key_sort_ascending(src_mapping.gdata());
-                    current_eq.map_n_key_sort(edgeDegree.gdata());
-                    src_mapping.freeGPU();
+                    uint len = Degree_Scan.gdata()[count - 1]; // grid size for pre encoded kernel
+                    src_mapping.initialize("mapping edges with sources", unified, len, dev_);
+                    execKernel((map_src<T>), count, 256, dev_, false, src_mapping.gdata(), current_nq.device_queue->gdata()[0], Degree_Scan.gdata(), nodeDegree.gdata());
                 }
                 double sort_time = t.elapsed_and_reset();
 
@@ -863,18 +857,18 @@ namespace graph
                 {
                     Log(debug, "HD non persistant kernel launched");
 
-                    // queuing check
+                    // accuracy check
                     T nnodes = current_nq.count.gdata()[0];
-                    T nedges = current_eq.count.gdata()[0];
+                    T nedges = Degree_Scan.gdata()[nnodes - 1];
                     GPUArray<int> offset("Encoding offset", AllocationTypeEnum::unified, dataGraph.numNodes, dev_);
-                    Log(debug, "%u:", nnodes);
-                    // queuing accuracy check
+                    Log(debug, "nnodes %u:", nnodes);
+                    Log(debug, "nedges %u:", nedges);
                     T temp_total = 0;
                     for (int i = 0; i < nnodes; i++)
                     {
                         T Node_id = current_nq.device_queue->gdata()->queue[i];
                         T degree = dataGraph.rowPtr[Node_id + 1] - dataGraph.rowPtr[Node_id];
-                        T src = dataGraph.rowInd[current_eq.device_queue->gdata()->queue[temp_total]];
+                        T src = (i > 0) ? src_mapping.gdata()[Degree_Scan.gdata()[i - 1]].src : src_mapping.gdata()[0].src;
                         T srcDegree = dataGraph.rowPtr[src + 1] - dataGraph.rowPtr[src];
                         // printf("%u, %u, %u, %u\n", Node_id, degree, src, srcDegree);
                         temp_total += degree;
@@ -890,17 +884,15 @@ namespace graph
                     T eq_head = 0;
                     bool first = true;
 
-                    Log(info, "node queue head: %u", nq_head);
+                    Log(debug, "node queue head: %u", nq_head);
                     while (nq_head < current_nq.count.gdata()[0])
                     {
                         T stride_degree, max_blocks;
-                        if (first)
-                            stride_degree = Degree_Scan.gdata()[0] - 0;
-                        else
-                            stride_degree = Degree_Scan.gdata()[nq_head] - Degree_Scan.gdata()[nq_head - 1];
+                        stride_degree = (nq_head > 0) ? Degree_Scan.gdata()[nq_head] - Degree_Scan.gdata()[nq_head - 1] : Degree_Scan.gdata()[0] - 0;
 
                         num_divs = (stride_degree + dv - 1) / dv;
                         get_max_blocks<T>(stride_degree, max_blocks, num_divs, max_qDegree);
+                        Log(debug, "stride degree: %u\t max_blocks: %u\n", stride_degree, max_blocks);
 
                         cudaMemcpyToSymbol(NUMPART, &numPartitions_HD, sizeof(NUMPART));
                         cudaMemcpyToSymbol(PARTSIZE, &partitionSize_HD, sizeof(PARTSIZE));
@@ -936,7 +928,7 @@ namespace graph
 
                         execKernel((sgm_kernel_pre_encoded_byEdge<T, block_size_LD, partitionSize_LD>),
                                    edge_grid_size, block_size_LD, dev_, false,
-                                   counter.gdata(), dataGraph, current_eq.device_queue->gdata()[0], eq_head,
+                                   counter.gdata(), dataGraph, src_mapping.gdata(), eq_head,
                                    current_level.gdata(),
                                    d_bitmap_states.gdata(), node_be.gdata(), per_node_count.gdata(),
                                    offset.gdata());
@@ -946,7 +938,6 @@ namespace graph
 
                         current_level.freeGPU();
                         node_be.freeGPU();
-
                         first = false;
                     }
                     offset.freeGPU();
@@ -1023,8 +1014,6 @@ namespace graph
             span = bound_HD;
             todo -= current_nq.count.gdata()[0];
             // todo = 0;
-            if (!first)
-                exit(-1);
             first = false;
         }
 
@@ -1083,4 +1072,74 @@ namespace graph
         triplet_array.freeGPU();
     }
 
+    template <typename T>
+    void SG_Match<T>::print_graph(graph::COOCSRGraph_d<T> &dataGraph)
+    {
+#define ORIENTED_PRINT
+
+        Log(info, "Printing graph as read");
+        Log(info, "num Nodes %lu", dataGraph.numNodes);
+        graph::COOCSRGraph<uint> temp_g;
+        uint m = dataGraph.numEdges, n = dataGraph.numNodes;
+        temp_g.capacity = m;
+        temp_g.numEdges = m;
+        temp_g.numNodes = n;
+
+        uint *rp, *ri, *ci, *oci, *sp;
+        cudaMallocHost((void **)&rp, (n + 1) * sizeof(uint));
+        cudaMallocHost((void **)&ri, (m) * sizeof(uint));
+        cudaMallocHost((void **)&ci, (m) * sizeof(uint));
+        cudaMallocHost((void **)&oci, (m) * sizeof(uint));
+        cudaMallocHost((void **)&sp, (n + 1) * sizeof(uint));
+
+        temp_g.rowPtr = new graph::GPUArray<uint>("Temp row ptr", AllocationTypeEnum::cpuonly);
+        temp_g.rowInd = new graph::GPUArray<uint>("Temp row indices", AllocationTypeEnum::cpuonly);
+        temp_g.colInd = new graph::GPUArray<uint>("Temp col indices", AllocationTypeEnum::cpuonly);
+
+        CUDA_RUNTIME(cudaMemcpy(rp, dataGraph.rowPtr, (n + 1) * sizeof(uint), cudaMemcpyKind::cudaMemcpyDeviceToHost));
+        CUDA_RUNTIME(cudaMemcpy(ri, dataGraph.rowInd, (m) * sizeof(uint), cudaMemcpyKind::cudaMemcpyDeviceToHost));
+        CUDA_RUNTIME(cudaMemcpy(ci, dataGraph.colInd, (m) * sizeof(uint), cudaMemcpyKind::cudaMemcpyDeviceToHost));
+        CUDA_RUNTIME(cudaMemcpy(oci, dataGraph.oriented_colInd, (m) * sizeof(uint), cudaMemcpyKind::cudaMemcpyDeviceToHost));
+        CUDA_RUNTIME(cudaMemcpy(sp, dataGraph.splitPtr, (n) * sizeof(uint), cudaMemcpyKind::cudaMemcpyDeviceToHost));
+
+        temp_g.rowPtr->cdata() = rp;
+        temp_g.rowInd->cdata() = ri;
+        temp_g.colInd->cdata() = ci;
+
+#ifndef ORIENTED_PRINT
+        for (T src = temp_g.rowInd->cdata()[0]; src < temp_g.numNodes; src++)
+        {
+            T srcStart = temp_g.rowPtr->cdata()[src];
+            T srcEnd = temp_g.rowPtr->cdata()[src + 1];
+
+            printf("%u\t: ", src);
+            for (T j = srcStart; j < srcEnd; j++)
+            {
+                printf("%u, ", temp_g.colInd->cdata()[j]);
+            }
+            printf("\t split after: %u\n", sp[src] - srcStart);
+            printf("\n");
+        }
+#else
+        for (T src = temp_g.rowInd->cdata()[0]; src < temp_g.numNodes; src++)
+        {
+            T srcStart = temp_g.rowPtr->cdata()[src];
+            T srcEnd = temp_g.rowPtr->cdata()[src + 1];
+            printf("%u\t: ", src);
+            for (T j = srcStart; j < srcEnd; j++)
+            {
+                printf("%u, ", oci[j]);
+            }
+            printf("\t split after: %u", sp[src] - srcStart);
+            printf("\n");
+        }
+#endif
+        printf("\n");
+        printf("***end of graph***\n");
+        cudaFreeHost(rp);
+        cudaFreeHost(ri);
+        cudaFreeHost(ci);
+        cudaFreeHost(sp);
+        // graph::free_csrcoo_host(temp_g);
+    }
 }

@@ -137,23 +137,23 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode_LD(
 
             if (l[wx] == KCCOUNT - LUNMAT && LUNMAT == 1)
             {
-                // uint64 tmpCount;
-                // compute_intersection<T, CPARTSIZE, false>(
-                // 	tmpCount, lx, partMask, num_divs_local, j, l[wx], to, cl, level_prev_index[wx], encode);
-                // warpCount *= tmpCount;
+                uint64 tmpCount;
+                compute_intersection<T, CPARTSIZE, false>(
+                    tmpCount, lx, partMask, num_divs_local, j, l[wx], to, cl, level_prev_index[wx], encode);
+                warpCount *= tmpCount;
 
-                // tmpCount = 0;
-                // for (T k = lx; k < num_divs_local; k += CPARTSIZE)
-                // {
-                // 	tmpCount += __popc(cl[num_divs_local + k] & cl[2 * num_divs_local + k]);
-                // }
-                // reduce_part<T, CPARTSIZE>(partMask, tmpCount);
+                tmpCount = 0;
+                for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+                {
+                    tmpCount += __popc(cl[num_divs_local + k] & cl[2 * num_divs_local + k]);
+                }
+                reduce_part<T, CPARTSIZE>(partMask, tmpCount);
 
-                // warpCount -= tmpCount;
+                warpCount -= tmpCount;
 
-                // if (SYMNODE_PTR[l[wx] + 1] > SYMNODE_PTR[l[wx]] &&
-                // 	SYMNODE[SYMNODE_PTR[l[wx] + 1] - 1] == l[wx] - 1)
-                // 	warpCount /= 2;
+                if (SYMNODE_PTR[l[wx] + 1] > SYMNODE_PTR[l[wx]] &&
+                    SYMNODE[SYMNODE_PTR[l[wx] + 1] - 1] == l[wx] - 1)
+                    warpCount /= 2;
             }
 
             if (lx == 0)
@@ -224,23 +224,23 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode_LD(
 #endif
                 if (l[wx] + 1 == KCCOUNT - LUNMAT && LUNMAT == 1)
                 {
-                    // 	uint64 tmpCount;
-                    // 	compute_intersection<T, CPARTSIZE, false>(
-                    // 		tmpCount, srcSplit - srcStart, lx, partMask, num_divs_local, newIndex[wx], l[wx] + 1, to, cl, level_prev_index[wx], encode);
-                    // 	warpCount *= tmpCount;
+                    uint64 tmpCount;
+                    compute_intersection<T, CPARTSIZE, false>(
+                        tmpCount, srcSplit - srcStart, lx, partMask, num_divs_local, newIndex[wx], l[wx] + 1, to, cl, level_prev_index[wx], encode);
+                    warpCount *= tmpCount;
 
-                    // 	tmpCount = 0;
-                    // 	for (T k = lx; k < num_divs_local; k += CPARTSIZE)
-                    // 	{
-                    // 		tmpCount += __popc(cl[(l[wx] - 1) * num_divs_local + k] & cl[l[wx] * num_divs_local + k]);
-                    // 	}
-                    // 	reduce_part<T, CPARTSIZE>(partMask, tmpCount);
+                    tmpCount = 0;
+                    for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+                    {
+                        tmpCount += __popc(cl[(l[wx] - 1) * num_divs_local + k] & cl[l[wx] * num_divs_local + k]);
+                    }
+                    reduce_part<T, CPARTSIZE>(partMask, tmpCount);
 
-                    // 	warpCount -= tmpCount;
+                    warpCount -= tmpCount;
 
-                    // 	if (SYMNODE_PTR[l[wx] + 2] > SYMNODE_PTR[l[wx] + 1] &&
-                    // 		SYMNODE[SYMNODE_PTR[l[wx] + 2] - 1] == l[wx])
-                    // 		warpCount /= 2;
+                    if (SYMNODE_PTR[l[wx] + 2] > SYMNODE_PTR[l[wx] + 1] &&
+                        SYMNODE[SYMNODE_PTR[l[wx] + 2] - 1] == l[wx])
+                        warpCount /= 2;
                 }
                 // unsetting to avoid repeats not needed
                 if (lx == 0)
@@ -280,8 +280,8 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode_LD(
             __syncwarp(partMask);
         }
         __syncthreads();
-        if (threadIdx.x == 0)
-            printf("Src: %u\t count:%u\n", src, cpn[src]);
+        // if (threadIdx.x == 0)
+        //     printf("Src: %u\t count:%u\n", src, cpn[src]);
         __syncthreads();
     }
 }

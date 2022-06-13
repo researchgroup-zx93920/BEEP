@@ -52,7 +52,7 @@ template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __global__ void sgm_kernel_pre_encoded_byEdge(
     uint64 *counter,
     const graph::COOCSRGraph_d<T> g,
-    const graph::GraphQueue_d<T, bool> current, const T head,
+    const mapping<T> *srcList, const T head,
     T *current_level,
     T *levelStats,
     T *adj_enc, T *node_count,
@@ -89,35 +89,27 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
 
     for (unsigned long long i = blockIdx.x; i < (unsigned long long)gridDim.x; i += gridDim.x)
     {
-
         // block things
         if (threadIdx.x == 0)
         {
-            src = g.rowInd[current.queue[i + head]];
+            src = srcList[i + head].src;
             srcStart = g.rowPtr[src];
             srcSplit = g.splitPtr[src];
             srcLen = g.rowPtr[src + 1] - srcStart;
 
-            dst = g.colInd[current.queue[i + head]];
+            dstIdx = i + head - srcList[i + head].srcHead;
+            dst = g.oriented_colInd[srcStart + dstIdx];
             dstStart = g.rowPtr[dst];
             dstLen = g.rowPtr[dst + 1] - dstStart;
 
-            dstIdx = current.queue[i + head] - srcStart;
             num_divs_local = (srcLen + 32 - 1) / 32;
-
-            uint64_t encode_offset = (uint64_t)offset[src] * NUMDIVS * MAXDEG;
-            encode = &adj_enc[encode_offset];
-
-            level_offset = &current_level[(uint64_t)((sm_id * CBPSM) + levelPtr) * (NUMDIVS * numPartitions * MAXLEVEL)];
+            encode = &adj_enc[(uint64)offset[src] * NUMDIVS * MAXDEG];
+            level_offset = &current_level[(uint64)((sm_id * CBPSM) + levelPtr) * (NUMDIVS * numPartitions * MAXLEVEL)];
         }
         __syncthreads();
 
-        if (SYMNODE_PTR[2] == 1)
-        {
-            bool keep = head + i > srcSplit - srcStart;
-            if (!keep)
-                continue;
-        }
+        if (SYMNODE_PTR[2] == 1 && dstIdx < (srcSplit - srcStart))
+            continue;
 
         T partMask = (1 << CPARTSIZE) - 1;
         partMask = partMask << ((wx % (32 / CPARTSIZE)) * CPARTSIZE);
