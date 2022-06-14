@@ -1,4 +1,3 @@
-
 #pragma once
 #include "config.cuh"
 
@@ -188,20 +187,20 @@ namespace graph
 
             Timer p;
             preprocess_query(patGraph);
-            Log(debug, "Parsing template succesful");
+            Log(debug, "Parsing template succesful!");
 
             detect_reuse(patGraph);
-            Log(debug, "detecting reuse succesful");
+            Log(debug, "detecting reuse succesful!");
 
             initialize(dataGraph);
-            Log(debug, "Initializing datagraph succesful");
+            Log(debug, "Initializing datagraph succesful!");
 
             peel_data(dataGraph);
-            Log(debug, "datagraph peeling succesful");
+            Log(debug, "datagraph peeling succesful!");
 
             Log(info, "Degree Ordering");
             degree_ordering(dataGraph);
-            Log(debug, "ordering succesfull");
+            Log(debug, "ordering succesfull!");
 
             // initialize1(dataGraph);
             // Log(debug, "initialize 1 succesfull");
@@ -1033,7 +1032,7 @@ namespace graph
 
                     auto grid_block_size = current_nq.count.gdata()[0];
 
-                    if (persistant)
+                    /*if (persistant)
                     {
                         execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size_LD, partitionSize_LD>),
                                    grid_block_size, block_size_LD, dev_, false,
@@ -1051,15 +1050,12 @@ namespace graph
                                    dataGraph, current_q.device_queue->gdata()[0],
                                    current_level.gdata(), reuse.gdata(), node_be.gdata(),
                                    by_ == ByNode);
-                    }
+                    }*/
 
                     // cleanup
                     node_be.freeGPU();
                     reuse.freeGPU();
                     current_level.freeGPU();
-
-                    time_ = t_.elapsed_and_reset();
-                    Log(info, "LD process TIME: %f s", time_);
                 }
 
                 // Print bucket stats:
@@ -1195,8 +1191,6 @@ namespace graph
                     T eq_head = 0;
                     bool first = true;
 
-                    double encode_time = 0, HD_process_time = 0;
-
                     while (nq_head < current_nq.count.gdata()[0])
                     {
                         T stride_degree, max_blocks;
@@ -1224,8 +1218,7 @@ namespace graph
                                    block_size_HD, dev_, false,
                                    dataGraph, current_nq.device_queue->gdata()[0], nq_head,
                                    node_be.gdata(), offset.gdata());
-
-                        encode_time += t_.elapsed_and_reset();
+                        Log(debug, "Compute encoding succesful");
 
                         nnodes -= node_grid_size;
                         nq_head += node_grid_size;
@@ -1239,6 +1232,8 @@ namespace graph
                         cudaMemcpyToSymbol(PARTSIZE, &partitionSize_LD, sizeof(PARTSIZE));
                         cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM_LD), sizeof(CBPSM));
 
+                        Log(debug, "pre encoded kernel grid size: %u", edge_grid_size);
+
                         execKernel((sgm_kernel_pre_encoded_byEdge<T, block_size_LD, partitionSize_LD>),
                                    edge_grid_size, block_size_LD, dev_, false,
                                    counter.gdata(), dataGraph, src_mapping.gdata(), eq_head,
@@ -1246,18 +1241,16 @@ namespace graph
                                    d_bitmap_states.gdata(), node_be.gdata(),
                                    offset.gdata());
 
+                        std::cout << cudaGetErrorString(cudaGetLastError()) << std::endl;
+
                         nedges -= edge_grid_size;
                         eq_head += edge_grid_size;
 
                         current_level.freeGPU();
                         node_be.freeGPU();
                         first = false;
-                        HD_process_time += t_.elapsed_and_reset();
                     }
                     offset.freeGPU();
-
-                    Log(info, "Encode TIME: %f s", encode_time);
-                    Log(info, "HD process TIME: %f s", HD_process_time);
                 }
                 else
                 {
@@ -1320,9 +1313,9 @@ namespace graph
                 }
 
                 // Print bucket stats:
-                // std::cout << "Bucket levels: " << level << " to " << maxDeg
-                //           << ", nodes/edges: " << current_nq.count.gdata()[0]
-                //           << ", Counter: " << counter.gdata()[0] << std::endl;
+                std::cout << "Bucket levels: " << level << " to " << maxDeg
+                          << ", nodes/edges: " << current_nq.count.gdata()[0]
+                          << ", Counter: " << counter.gdata()[0] << std::endl;
             }
             level += span;
             span = bound_HD;

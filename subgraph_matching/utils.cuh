@@ -139,7 +139,7 @@ __device__ __forceinline__ void compute_intersection(
     uint64 &wc, T &offset,
     const size_t lx, const T partMask,
     const T num_divs_local, const T maskIdx, const T lvl,
-    T *to, T *cl, const T *level_prev_index, T *encode)
+    T *to, T *cl, const T *level_prev_index, const T *encode)
 {
     wc = 0;
     // to[threadIdx.x] = 0x00;

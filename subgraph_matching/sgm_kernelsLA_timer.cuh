@@ -179,6 +179,10 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
             dstLen = g.rowPtr[dst + 1] - dstStart;
 
             num_divs_local = (srcLen + 32 - 1) / 32;
+            if (i == 45)
+            {
+                printf("offset at blockId 45: %d\t srcLen: %u\n", offset[src], srcLen);
+            }
             encode = &adj_enc[(uint64)offset[src] * NUMDIVS * MAXDEG];
             level_offset = &current_level[(uint64)((sm_id * CBPSM) + levelPtr) * (NUMDIVS * numPartitions * MAXLEVEL)];
         }
