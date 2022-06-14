@@ -937,6 +937,7 @@ namespace graph
                                    node_be.gdata(), offset.gdata());
 
                         encode_time += t_.elapsed_and_reset();
+                        Log(debug, "Compute encoding succesful");
 
                         CUDA_RUNTIME(cudaMemset(SM_times.gdata(), 0, num_SMs * sizeof(Counters)));
                         CUDA_RUNTIME(cudaMemset(SM_nodes.gdata(), 0, num_SMs * sizeof(uint64)));
