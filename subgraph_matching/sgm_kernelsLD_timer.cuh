@@ -1,8 +1,9 @@
 #pragma once
 #include "utils.cuh"
+#include "config.cuh"
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
-__device__ __forceinline__ void sgm_kernel_central_node_function_byNode_LD(
+__device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
     T blockOffset,
     uint64 *counter, T *cpn, uint64 *intersection_count,
     const graph::COOCSRGraph_d<T> &g,
@@ -17,7 +18,6 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode_LD(
     __shared__ T level_index[numPartitions][DEPTH];
     __shared__ T level_count[numPartitions][DEPTH];
     __shared__ T level_prev_index[numPartitions][DEPTH];
-    __shared__ T reuse_SM[DEPTH - 3][BLOCK_DIM_X];
 
     __shared__ uint64 sg_count[numPartitions];
     __shared__ T src, srcStart, srcLen, srcSplit;
@@ -52,12 +52,16 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode_LD(
             level_offset = &current_level[orient_offset * (numPartitions * MAXLEVEL)];
             reuse_offset = &reuse_stats[orient_offset * (numPartitions * MAXLEVEL)];
         }
+#ifdef IC_COUNT
         if (lx == 0)
         {
-#ifdef IC_COUNT
             icount[wx] = 0;
-#endif
             offset[wx] = 0;
+        }
+#endif
+        if (lx == 0)
+        {
+            sg_count[wx] = 0;
         }
         __syncthreads();
 
@@ -95,11 +99,10 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode_LD(
                 level_index[wx][k] = 0;
                 level_prev_index[wx][k] = 0;
             }
-
             if (lx == 1)
             {
                 l[wx] = 3; // i.e. at level 2	l[wx] is +1 at all places
-                sg_count[wx] = 0;
+                // sg_count[wx] = 0;
                 level_prev_index[wx][0] = srcSplit - srcStart + 1;
                 level_prev_index[wx][1] = j + 1;
             }
@@ -111,8 +114,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode_LD(
             {
                 cl[k] = get_mask(srcLen, k) & unset_mask(j, k); // unset mask returns all ones except at bit j
                                                                 // if (j == 32 * (srcLen / 32) + 1)
-
-                if (QEDGE_PTR[3] - QEDGE_PTR[2] == 2) // i.e. if connected to both nodes at level 0 and 1
+                if (QEDGE_PTR[3] - QEDGE_PTR[2] == 2)           // i.e. if connected to both nodes at level 0 and 1
                     to[threadIdx.x] = encode[j * num_divs_local + k];
                 else
                     to[threadIdx.x] = cl[k]; // if only connected to central node, everything is a candidate.
@@ -135,26 +137,27 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode_LD(
             }
             reduce_part<T, CPARTSIZE>(partMask, warpCount);
 
-            if (l[wx] == KCCOUNT - LUNMAT && LUNMAT == 1)
-            {
-                uint64 tmpCount;
-                compute_intersection<T, CPARTSIZE, false>(
-                    tmpCount, lx, partMask, num_divs_local, j, l[wx], to, cl, level_prev_index[wx], encode);
-                warpCount *= tmpCount;
+            /*if (l[wx] == KCCOUNT - LUNMAT && LUNMAT == 1)
+                        {
+                            // uint64 tmpCount;
+                            // compute_intersection<T, CPARTSIZE, false>(
+                            // 	tmpCount, lx, partMask, num_divs_local, j, l[wx], to, cl, level_prev_index[wx], encode);
+                            // warpCount *= tmpCount;
 
-                tmpCount = 0;
-                for (T k = lx; k < num_divs_local; k += CPARTSIZE)
-                {
-                    tmpCount += __popc(cl[num_divs_local + k] & cl[2 * num_divs_local + k]);
-                }
-                reduce_part<T, CPARTSIZE>(partMask, tmpCount);
+                            // tmpCount = 0;
+                            // for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+                            // {
+                            // 	tmpCount += __popc(cl[num_divs_local + k] & cl[2 * num_divs_local + k]);
+                            // }
+                            // reduce_part<T, CPARTSIZE>(partMask, tmpCount);
 
-                warpCount -= tmpCount;
+                            // warpCount -= tmpCount;
 
-                if (SYMNODE_PTR[l[wx] + 1] > SYMNODE_PTR[l[wx]] &&
-                    SYMNODE[SYMNODE_PTR[l[wx] + 1] - 1] == l[wx] - 1)
-                    warpCount /= 2;
-            }
+                            // if (SYMNODE_PTR[l[wx] + 1] > SYMNODE_PTR[l[wx]] &&
+                            // 	SYMNODE[SYMNODE_PTR[l[wx] + 1] - 1] == l[wx] - 1)
+                            // 	warpCount /= 2;
+                        }
+            */
 
             if (lx == 0)
             {
@@ -208,12 +211,10 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode_LD(
 #else
 
 #ifdef REUSE
-
-                compute_intersection_reuse_SM<T, CPARTSIZE, BLOCK_DIM_X, true>(
+                compute_intersection_reuse<T, CPARTSIZE, true>(
                     warpCount, offset[wx], lx, partMask,
                     num_divs_local, newIndex[wx], l[wx],
-                    to, cl, reuse_SM, level_prev_index[wx], encode);
-
+                    to, cl, reuse, level_prev_index[wx], encode);
 #else
                 compute_intersection<T, CPARTSIZE, true>(
                     warpCount, offset[wx], lx, partMask,
@@ -224,25 +225,27 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode_LD(
 #endif
                 if (l[wx] + 1 == KCCOUNT - LUNMAT && LUNMAT == 1)
                 {
-                    uint64 tmpCount;
-                    compute_intersection<T, CPARTSIZE, false>(
-                        tmpCount, srcSplit - srcStart, lx, partMask, num_divs_local, newIndex[wx], l[wx] + 1, to, cl, level_prev_index[wx], encode);
-                    warpCount *= tmpCount;
+                    // 	uint64 tmpCount;
+                    // 	compute_intersection<T, CPARTSIZE, false>(
+                    // 		tmpCount, srcSplit - srcStart, lx, partMask, num_divs_local, newIndex[wx], l[wx] + 1, to, cl, level_prev_index[wx], encode);
+                    // 	warpCount *= tmpCount;
 
-                    tmpCount = 0;
-                    for (T k = lx; k < num_divs_local; k += CPARTSIZE)
-                    {
-                        tmpCount += __popc(cl[(l[wx] - 1) * num_divs_local + k] & cl[l[wx] * num_divs_local + k]);
-                    }
-                    reduce_part<T, CPARTSIZE>(partMask, tmpCount);
+                    // 	tmpCount = 0;
+                    // 	for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+                    // 	{
+                    // 		tmpCount += __popc(cl[(l[wx] - 1) * num_divs_local + k] & cl[l[wx] * num_divs_local + k]);
+                    // 	}
+                    // 	reduce_part<T, CPARTSIZE>(partMask, tmpCount);
 
-                    warpCount -= tmpCount;
+                    // 	warpCount -= tmpCount;
 
-                    if (SYMNODE_PTR[l[wx] + 2] > SYMNODE_PTR[l[wx] + 1] &&
-                        SYMNODE[SYMNODE_PTR[l[wx] + 2] - 1] == l[wx])
-                        warpCount /= 2;
+                    // 	if (SYMNODE_PTR[l[wx] + 2] > SYMNODE_PTR[l[wx] + 1] &&
+                    // 		SYMNODE[SYMNODE_PTR[l[wx] + 2] - 1] == l[wx])
+                    // 		warpCount /= 2;
                 }
+
                 // unsetting to avoid repeats not needed
+
                 if (lx == 0)
                 {
                     if (l[wx] + 1 == KCCOUNT - LUNMAT) // reached last level
@@ -269,25 +272,21 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode_LD(
                 }
                 __syncwarp(partMask);
             }
-            if (lx == 0)
-            {
-                atomicAdd(counter, sg_count[wx]);
-                atomicAdd(&cpn[src], sg_count[wx]);
-#ifdef IC_COUNT
-                atomicAdd(intersection_count, icount[wx]);
-#endif
-            }
             __syncwarp(partMask);
         }
-        __syncthreads();
-        // if (threadIdx.x == 0)
-        //     printf("Src: %u\t count:%u\n", src, cpn[src]);
+        if (lx == 0)
+        {
+            atomicAdd(counter, sg_count[wx]);
+#ifdef IC_COUNT
+            atomicAdd(intersection_count, icount[wx]);
+#endif
+        }
         __syncthreads();
     }
 }
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
-__device__ __forceinline__ void sgm_kernel_central_node_function_byEdge_LD(
+__device__ __forceinline__ void sgm_kernel_central_node_function_byEdge(
     T blockOffset,
     uint64 *counter,
     const graph::COOCSRGraph_d<T> g,
@@ -546,7 +545,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byEdge_LD(
             if (lx == 0)
             {
                 atomicAdd(counter, sg_count[wx]);
-                // atomicAdd(&cpn[current.queue[i]], sg_count[wx]);
+                // cpn[current.queue[i]] = sg_count[wx];
             }
             __syncwarp(partMask);
         }
@@ -556,7 +555,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byEdge_LD(
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X)
-    __global__ void sgm_kernel_central_node_base_binary_LD(
+    __global__ void sgm_kernel_central_node_base_binary(
         uint64 *counter, T *cpn, uint64 *intersection_count,
         const graph::COOCSRGraph_d<T> g,
         const graph::GraphQueue_d<T, bool> current,
@@ -565,16 +564,16 @@ __launch_bounds__(BLOCK_DIM_X)
         const bool byNode)
 {
     if (byNode)
-        sgm_kernel_central_node_function_byNode_LD<T, BLOCK_DIM_X, CPARTSIZE>(blockIdx.x,
-                                                                              counter, cpn, intersection_count, g, current, current_level, reuse, adj_enc);
+        sgm_kernel_central_node_function_byNode<T, BLOCK_DIM_X, CPARTSIZE>(blockIdx.x,
+                                                                           counter, cpn, intersection_count, g, current, current_level, reuse, adj_enc);
     else
-        sgm_kernel_central_node_function_byEdge_LD<T, BLOCK_DIM_X, CPARTSIZE>(blockIdx.x,
-                                                                              counter, g, current, current_level, reuse, adj_enc);
+        sgm_kernel_central_node_function_byEdge<T, BLOCK_DIM_X, CPARTSIZE>(blockIdx.x,
+                                                                           counter, g, current, current_level, reuse, adj_enc);
 }
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X)
-    __global__ void sgm_kernel_central_node_base_binary_persistant_LD(
+    __global__ void sgm_kernel_central_node_base_binary_persistant(
         uint64 *counter, T *cpn, uint64 *intersection_count,
         const graph::COOCSRGraph_d<T> g,
         const graph::GraphQueue_d<T, bool> current,
@@ -599,11 +598,11 @@ __launch_bounds__(BLOCK_DIM_X)
     __syncthreads();
 
     if (byNode)
-        sgm_kernel_central_node_function_byNode_LD<T, BLOCK_DIM_X, CPARTSIZE>((sm_id * CBPSM) + levelPtr,
-                                                                              counter, cpn, intersection_count, g, current, current_level, reuse, adj_enc);
+        sgm_kernel_central_node_function_byNode<T, BLOCK_DIM_X, CPARTSIZE>((sm_id * CBPSM) + levelPtr,
+                                                                           counter, cpn, intersection_count, g, current, current_level, reuse, adj_enc);
     else
-        sgm_kernel_central_node_function_byEdge_LD<T, BLOCK_DIM_X, CPARTSIZE>((sm_id * CBPSM) + levelPtr,
-                                                                              counter, g, current, current_level, reuse, adj_enc);
+        sgm_kernel_central_node_function_byEdge<T, BLOCK_DIM_X, CPARTSIZE>((sm_id * CBPSM) + levelPtr,
+                                                                           counter, g, current, current_level, reuse, adj_enc);
 
     __syncthreads();
 

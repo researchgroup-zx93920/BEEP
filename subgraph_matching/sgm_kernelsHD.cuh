@@ -5,8 +5,7 @@
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 	T blockOffset,
-	uint64 *counter, T *cpn, uint64 *intersection_count,
-	const graph::COOCSRGraph_d<T> &g,
+	uint64 *counter, const graph::COOCSRGraph_d<T> &g,
 	const graph::GraphQueue_d<T, bool> current,
 	T *current_level, T *reuse_stats,
 	T *adj_enc)
@@ -158,7 +157,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 							// 	warpCount /= 2;
 						}
 			*/
-			
+
 			if (lx == 0)
 			{
 				if (l[wx] == KCCOUNT - LUNMAT) // If reached last level
@@ -556,7 +555,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byEdge(
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X)
 	__global__ void sgm_kernel_central_node_base_binary(
-		uint64 *counter, T *cpn, uint64 *intersection_count,
+		uint64 *counter,
 		const graph::COOCSRGraph_d<T> g,
 		const graph::GraphQueue_d<T, bool> current,
 		T *current_level, T *reuse,
@@ -565,7 +564,7 @@ __launch_bounds__(BLOCK_DIM_X)
 {
 	if (byNode)
 		sgm_kernel_central_node_function_byNode<T, BLOCK_DIM_X, CPARTSIZE>(blockIdx.x,
-																		   counter, cpn, intersection_count, g, current, current_level, reuse, adj_enc);
+																		   counter, g, current, current_level, reuse, adj_enc);
 	else
 		sgm_kernel_central_node_function_byEdge<T, BLOCK_DIM_X, CPARTSIZE>(blockIdx.x,
 																		   counter, g, current, current_level, reuse, adj_enc);
@@ -574,7 +573,7 @@ __launch_bounds__(BLOCK_DIM_X)
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X)
 	__global__ void sgm_kernel_central_node_base_binary_persistant(
-		uint64 *counter, T *cpn, uint64 *intersection_count,
+		uint64 *counter,
 		const graph::COOCSRGraph_d<T> g,
 		const graph::GraphQueue_d<T, bool> current,
 		T *current_level, T *reuse,
@@ -599,7 +598,7 @@ __launch_bounds__(BLOCK_DIM_X)
 
 	if (byNode)
 		sgm_kernel_central_node_function_byNode<T, BLOCK_DIM_X, CPARTSIZE>((sm_id * CBPSM) + levelPtr,
-																		   counter, cpn, intersection_count, g, current, current_level, reuse, adj_enc);
+																		   counter, g, current, current_level, reuse, adj_enc);
 	else
 		sgm_kernel_central_node_function_byEdge<T, BLOCK_DIM_X, CPARTSIZE>((sm_id * CBPSM) + levelPtr,
 																		   counter, g, current, current_level, reuse, adj_enc);

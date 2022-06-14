@@ -1,6 +1,7 @@
 #pragma once
 
 // #define IC_COUNT
+#define TIMER
 
 // #define DEGENERACY
 #define DEGREE
@@ -14,6 +15,6 @@
 #define BLOCK_SIZE_LD 1024
 #define PARTITION_SIZE_LD 32
 
-#define CUTOFF 768
-#define SCHEDULING true
-// #define SCHEDULING false
+#define CUTOFF 6
+// #define SCHEDULING true
+#define SCHEDULING false
