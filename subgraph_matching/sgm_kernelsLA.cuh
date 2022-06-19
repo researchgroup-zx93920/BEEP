@@ -85,7 +85,7 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
 
     __shared__ T num_divs_local, *level_offset, *reuse_offset, *encode;
 
-    __shared__ T to[BLOCK_DIM_X], newIndex[numPartitions], of[numPartitions];
+    __shared__ T to[BLOCK_DIM_X], newIndex[numPartitions];
 
     // block things
     if (threadIdx.x == 0)
@@ -100,9 +100,6 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
         num_divs_local = (srcLen + 32 - 1) / 32;
         encode = &adj_enc[(uint64)offset[src] * NUMDIVS * MAXDEG];
         level_offset = &current_level[(uint64)((sm_id * CBPSM) + levelPtr) * (NUMDIVS * numPartitions * MAXLEVEL)];
-#ifdef REUSE
-        reuse_offset = &reuse_stats[(uint64)((sm_id * CBPSM) + levelPtr) * (NUMDIVS * numPartitions * MAXLEVEL)];
-#endif
     }
     __syncthreads();
 
@@ -145,9 +142,7 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
     }
     if (lx == 0)
     {
-#ifdef SYMOPT
-        of[wx] = 0;
-#endif
+
         sg_count[wx] = 0;
     }
 
@@ -156,9 +151,6 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
         if ((level_offset[num_divs_local + j / 32] >> (j % 32)) % 2 == 0)
             continue;
         T *cl = level_offset + wx * (NUMDIVS * MAXLEVEL);
-#ifdef REUSE
-        T *reuse = reuse_offset + wx * (NUMDIVS * MAXLEVEL);
-#endif
 
         for (T k = lx; k < DEPTH; k += CPARTSIZE)
         {
@@ -179,18 +171,13 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
         }
         __syncwarp(partMask);
 
-// get warp count ??
-#ifdef REUSE
-        compute_intersection_reuse<T, CPARTSIZE, true>(
-            warpCount, of[wx], lx, partMask,
-            num_divs_local, UINT32_MAX, l[wx], to, cl,
-            reuse, level_prev_index[wx], encode);
-#else
+        // get warp count ??
+
         compute_intersection<T, CPARTSIZE, true>(
-            warpCount, of[wx], lx, partMask,
+            warpCount, lx, partMask,
             num_divs_local, UINT32_MAX, l[wx], to, cl,
             level_prev_index[wx], encode);
-#endif
+
         if (lx == 0)
         {
             if (l[wx] + 1 == KCCOUNT)
@@ -227,17 +214,12 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
                 level_index[wx][l[wx] - 3]++;
             }
             __syncwarp(partMask);
-#ifdef REUSE
-            compute_intersection_reuse<T, CPARTSIZE, true>(
-                warpCount, of[wx], lx, partMask, num_divs_local,
-                newIndex[wx], l[wx], to, cl,
-                reuse, level_prev_index[wx], encode);
-#else
+
             compute_intersection<T, CPARTSIZE, true>(
-                warpCount, of[wx], lx, partMask, num_divs_local,
+                warpCount, lx, partMask, num_divs_local,
                 newIndex[wx], l[wx], to, cl,
                 level_prev_index[wx], encode);
-#endif
+
             if (lx == 0)
             {
                 if (l[wx] + 1 == KCCOUNT)

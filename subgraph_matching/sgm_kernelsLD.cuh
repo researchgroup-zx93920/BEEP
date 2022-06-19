@@ -22,7 +22,6 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 	__shared__ T src, srcStart, srcLen, srcSplit;
 
 	__shared__ T l[numPartitions];
-	__shared__ T offset[numPartitions];
 
 #ifdef IC_COUNT
 	__shared__ uint64 icount[numPartitions];
@@ -43,9 +42,6 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 
 		encode = &adj_enc[(uint64)blockOffset * NUMDIVS * MAXDEG]; /*srcStart[wx]*/
 		level_offset = &current_level[blockOffset * NUMDIVS * (numPartitions * MAXLEVEL)];
-#ifdef REUSE
-		reuse_offset = &reuse_stats[blockOffset * NUMDIVS * (numPartitions * MAXLEVEL)];
-#endif
 	}
 
 	if (lx == 0)
@@ -53,9 +49,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 #ifdef IC_COUNT
 		icount[wx] = 0;
 #endif
-#ifdef SYMOPT
-		offset[wx] = 0;
-#endif
+
 		sg_count[wx] = 0;
 	}
 	__syncthreads();
@@ -86,9 +80,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			continue;
 
 		T *cl = level_offset + wx * (NUMDIVS * MAXLEVEL);
-#ifdef REUSE
-		T *reuse = reuse_offset + wx * (NUMDIVS * MAXLEVEL);
-#endif
+
 		for (T k = lx; k < DEPTH; k += CPARTSIZE)
 		{
 			level_count[wx][k] = 0;
@@ -189,31 +181,17 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			__syncwarp(partMask);
 
 #ifdef IC_COUNT
-#ifdef REUSE
-			compute_intersection_ic_reuse<T, CPARTSIZE, true>(
-				warpCount, icount[wx], offset[wx], srcSplit - srcStart,
-				lx, partMask, num_divs_local, newIndex[wx], l[wx],
-				to, cl, reuse, level_prev_index[wx], encode);
-#else
 			compute_intersection_ic<T, CPARTSIZE, true>(
 				warpCount, icount[wx], offset[wx], srcSplit - srcStart,
 				lx, partMask, num_divs_local, newIndex[wx], l[wx],
 				to, cl, level_prev_index[wx], encode);
-#endif
-#else
 
-#ifdef REUSE
-			compute_intersection_reuse<T, CPARTSIZE, true>(
-				warpCount, offset[wx], lx, partMask,
-				num_divs_local, newIndex[wx], l[wx],
-				to, cl, reuse, level_prev_index[wx], encode);
 #else
 			compute_intersection<T, CPARTSIZE, true>(
-				warpCount, offset[wx], lx, partMask,
+				warpCount, lx, partMask,
 				num_divs_local, newIndex[wx], l[wx],
 				to, cl, level_prev_index[wx], encode);
 
-#endif
 #endif
 			if (l[wx] + 1 == KCCOUNT - LUNMAT && LUNMAT == 1)
 			{

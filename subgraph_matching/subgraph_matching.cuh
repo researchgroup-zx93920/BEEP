@@ -1221,7 +1221,6 @@ namespace graph
                         cudaMemcpyToSymbol(NUMPART, &numPartitions_LD, sizeof(NUMPART));
                         cudaMemcpyToSymbol(PARTSIZE, &partitionSize_LD, sizeof(PARTSIZE));
                         cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM_LD), sizeof(CBPSM));
-
                         Log(debug, "pre encoded kernel grid size: %u", edge_grid_size);
 
                         execKernel((sgm_kernel_pre_encoded_byEdge<T, block_size_LD, partitionSize_LD>),
