@@ -1,5 +1,5 @@
 #pragma once
-#include "utils.cuh"
+#include "include/utils.cuh"
 #include "config.cuh"
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
@@ -40,11 +40,11 @@ __global__ void sgm_kernel_compute_encoding(
         }
         __syncwarp(partMask);
 
-        graph::warp_sorted_count_and_encode_full<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&g.oriented_colInd[srcStart], srcLen,
-                                                                                      &g.colInd[g.rowPtr[g.oriented_colInd[srcStart + j]]],
-                                                                                      g.rowPtr[g.oriented_colInd[srcStart + j] + 1] - g.rowPtr[g.oriented_colInd[srcStart + j]],
-                                                                                      j, num_divs_local,
-                                                                                      encode);
+        warp_sorted_count_and_encode_full<T, true, CPARTSIZE>(&g.oriented_colInd[srcStart], srcLen,
+                                                              &g.colInd[g.rowPtr[g.oriented_colInd[srcStart + j]]],
+                                                              g.rowPtr[g.oriented_colInd[srcStart + j] + 1] - g.rowPtr[g.oriented_colInd[srcStart + j]],
+                                                              j, num_divs_local,
+                                                              encode);
     }
 }
 

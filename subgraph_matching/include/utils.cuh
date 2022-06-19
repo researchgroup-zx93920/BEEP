@@ -1,8 +1,7 @@
 #pragma once
 #include "config.cuh"
-#include "../include/GraphDataStructure.cuh"
-#include "../kclique/common.cuh"
-#include "../kclique/kckernels.cuh"
+#include "../include/Timer.h"
+#include "include/common_utils.cuh"
 
 const uint DEPTH = 10;
 
@@ -34,8 +33,6 @@ struct mapping
     T src;
     T srcHead;
 };
-
-// Unary method to compare two cells of a cost matrix
 
 template <typename T, bool ASCENDING>
 struct comparePriority
@@ -151,160 +148,6 @@ __device__ __forceinline__ void compute_intersection(
 }
 
 template <typename T, uint CPARTSIZE, bool MAT>
-__device__ __forceinline__ void compute_intersection_ic(
-    uint64 &wc, uint64 &icount, T &offset, T len,
-    const size_t lx, const T partMask,
-    const T num_divs_local, const T maskIdx, const T lvl,
-    T *to, T *cl, const T *level_prev_index, const T *encode)
-{
-    wc = 0;
-    to[threadIdx.x] = 0x00;
-#ifdef SYMOPT
-    if (lx == 1)
-    {
-        offset = 0;
-        for (T sym_idx = SYMNODE_PTR[lvl]; sym_idx < SYMNODE_PTR[lvl + 1]; sym_idx++)
-        {
-            offset = max(offset, level_prev_index[SYMNODE[sym_idx]] - 1);
-        }
-    }
-    __syncwarp(partMask);
-#endif
-    for (T k = lx; k < num_divs_local; k += CPARTSIZE)
-    {
-
-        to[threadIdx.x] = cl[k] & unset_mask(maskIdx, k);
-
-        // Compute Intersection
-        for (T q_idx = QEDGE_PTR[lvl] + 1; q_idx < QEDGE_PTR[lvl + 1]; q_idx++)
-        {
-            to[threadIdx.x] &= encode[(level_prev_index[QEDGE[q_idx]] - 1) * num_divs_local + k];
-            atomicAdd(&icount, 1);
-        }
-
-        // Remove Redundancies
-#ifdef SYMOPT
-        to[threadIdx.x] &= ~get_mask(offset, k);
-        atomicAdd(&icount, 1);
-#else
-        for (T sym_idx = SYMNODE_PTR[lvl]; sym_idx < SYMNODE_PTR[lvl + 1]; sym_idx++)
-        {
-            if (!MAT && SYMNODE[sym_idx] == lvl - 1)
-                continue;
-            if (SYMNODE[sym_idx] > 0)
-            {
-                to[threadIdx.x] &= ~(get_mask(level_prev_index[SYMNODE[sym_idx]] - 1, k));
-                atomicAdd(&icount, 1);
-            }
-        }
-#endif
-        wc += __popc(to[threadIdx.x]);                        // counts number of set bits
-        cl[(lvl - 1) * num_divs_local + k] = to[threadIdx.x]; // saves candidates list in cl
-    }
-
-    reduce_part<T, CPARTSIZE>(partMask, wc);
-}
-
-template <typename T, uint CPARTSIZE, bool MAT>
-__device__ __forceinline__ void compute_intersection_ic_reuse(
-    uint64 &wc, uint64 &icount, T &offset, T len,
-    const size_t lx, const T partMask,
-    const T num_divs_local, const T maskIdx, const T lvl,
-    T *to, T *cl, T *reuse, const T *level_prev_index, const T *encode)
-{
-    wc = 0;
-    to[threadIdx.x] = 0x00;
-#ifdef SYMOPT
-    if (lx == 1)
-    {
-        offset = 0;
-        for (T sym_idx = SYMNODE_PTR[lvl]; sym_idx < SYMNODE_PTR[lvl + 1]; sym_idx++)
-        {
-            offset = max(offset, level_prev_index[SYMNODE[sym_idx]] - 1);
-        }
-    }
-    __syncwarp(partMask);
-
-    if (offset > 0)
-    {
-#endif
-        for (T k = lx; k < num_divs_local; k += CPARTSIZE)
-        {
-
-            to[threadIdx.x] = cl[k] & unset_mask(maskIdx, k);
-
-            if (QREUSE[lvl] > 0)
-            {
-                to[threadIdx.x] &= reuse[QREUSE[lvl] * num_divs_local + k];
-                atomicAdd(&icount, 1);
-            }
-            // Compute Intersection
-            for (T q_idx = REUSE_PTR[lvl]; q_idx < QEDGE_PTR[lvl + 1]; q_idx++)
-            {
-                to[threadIdx.x] &= encode[(level_prev_index[QEDGE[q_idx]] - 1) * num_divs_local + k];
-                atomicAdd(&icount, 1);
-            }
-
-            if (QREUSABLE[lvl])
-            {
-                reuse[lvl * num_divs_local + k] = to[threadIdx.x];
-                atomicAdd(&icount, 1);
-            }
-
-            // Remove Redundancies
-#ifdef SYMOPT
-            to[threadIdx.x] &= ~get_mask(offset, k);
-            atomicAdd(&icount, 1);
-#else
-        for (T sym_idx = SYMNODE_PTR[lvl]; sym_idx < SYMNODE_PTR[lvl + 1]; sym_idx++)
-        {
-            if (QREUSABLE[lvl])
-                reuse[lvl * num_divs_local + k] = to[threadIdx.x];
-
-            {
-                to[threadIdx.x] &= ~(get_mask(level_prev_index[SYMNODE[sym_idx]] - 1, k));
-                atomicAdd(&icount, 1);
-            }
-        }
-#endif
-            wc += __popc(to[threadIdx.x]);                        // counts number of set bits
-            cl[(lvl - 1) * num_divs_local + k] = to[threadIdx.x]; // saves candidates list in cl
-        }
-#ifdef SYMOPT
-    }
-    else
-    {
-        for (T k = lx; k < num_divs_local; k += CPARTSIZE)
-        {
-
-            to[threadIdx.x] = cl[k] & unset_mask(maskIdx, k);
-
-            if (QREUSE[lvl] > 0)
-            {
-                to[threadIdx.x] &= reuse[QREUSE[lvl] * num_divs_local + k];
-                atomicAdd(&icount, 1);
-            }
-            // Compute Intersection
-            for (T q_idx = REUSE_PTR[lvl]; q_idx < QEDGE_PTR[lvl + 1]; q_idx++)
-            {
-                to[threadIdx.x] &= encode[(level_prev_index[QEDGE[q_idx]] - 1) * num_divs_local + k];
-                atomicAdd(&icount, 1);
-            }
-
-            if (QREUSABLE[lvl])
-            {
-                reuse[lvl * num_divs_local + k] = to[threadIdx.x];
-                atomicAdd(&icount, 1);
-            }
-            wc += __popc(to[threadIdx.x]);                        // counts number of set bits
-            cl[(lvl - 1) * num_divs_local + k] = to[threadIdx.x]; // saves candidates list in cl
-        }
-    }
-#endif
-    reduce_part<T, CPARTSIZE>(partMask, wc);
-}
-
-template <typename T, uint CPARTSIZE, bool MAT>
 __device__ __forceinline__ void compute_intersection_reuse(
     uint64 &wc, T &offset, const size_t lx, const T partMask,
     const T num_divs_local, const T maskIdx, const T lvl,
@@ -379,105 +222,6 @@ __device__ __forceinline__ void compute_intersection_reuse(
     }
 #endif
     reduce_part<T, CPARTSIZE>(partMask, wc);
-}
-
-template <typename T, uint CPARTSIZE, uint BLOCK_DIM_X, bool MAT>
-__device__ __forceinline__ void compute_intersection_reuse_SM(
-    uint64 &wc, T &offset, const size_t lx, const T partMask,
-    const T num_divs_local, const T maskIdx, const T lvl,
-    T *to, T *cl, T reuse_SM[][BLOCK_DIM_X], const T *level_prev_index, const T *encode)
-{
-    wc = 0;
-#ifdef SYMOPT
-    if (lx == 1)
-    {
-        offset = 0;
-        for (T sym_idx = SYMNODE_PTR[lvl]; sym_idx < SYMNODE_PTR[lvl + 1]; sym_idx++)
-        {
-            offset = max(offset, level_prev_index[SYMNODE[sym_idx]] - 1);
-        }
-    }
-    __syncwarp(partMask);
-#endif
-    for (T k = lx; k < num_divs_local; k += CPARTSIZE)
-    {
-        to[threadIdx.x] = cl[k] & unset_mask(maskIdx, k);
-        if (QREUSE[lvl] > 0)
-            to[threadIdx.x] &= reuse_SM[QREUSE[lvl] - 3][threadIdx.x];
-
-        // Compute Intersection
-        for (T q_idx = REUSE_PTR[lvl]; q_idx < QEDGE_PTR[lvl + 1]; q_idx++)
-            to[threadIdx.x] &= encode[(level_prev_index[QEDGE[q_idx]] - 1) * num_divs_local + k];
-
-        if (QREUSABLE[lvl])
-            reuse_SM[lvl - 3][threadIdx.x] = to[threadIdx.x];
-
-// Remove Redundancies
-#ifdef SYMOPT
-        to[threadIdx.x] &= ~get_mask(offset, k);
-#else
-        for (T sym_idx = SYMNODE_PTR[lvl]; sym_idx < SYMNODE_PTR[lvl + 1]; sym_idx++)
-        {
-            if (!MAT && SYMNODE[sym_idx] == lvl - 1)
-                continue;
-            if (SYMNODE[sym_idx] > 0)
-                to[threadIdx.x] &= ~(get_mask(level_prev_index[SYMNODE[sym_idx]] - 1, k));
-        }
-#endif
-        wc += __popc(to[threadIdx.x]);                        // counts number of set bits
-        cl[(lvl - 1) * num_divs_local + k] = to[threadIdx.x]; // saves candidates list in cl
-    }
-    reduce_part<T, CPARTSIZE>(partMask, wc);
-}
-
-template <typename T>
-__global__ void remove_edges_connected_to_node(
-    const graph::COOCSRGraph_d<T> g,
-    const graph::GraphQueue_d<T, bool> node_queue,
-    bool *keep)
-{
-    const int partition = 1;
-    auto lx = threadIdx.x % partition;
-    auto wx = threadIdx.x / partition;
-    auto numPart = blockDim.x / partition;
-    for (auto i = wx + blockIdx.x * numPart; i < node_queue.count[0]; i += numPart * gridDim.x)
-    {
-        T src = node_queue.queue[i];
-        T srcStart = g.rowPtr[src];
-        T srcEnd = g.rowPtr[src + 1];
-        for (T j = srcStart + lx; j < srcEnd; j += partition)
-        {
-            keep[j] = false;
-            T dst = g.colInd[j];
-            for (T k = g.rowPtr[dst]; k < g.rowPtr[dst + 1]; k++)
-            {
-                if (g.colInd[k] == src)
-                {
-                    keep[k] = false;
-                    break;
-                }
-            }
-        }
-    }
-}
-
-template <typename T, int BLOCK_DIM_X>
-__global__ void getNodeDegree_split_kernel(T *nodeDegree, graph::COOCSRGraph_d<T> g, T *maxDegree)
-{
-    T gtid = threadIdx.x + blockIdx.x * blockDim.x;
-    typedef cub::BlockReduce<T, BLOCK_DIM_X> BlockReduce;
-    __shared__ typename BlockReduce::TempStorage temp_storage;
-    T degree = 0;
-    if (gtid < g.numNodes)
-    {
-        degree = g.rowPtr[gtid + 1] - g.splitPtr[gtid];
-        nodeDegree[gtid] = degree;
-        // printf("id %u: %u\n", gtid, degree);
-    }
-
-    T aggregate = BlockReduce(temp_storage).Reduce(degree, cub::Max());
-    if (threadIdx.x == 0)
-        atomicMax(maxDegree, aggregate);
 }
 
 template <typename T>

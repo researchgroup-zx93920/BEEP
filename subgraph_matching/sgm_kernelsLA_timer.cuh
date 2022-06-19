@@ -1,5 +1,5 @@
 #pragma once
-#include "utils.cuh"
+#include "include/utils.cuh"
 #include "config.cuh"
 
 enum CounterName
