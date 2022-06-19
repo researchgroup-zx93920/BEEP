@@ -1,7 +1,7 @@
 #pragma once
-#include "config.cuh"
-#include "../include/Timer.h"
-#include "include/common_utils.cuh"
+#include "../config.cuh"
+#include "../../include/Timer.h"
+#include "common_utils.cuh"
 
 const uint DEPTH = 10;
 

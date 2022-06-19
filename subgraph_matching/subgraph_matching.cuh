@@ -14,11 +14,6 @@
 namespace graph
 {
 
-// MAXN definition needed by NAUTY to allow static allocation
-// Set to maximum number of nodes in the template graph
-// DEPTH declared in sgm_kernels.cuh
-#define MAXN DEPTH
-
 // Needs to be included in namespace graph to avoid name conflict
 #include "../nauty/nauty.h"
 
@@ -391,9 +386,9 @@ namespace graph
     void SG_Match<T>::detect_symmetry()
     {
         // Define required variables for NAUTY
-        graph g[MAXN];
-        int lab[MAXN], ptn[MAXN];
-        int orbits[MAXN];
+        graph g[DEPTH];
+        int lab[DEPTH], ptn[DEPTH];
+        int orbits[DEPTH];
         static DEFAULTOPTIONS_GRAPH(opt);
         statsblk stats;
         int m = 1;
@@ -419,7 +414,7 @@ namespace graph
         }
 
         // Vector to hold symmetrical nodes
-        vector<int> sym[MAXN];
+        vector<int> sym[DEPTH];
         vector<T> history;
         while (true)
         {
@@ -427,7 +422,7 @@ namespace graph
             densenauty(g, lab, ptn, orbits, &opt, &stats, m, n, NULL);
 
             // Find the biggest orbit
-            int cnts[MAXN] = {0};
+            int cnts[DEPTH] = {0};
             for (int i = 0; i < n; i++)
                 cnts[orbits[i]]++;
             int maxLen = 0;
