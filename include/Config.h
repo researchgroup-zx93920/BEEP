@@ -23,6 +23,7 @@ struct Config
     const char *srcGraph;
     const char *dstGraph; // for conversion
     const char *patGraph; // for subgraph matching
+    uint cutoff;          // for subgraph matching
     MAINTASK mt;
     bool printStats;
     int deviceId;
@@ -326,6 +327,7 @@ static void usage()
             "\n    -e <process element>         Granulaity of element processor (default = t) <t: Thread, w: warp, b: block, g: grid>"
             "\n    -q <kclique specs>           Specify KC Specs: (o4b --> graph orient, Partition Size = 4, binary encoeding)  (p4n --> pivoting, Partition Size = 4, NO binary encoding) default: o8b"
             "\n    -h                       Help"
+            "\n    -c <cutoff>          Used for subgraph matching"
             "\n"
             "\n");
 }
@@ -343,6 +345,7 @@ static Config parseArgs(int argc, char **argv)
     config.allocation = gpu;
     config.k = 5;
     config.sortEdges = false;
+    config.cutoff = 768;
 
     config.processBy = ByNode;
     config.processElement = BlockWarp;
@@ -354,7 +357,7 @@ static Config parseArgs(int argc, char **argv)
 
     // printf("parsing configuration .... \n");
 
-    while ((opt = getopt(argc, argv, "g:r:d:m:x:o:a:k:h:v:s:p:e:q:w:t:")) >= 0)
+    while ((opt = getopt(argc, argv, "g:r:d:m:x:o:a:k:h:v:s:p:e:q:w:t:c:")) >= 0)
     {
         switch (opt)
         {
@@ -402,6 +405,9 @@ static Config parseArgs(int argc, char **argv)
             break;
         case 'q':
             config.kcConfig = parseKcConfig(optarg);
+            break;
+        case 'c':
+            config.cutoff = atoi(optarg);
             break;
         case 'h':
             usage();

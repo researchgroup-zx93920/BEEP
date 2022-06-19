@@ -64,6 +64,7 @@ namespace graph
 
         // Array used by bucket scan
         GPUArray<T> asc;
+        uint cutoff_;
 
         // Bucket Scan function from K-Cliques
         void bucket_scan(
@@ -113,9 +114,9 @@ namespace graph
 
     public:
         // Constructors
-        SG_Match(MAINTASK task = GRAPH_MATCH, ProcessBy by = ByNode, int dev = 0) : task_(task),
-                                                                                    by_(by),
-                                                                                    dev_(dev)
+        SG_Match(MAINTASK task = GRAPH_MATCH, ProcessBy by = ByNode, int dev = 0, uint cutoff = 768) : task_(task),
+                                                                                                       by_(by),
+                                                                                                       dev_(dev)
         {
             query_sequence = new GPUArray<T>("Query Sequence", cpuonly);
             query_degree = new GPUArray<T>("Query degree", cpuonly);
@@ -143,6 +144,7 @@ namespace graph
             min_qDegree = INT_MAX;
 
             unmat_level = 0;
+            cutoff_ = cutoff;
         }
 
         // Destructor
@@ -208,7 +210,6 @@ namespace graph
             time = p.elapsed();
             Log(info, "Preprocessing TIME: %f ms", time * 1000);
             Log(debug, "Undirected graph maxdegree: %lu", max_dDegree.gdata()[0]);
-            Log(debug, "Directed graph maxdegree %lu", oriented_max_dDegree.gdata()[0]);
 
             Timer t;
 
@@ -234,6 +235,7 @@ namespace graph
         void initialize1(graph::COOCSRGraph_d<T> &oriented_dataGraph);
 #ifdef TIMER
         void count_subgraphs_timer(graph::COOCSRGraph_d<T> &dataGraph);
+        void print_SM_counters(Counters *SM_times, uint64 *SM_nodes);
 #else
         void count_subgraphs(graph::COOCSRGraph_d<T> &dataGraph);
 #endif
@@ -578,6 +580,11 @@ namespace graph
                 reuse_ptr->cdata()[i] = query_edge_ptr->cdata()[i + 1];
             }
         }
+        Log(info, "ID: Reusable: Reuse:\n");
+        for (int i = 0; i < numNodes; i++)
+        {
+            Log(critical, "%d\t %u\t %u", i, q_reusable->cdata()[i], reuse_level->cdata()[i]);
+        }
 #endif
         for (uint i = 0; i < numNodes; i++)
         {
@@ -585,11 +592,6 @@ namespace graph
                 reuse_ptr->cdata()[i] = query_edge_ptr->cdata()[i] + 1;
         }
 
-        Log(critical, "ID: Reusable: Reuse:\n");
-        for (int i = 0; i < numNodes; i++)
-        {
-            Log(critical, "%d\t %u\t %u", i, q_reusable->cdata()[i], reuse_level->cdata()[i]);
-        }
         Log(info, "ID: qedge_ptr: Reuse ptr: qedge_ptr_end");
         for (uint i = 0; i < numNodes; i++)
         {
@@ -776,19 +778,20 @@ namespace graph
         const auto block_size_HD = BLOCK_SIZE_HD; // Block size for high degree nodes
         const T partitionSize_HD = PARTITION_SIZE_HD;
         const T numPartitions_HD = block_size_HD / partitionSize_HD;
-        const T bound_LD = CUTOFF;
+        const T bound_LD = cutoff_;
         const T bound_HD = 32768 + 16384;
         const uint dv = 32;
 
         // CUDA Initialise, gather runtime Info.
         CUDAContext context;
         T num_SMs = context.num_SMs;
+        Log(debug, "Num SMs: %u", num_SMs);
         T conc_blocks_per_SM_LD = context.GetConCBlocks(block_size_LD);
         T conc_blocks_per_SM_HD = context.GetConCBlocks(block_size_HD);
 
         GPUArray<Counters> SM_times("SM times", unified, num_SMs, dev_);
-
         GPUArray<uint64> SM_nodes("nodes processed per SM", unified, num_SMs, dev_);
+
         CUDA_RUNTIME(cudaMemset(SM_times.gdata(), 0, num_SMs * sizeof(Counters)));
         CUDA_RUNTIME(cudaMemset(SM_nodes.gdata(), 0, num_SMs * sizeof(uint64)));
         GPUArray<uint64> intersection_count;
@@ -922,10 +925,11 @@ namespace graph
                         cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
 
                         T node_grid_size = min(nnodes, max_blocks);
-                        Log(debug, "processing %u nodes", node_grid_size);
+                        Log(info, "processing %u nodes of %u remaining", node_grid_size, nnodes);
                         size_t encode_size = (size_t)node_grid_size * stride_degree * num_divs;
                         GPUArray<T> node_be("Temp level Counter", AllocationTypeEnum::gpu, encode_size, dev_);
-
+                        CUDA_RUNTIME(cudaMemset(SM_times.gdata(), 0, num_SMs * sizeof(Counters)));
+                        CUDA_RUNTIME(cudaMemset(SM_nodes.gdata(), 0, num_SMs * sizeof(uint64)));
                         cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T));
                         cudaMemset(offset.gdata(), -1, dataGraph.numNodes * sizeof(int));
                         cudaMemset(d_bitmap_states.gdata(), 0, num_SMs * conc_blocks_per_SM_LD * sizeof(T));
@@ -933,7 +937,10 @@ namespace graph
                         execKernel((sgm_kernel_compute_encoding<T, block_size_HD, partitionSize_HD>), node_grid_size,
                                    block_size_HD, dev_, false,
                                    dataGraph, current_nq.device_queue->gdata()[0], nq_head,
-                                   node_be.gdata(), offset.gdata());
+                                   node_be.gdata(), offset.gdata(), SM_times.gdata(), SM_nodes.gdata());
+
+                        // if (eq_head == 0)
+                        //     print_SM_counters(SM_times.gdata(), SM_nodes.gdata());
 
                         encode_time += t_.elapsed_and_reset();
                         Log(debug, "Compute encoding succesful");
@@ -945,6 +952,7 @@ namespace graph
                         nq_head += node_grid_size;
                         T edge_grid_size = (eq_head > 0) ? (Degree_Scan.gdata()[nq_head - 1] - Degree_Scan.gdata()[nq_head - 1 - node_grid_size]) : Degree_Scan.gdata()[nq_head - 1] - 0;
 
+                        Log(debug, "pre encoded kernel grid size: %u", edge_grid_size);
                         uint64 level_size = num_SMs * conc_blocks_per_SM_LD * max_qDegree * num_divs * numPartitions_LD;
                         GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
                         cudaMemset(current_level.gdata(), 0, level_size * sizeof(T));
@@ -960,6 +968,9 @@ namespace graph
                                    d_bitmap_states.gdata(), node_be.gdata(), per_node_count.gdata(),
                                    offset.gdata(), SM_times.gdata(), SM_nodes.gdata());
 
+                        if (eq_head == 0)
+                            print_SM_counters(SM_times.gdata(), SM_nodes.gdata());
+
                         nedges -= edge_grid_size;
                         eq_head += edge_grid_size;
 
@@ -971,32 +982,6 @@ namespace graph
 
                     Log(info, "Encode TIME: %f s", encode_time);
                     Log(info, "HD process TIME: %f s", HD_process_time);
-
-                    const uint width = NUM_COUNTERS - 1;
-                    GPUArray<uint64> total_times("Total Times", AllocationTypeEnum::unified, num_SMs, dev_);
-                    GPUArray<float> SM_frac_times("Fractional SM times", unified, num_SMs * width, dev_);
-                    GPUArray<float> total_frac_times("Fractional SM times", unified, width, dev_);
-                    for (int i = 0; i < num_SMs; i++)
-                    {
-                        for (int j = 0; j < width; j++)
-                            total_times.gdata()[i] += SM_times.gdata()[i].totalTime[j];
-
-                        for (int j = 0; j < width; j++)
-                            SM_frac_times.gdata()[i * width + j] = (SM_times.gdata()[i].totalTime[j] * 1.0) / total_times.gdata()[i];
-                    }
-
-                    // get average
-                    for (int j = 0; j < width; j++)
-                    {
-                        for (int i = 0; i < num_SMs; i++)
-                        {
-                            total_frac_times.gdata()[j] += SM_frac_times.gdata()[width * i + j];
-                        }
-                        total_frac_times.gdata()[j] = total_frac_times.gdata()[j] / num_SMs;
-                    }
-
-                    for (int i = 0; i < width; i++)
-                        std::cout << Names[i] << total_frac_times.gdata()[i] << std::endl;
                 }
                 else
                 {
@@ -1032,7 +1017,10 @@ namespace graph
 
                     auto grid_block_size = current_nq.count.gdata()[0];
 
-                    /*if (persistant)
+                    CUDA_RUNTIME(cudaMemset(SM_times.gdata(), 0, num_SMs * sizeof(Counters)));
+                    CUDA_RUNTIME(cudaMemset(SM_nodes.gdata(), 0, num_SMs * sizeof(uint64)));
+
+                    if (persistant)
                     {
                         execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size_LD, partitionSize_LD>),
                                    grid_block_size, block_size_LD, dev_, false,
@@ -1040,6 +1028,7 @@ namespace graph
                                    dataGraph, current_q.device_queue->gdata()[0],
                                    current_level.gdata(), reuse.gdata(),
                                    d_bitmap_states.gdata(), node_be.gdata(),
+                                   SM_times.gdata(), SM_nodes.gdata(),
                                    by_ == ByNode);
                     }
                     else
@@ -1049,9 +1038,11 @@ namespace graph
                                    counter.gdata(), per_node_count.gdata(), intersection_count.gdata(),
                                    dataGraph, current_q.device_queue->gdata()[0],
                                    current_level.gdata(), reuse.gdata(), node_be.gdata(),
+                                   SM_times.gdata(), SM_nodes.gdata(),
                                    by_ == ByNode);
-                    }*/
+                    }
 
+                    // print_SM_counters(SM_times.gdata(), SM_nodes.gdata());
                     // cleanup
                     node_be.freeGPU();
                     reuse.freeGPU();
@@ -1059,9 +1050,9 @@ namespace graph
                 }
 
                 // Print bucket stats:
-                // std::cout << "Bucket levels: " << level << " to " << maxDeg
-                //           << ", nodes/edges: " << current_nq.count.gdata()[0]
-                //           << ", Counter: " << counter.gdata()[0] << std::endl;
+                std::cout << "Bucket levels: " << level << " to " << maxDeg
+                          << ", nodes/edges: " << current_nq.count.gdata()[0]
+                          << ", Counter: " << counter.gdata()[0] << std::endl;
             }
             level += span;
             span = bound_HD;
@@ -1076,6 +1067,8 @@ namespace graph
         per_node_count.freeGPU();
         d_bitmap_states.freeGPU();
         intersection_count.freeGPU();
+        SM_times.freeGPU();
+        SM_nodes.freeGPU();
     }
 #else
 
@@ -1089,7 +1082,7 @@ namespace graph
         const auto block_size_HD = BLOCK_SIZE_HD; // Block size for high degree nodes
         const T partitionSize_HD = PARTITION_SIZE_HD;
         const T numPartitions_HD = block_size_HD / partitionSize_HD;
-        const T bound_LD = CUTOFF;
+        const T bound_LD = cutoff_;
         const T bound_HD = 32768 + 16384;
         const uint dv = 32;
 
@@ -1160,7 +1153,7 @@ namespace graph
                     Degree_Scan.setAll(0, current_nq.count.gdata()[0]);
                     current_nq.i_scan(Degree_Scan.gdata(), nodeDegree.gdata());
                     uint len = Degree_Scan.gdata()[count - 1]; // grid size for pre encoded kernel
-                    src_mapping.initialize("mapping edges with sources", unified, len, dev_);
+                    src_mapping.initialize("mapping edges with sources", gpu, len, dev_);
                     execKernel((map_src<T>), count, 256, dev_, false, src_mapping.gdata(), current_nq.device_queue->gdata()[0], Degree_Scan.gdata(), nodeDegree.gdata());
                 }
 
@@ -1169,7 +1162,7 @@ namespace graph
 
                     T nnodes = current_nq.count.gdata()[0];
                     T nedges = Degree_Scan.gdata()[nnodes - 1];
-                    GPUArray<int> offset("Encoding offset", AllocationTypeEnum::unified, dataGraph.numNodes, dev_);
+                    GPUArray<int> offset("Encoding offset", gpu, dataGraph.numNodes, dev_);
 
                     // // accuracy check
                     // T temp_total = 0;
@@ -1189,7 +1182,6 @@ namespace graph
                     // start loop
                     T nq_head = 0;
                     T eq_head = 0;
-                    bool first = true;
 
                     while (nq_head < current_nq.count.gdata()[0])
                     {
@@ -1222,11 +1214,14 @@ namespace graph
 
                         nnodes -= node_grid_size;
                         nq_head += node_grid_size;
-                        T edge_grid_size = (!first) ? (Degree_Scan.gdata()[nq_head - 1] - Degree_Scan.gdata()[nq_head - 1 - node_grid_size]) : Degree_Scan.gdata()[nq_head - 1] - 0;
+                        T edge_grid_size = (eq_head > 0) ? (Degree_Scan.gdata()[nq_head - 1] - Degree_Scan.gdata()[nq_head - 1 - node_grid_size]) : Degree_Scan.gdata()[nq_head - 1] - 0;
 
                         uint64 level_size = num_SMs * conc_blocks_per_SM_LD * max_qDegree * num_divs * numPartitions_LD;
                         GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
+                        GPUArray<T> reuse("Intersection storage for reuse", AllocationTypeEnum::gpu, level_size, dev_);
+
                         cudaMemset(current_level.gdata(), 0, level_size * sizeof(T));
+                        cudaMemset(reuse.gdata(), 0, level_size * sizeof(T));
 
                         cudaMemcpyToSymbol(NUMPART, &numPartitions_LD, sizeof(NUMPART));
                         cudaMemcpyToSymbol(PARTSIZE, &partitionSize_LD, sizeof(PARTSIZE));
@@ -1237,18 +1232,15 @@ namespace graph
                         execKernel((sgm_kernel_pre_encoded_byEdge<T, block_size_LD, partitionSize_LD>),
                                    edge_grid_size, block_size_LD, dev_, false,
                                    counter.gdata(), dataGraph, src_mapping.gdata(), eq_head,
-                                   current_level.gdata(),
+                                   current_level.gdata(), reuse.gdata(),
                                    d_bitmap_states.gdata(), node_be.gdata(),
                                    offset.gdata());
-
-                        std::cout << cudaGetErrorString(cudaGetLastError()) << std::endl;
 
                         nedges -= edge_grid_size;
                         eq_head += edge_grid_size;
 
                         current_level.freeGPU();
                         node_be.freeGPU();
-                        first = false;
                     }
                     offset.freeGPU();
                 }
@@ -1293,8 +1285,7 @@ namespace graph
                                    counter.gdata(),
                                    dataGraph, current_q.device_queue->gdata()[0],
                                    current_level.gdata(), reuse.gdata(),
-                                   d_bitmap_states.gdata(), node_be.gdata(),
-                                   by_ == ByNode);
+                                   d_bitmap_states.gdata(), node_be.gdata());
                     }
                     else
                     {
@@ -1302,8 +1293,7 @@ namespace graph
                                    grid_block_size, block_size_LD, dev_, false,
                                    counter.gdata(),
                                    dataGraph, current_q.device_queue->gdata()[0],
-                                   current_level.gdata(), reuse.gdata(), node_be.gdata(),
-                                   by_ == ByNode);
+                                   current_level.gdata(), reuse.gdata(), node_be.gdata());
                     }
 
                     // cleanup
@@ -1442,4 +1432,59 @@ namespace graph
         cudaFreeHost(sp);
         // graph::free_csrcoo_host(temp_g);
     }
+
+#ifdef TIMER
+    template <typename T>
+    void SG_Match<T>::print_SM_counters(Counters *SM_times, uint64 *SM_nodes)
+    {
+        CUDAContext context;
+        T num_SMs = context.num_SMs;
+        Log(info, "SM count %u", num_SMs);
+        const uint width = NUM_COUNTERS - 1;
+        GPUArray<uint64> total_times("Total Times", AllocationTypeEnum::unified, num_SMs, dev_);
+        GPUArray<float> SM_frac_times("Fractional SM times", unified, num_SMs * width, dev_);
+        GPUArray<float> total_frac_times("Fractional SM times", unified, width, dev_);
+        GPUArray<float> average_time("Average workload of an SM", unified, 1, dev_);
+        total_times.setAll(0, true);
+        SM_frac_times.setAll(0, true);
+        total_frac_times.setAll(0, true);
+        average_time.setAll(0, true);
+
+        for (int i = 0; i < num_SMs; i++)
+        {
+            for (int j = 0; j < width; j++)
+                total_times.gdata()[i] += SM_times[i].totalTime[j];
+
+            for (int j = 0; j < width; j++)
+                SM_frac_times.gdata()[i * width + j] = (SM_times[i].totalTime[j] * 1.0) / total_times.gdata()[i];
+        }
+
+        Log(info, "SM Workload");
+        // get average
+        for (int i = 0; i < num_SMs; i++)
+        {
+            average_time.gdata()[0] += SM_times[i].totalTime[TOTAL];
+        }
+        average_time.gdata()[0] = average_time.gdata()[0] / num_SMs;
+
+        for (int i = 0; i < num_SMs; i++)
+        {
+            std::cout << i << "\t" << (SM_times[i].totalTime[TOTAL] * 1.0) / average_time.gdata()[0] << "\t" << SM_nodes[i] << std::endl;
+        }
+        printf("\n\n");
+
+        for (int j = 0; j < width; j++)
+        {
+            for (int i = 0; i < num_SMs; i++)
+            {
+                total_frac_times.gdata()[j] += SM_frac_times.gdata()[width * i + j];
+            }
+            total_frac_times.gdata()[j] = total_frac_times.gdata()[j] / num_SMs;
+        }
+        Log(info, "Time distribution");
+        for (int i = 0; i < width; i++)
+            std::cout << Names[i] << "\t" << total_frac_times.gdata()[i] << std::endl;
+    }
+#endif
+
 }

@@ -1,6 +1,6 @@
 #pragma once
 
-// #define IC_COUNT
+// #define IC_COUNT  //make CUTOFF infinity for this to give correct results
 // #define TIMER
 
 // #define DEGENERACY
@@ -15,6 +15,6 @@
 #define BLOCK_SIZE_LD 1024
 #define PARTITION_SIZE_LD 32
 
-#define CUTOFF 2048
+// #define CUTOFF 128
 // #define SCHEDULING true
 #define SCHEDULING false

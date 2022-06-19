@@ -512,7 +512,7 @@ int main(int argc, char **argv)
             break;
         }*/
     }
-    
+
     else if (config.mt == CROSSDECOMP)
     {
         // Update Please
@@ -583,7 +583,7 @@ int main(int argc, char **argv)
 
         // Process template and count subgraphs
 
-        graph::SG_Match<uint> *sgm = new graph::SG_Match<uint>(config.mt, config.processBy, config.deviceId);
+        graph::SG_Match<uint> *sgm = new graph::SG_Match<uint>(config.mt, config.processBy, config.deviceId, config.cutoff);
         // sgm->run(*gd, patG);
         printf("code initiates sgm->run\n");
         sgm->run(*gd, patG);
