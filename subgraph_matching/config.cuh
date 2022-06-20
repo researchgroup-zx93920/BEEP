@@ -7,10 +7,23 @@
 #define DEGREE
 // #define LEX
 
-#define BLOCK_SIZE_HD 1024
-#define PARTITION_SIZE_HD 32
-#define BLOCK_SIZE_LD 128
+#define BLOCK_SIZE_LD 1024
 #define PARTITION_SIZE_LD 32
+#define BLOCK_SIZE_HD 16
 
 // #define SCHEDULING true
 #define SCHEDULING false
+
+// template <typename T>
+// struct SHARED_HANDLE
+// {
+//     T level_index[DEPTH];
+//     T level_count[DEPTH];
+//     T level_prec_index[DEPTH];
+//     uint64 sg_count;
+//     T lvl;
+//     T src, srcStart, srcLen, srcSplit, dstIdx;
+
+//     T num_divs_local, *level_offset, *reuse_offset, *encode;
+//     T to[BLCOK_DIM_X], newIndex;
+// };

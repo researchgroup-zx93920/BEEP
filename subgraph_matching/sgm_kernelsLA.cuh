@@ -76,7 +76,6 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
     __shared__ T level_index[DEPTH];
     __shared__ T level_count[DEPTH];
     __shared__ T level_prev_index[DEPTH];
-
     __shared__ uint64 sg_count;
     __shared__ T lvl;
     __shared__ T src, srcStart, srcLen, srcSplit, dstIdx;
@@ -159,6 +158,7 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
             cl[k] = get_mask(srcLen, k) & unset_mask(dstIdx, k) & unset_mask(j, k);
             cl[num_divs_local + k] = level_offset[num_divs_local + k];
         }
+        __syncthreads();
         if (tx == 0)
         {
             lvl = 3;
@@ -189,6 +189,7 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
 
         while (level_count[lvl - 3] > level_index[lvl - 3])
         {
+            __syncthreads();
             // First Index
             if (tx == 0)
             {
@@ -240,6 +241,7 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
         }
         __syncthreads();
     }
+    __syncthreads();
     if (tx == 0)
     {
         if (sg_count > 0)
@@ -248,7 +250,7 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
             // atomicAdd(&node_count[src], sg_count[wx]);
         }
     }
-
+    __syncthreads();
 end:
     if (tx == 0)
     {

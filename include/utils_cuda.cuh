@@ -165,6 +165,7 @@ struct CUDAContext
         cudaGetDeviceProperties(&prop, 0); /*currently 0th device*/
         max_threads_per_SM = prop.maxThreadsPerMultiProcessor;
         Log(debug, "Max threads per SM %u", max_threads_per_SM);
+
         // Log(LogPriorityEnum::info, "Shared MemPerBlock: %zu, PerSM: %zu", prop.sharedMemPerBlock, prop.sharedMemPerMultiprocessor);
         shared_mem_size_per_block = prop.sharedMemPerBlock;
         shared_mem_size_per_sm = prop.sharedMemPerMultiprocessor;

@@ -3,6 +3,8 @@
 #include "../../include/Timer.h"
 #include "common_utils.cuh"
 
+#define fundef template <typename T, uint BLOCK_DIM_X> \
+__device__ __forceinline__
 const uint DEPTH = 10;
 
 __constant__ uint MINLEVEL;
@@ -20,18 +22,181 @@ __constant__ bool QREUSABLE[DEPTH];
 __constant__ uint REUSE_PTR[DEPTH];
 
 template <typename T>
+struct mapping
+{
+    T src;
+    T srcHead;
+};
+
+template <typename T>
+struct GLOBAL_HANDLE
+{
+    uint64 *counter;
+    graph::COOCSRGraph_d<T> g;
+    mapping<T> *srcList;
+    T *current_level;
+    T *reuse_stats;
+    T *levelStats;
+    T *adj_enc;
+};
+
+template <typename T, uint BLOCK_DIM_X>
+struct SHARED_HANDLE
+{
+    T level_index[DEPTH];
+    T level_count[DEPTH];
+    T level_prev_index[DEPTH];
+    uint64 sg_count;
+    T lvl, src, srcStart, srcLen, srcSplit, dstIdx;
+    T num_divs_local, *cl, *reuse_offset, *encode;
+    T to[BLOCK_DIM_X], newIndex;
+    uint32_t sm_id, levelPtr;
+};
+
+template <typename T>
+struct LOCAL_HANDLE
+{
+    uint64 warpCount = 0;
+    bool go_ahead = true;
+};
+
+fundef void init_sm(SHARED_HANDLE<T, BLOCK_DIM_X> &sh,
+                    GLOBAL_HANDLE<T> &gh, const T head, const int *offset)
+{
+    if (threadIdx.x == 0)
+    {
+        sh.src = gh.srcList[blockIdx.x + head].src;
+        sh.srcStart = gh.g.rowPtr[sh.src];
+        sh.srcSplit = gh.g.splitPtr[sh.src];
+        sh.srcLen = gh.g.rowPtr[sh.src + 1] - sh.srcStart;
+
+        sh.dstIdx = blockIdx.x + head - gh.srcList[blockIdx.x + head].srcHead;
+
+        sh.num_divs_local = (sh.srcLen + 32 - 1) / 32;
+        sh.encode = &gh.adj_enc[(uint64)offset[sh.src] * NUMDIVS * MAXDEG];
+        sh.cl = &gh.current_level[(uint64)((sh.sm_id * CBPSM) + sh.levelPtr) * (NUMDIVS * 1 * MAXLEVEL)];
+    }
+    __syncthreads();
+}
+
+fundef void compute_triangles(SHARED_HANDLE<T, BLOCK_DIM_X> &sh, GLOBAL_HANDLE<T> &gh, LOCAL_HANDLE<T> &lh)
+{
+    if (SYMNODE_PTR[2] == 1 && sh.dstIdx < (sh.srcSplit - sh.srcStart))
+    {
+        lh.go_ahead = false;
+        return;
+    }
+    for (T k = threadIdx.x; k < sh.num_divs_local; k += BLOCK_DIM_X)
+    {
+        sh.cl[k] = get_mask(sh.srcLen, k) & unset_mask(sh.dstIdx, k);
+        if (QEDGE_PTR[3] - QEDGE_PTR[2] == 2)
+            sh.to[threadIdx.x] = sh.encode[sh.dstIdx * sh.num_divs_local + k];
+        else
+            sh.to[threadIdx.x] = sh.cl[k];
+
+        // Remove Redundancies
+        for (T sym_idx = SYMNODE_PTR[2]; sym_idx < SYMNODE_PTR[3]; sym_idx++)
+        {
+            if (SYMNODE[sym_idx] > 0)
+                sh.to[threadIdx.x] &= ~(sh.cl[k] & get_mask(sh.dstIdx, k));
+        }
+        sh.cl[sh.num_divs_local + k] = sh.to[threadIdx.x];
+        lh.warpCount += __popc(sh.to[threadIdx.x]);
+    }
+    typedef cub::BlockReduce<uint64, BLOCK_DIM_X> BlockReduce;
+    __shared__ typename BlockReduce::TempStorage temp_storage;
+    lh.warpCount = BlockReduce(temp_storage).Sum(lh.warpCount);
+    __syncthreads();
+    if (KCCOUNT == 3)
+    {
+        if (threadIdx.x == 0 && lh.warpCount > 0)
+            atomicAdd(gh.counter, lh.warpCount);
+        lh.go_ahead = false;
+        return;
+    }
+    else if (threadIdx.x == 0)
+    {
+        sh.sg_count = 0;
+    }
+}
+
+fundef void init_stack(SHARED_HANDLE<T, BLOCK_DIM_X> &sh, GLOBAL_HANDLE<T> &gh, LOCAL_HANDLE<T> &lh, const T j)
+{
+    if ((sh.cl[sh.num_divs_local + (j / 32)] >> (j % 32)) % 2 == 0)
+    {
+        lh.go_ahead = false;
+        return;
+    }
+    for (T k = threadIdx.x; k < DEPTH; k += BLOCK_DIM_X)
+    {
+        sh.level_index[k] = 0;
+        sh.level_count[k] = 0;
+        sh.level_prev_index[k] = 0;
+    }
+    for (T k = threadIdx.x; k < sh.num_divs_local; k += BLOCK_DIM_X)
+    {
+        sh.cl[k] = get_mask(sh.srcLen, k) & unset_mask(sh.dstIdx, k) & unset_mask(j, k);
+        sh.cl[sh.num_divs_local + k] = sh.cl[sh.num_divs_local + k];
+    }
+    __syncthreads();
+    if (threadIdx.x == 0)
+    {
+        sh.lvl = 3;
+        sh.level_prev_index[1] = sh.dstIdx + 1;
+        sh.level_prev_index[2] = j + 1;
+    }
+    __syncthreads();
+}
+
+fundef void check_terminate(SHARED_HANDLE<T, BLOCK_DIM_X> &sh, LOCAL_HANDLE<T> &lh)
+{
+    if (threadIdx.x == 0)
+    {
+        if (sh.lvl + 1 == KCCOUNT)
+            sh.sg_count += lh.warpCount;
+        else
+        {
+            sh.lvl++;
+            sh.level_count[sh.lvl - 3] = lh.warpCount;
+            sh.level_index[sh.lvl - 3] = 0;
+            sh.level_prev_index[sh.lvl - 1] = 0;
+        }
+    }
+    __syncthreads();
+}
+
+fundef void finalize_count(SHARED_HANDLE<T, BLOCK_DIM_X> &sh, GLOBAL_HANDLE<T> &gh, LOCAL_HANDLE<T> &lh)
+{
+    __syncthreads();
+    if (threadIdx.x == 0)
+    {
+        if (sh.sg_count > 0)
+            atomicAdd(gh.counter, sh.sg_count);
+    }
+    __syncthreads();
+}
+
+// space
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+// space end
+
+template <typename T>
 struct triplet
 {
     T colind;
     T partition;
     T priority;
-};
-
-template <typename T>
-struct mapping
-{
-    T src;
-    T srcHead;
 };
 
 template <typename T, bool ASCENDING>

@@ -27,7 +27,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 	__shared__ uint64 icount[numPartitions];
 #endif
 
-	__shared__ T num_divs_local, *level_offset, *encode, *reuse_offset;
+	__shared__ T num_divs_local, *level_offset, *encode;
 	__shared__ T to[BLOCK_DIM_X], newIndex[numPartitions];
 
 	//  block things
@@ -281,11 +281,6 @@ __launch_bounds__(BLOCK_DIM_X)
 
 	if (threadIdx.x == 0)
 	{
-		if (blockIdx.x == 0)
-		{
-			printf("Block Dim: %u, Partition size: %u\n", BLOCK_DIM_X, CPARTSIZE);
-			printf("CBPSM: %u\n", CBPSM);
-		}
 		sm_id = __mysmid();
 		levelPtr = 0;
 		while (atomicCAS(&(levelStats[(sm_id * CBPSM) + levelPtr]), 0, 1) != 0)
