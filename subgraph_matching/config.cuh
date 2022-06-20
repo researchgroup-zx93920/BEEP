@@ -9,9 +9,8 @@
 
 #define BLOCK_SIZE_HD 1024
 #define PARTITION_SIZE_HD 32
-#define BLOCK_SIZE_LD 1024
+#define BLOCK_SIZE_LD 128
 #define PARTITION_SIZE_LD 32
 
-// #define CUTOFF 128
 // #define SCHEDULING true
 #define SCHEDULING false

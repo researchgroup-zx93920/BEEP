@@ -280,6 +280,11 @@ __launch_bounds__(BLOCK_DIM_X)
 
 	if (threadIdx.x == 0)
 	{
+		if (blockIdx.x == 0)
+		{
+			printf("Block Dim: %u, Partition size: %u\n", BLOCK_DIM_X, CPARTSIZE);
+			printf("CBPSM: %u\n", CBPSM);
+		}
 		sm_id = __mysmid();
 		levelPtr = 0;
 		while (atomicCAS(&(levelStats[(sm_id * CBPSM) + levelPtr]), 0, 1) != 0)

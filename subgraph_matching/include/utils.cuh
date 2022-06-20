@@ -100,6 +100,39 @@ __device__ __forceinline__ void compute_intersection(
     reduce_part<T, CPARTSIZE>(partMask, wc);
 }
 
+template <typename T, uint BLOCK_DIM_X, bool MAT>
+__device__ __forceinline__ void compute_intersection_block(
+    uint64 &wc, const T tx, const T num_divs_local, const T maskIdx,
+    const T lvl, T *to, T *cl, const T *level_prev_index, const T *encode)
+{
+    wc = 0;
+    for (T k = tx; k < num_divs_local; k += BLOCK_DIM_X)
+    {
+        to[threadIdx.x] = cl[k] & unset_mask(maskIdx, k);
+
+        // Compute Intersection
+        for (T q_idx = QEDGE_PTR[lvl] + 1; q_idx < QEDGE_PTR[lvl + 1]; q_idx++)
+        {
+            to[threadIdx.x] &= encode[(level_prev_index[QEDGE[q_idx]] - 1) * num_divs_local + k];
+        }
+
+        // Remove Redundancies
+        for (T sym_idx = SYMNODE_PTR[lvl]; sym_idx < SYMNODE_PTR[lvl + 1]; sym_idx++)
+        {
+            if (!MAT && SYMNODE[sym_idx] == lvl - 1)
+                continue;
+            if (SYMNODE[sym_idx] > 0)
+                to[threadIdx.x] &= ~(get_mask(level_prev_index[SYMNODE[sym_idx]] - 1, k));
+        }
+        wc += __popc(to[threadIdx.x]);
+        cl[(lvl - 1) * num_divs_local + k] = to[threadIdx.x];
+    }
+    typedef cub::BlockReduce<uint64, BLOCK_DIM_X> BlockReduce;
+    __shared__ typename BlockReduce::TempStorage temp_storage;
+    wc = BlockReduce(temp_storage).Sum(wc); // whole block performs reduction here
+    __syncthreads();
+}
+
 template <typename T>
 __global__ void map_and_gen_triplet_array(triplet<T> *book, const graph::COOCSRGraph_d<T> g, const T *nodePriority)
 {
