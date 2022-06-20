@@ -1132,6 +1132,7 @@ namespace graph
                 uint num_divs = (maxDeg + dv - 1) / dv;
                 size_t free = 0, total = 0;
                 cuMemGetInfo(&free, &total);
+                Log(debug, "max Bucket degree %u", maxDeg);
 
                 if (!first || SCHEDULING)
                     current_nq.map_n_key_sort(nodeDegree.gdata());
@@ -1290,8 +1291,8 @@ namespace graph
             }
             level += span;
             span = bound_HD;
-            // todo -= current_nq.count.gdata()[0];
-            todo = 0;
+            todo -= current_nq.count.gdata()[0];
+            // todo = 0;
             first = false;
         }
         std::cout << "------------- Counter = " << counter.gdata()[0] << "\n";

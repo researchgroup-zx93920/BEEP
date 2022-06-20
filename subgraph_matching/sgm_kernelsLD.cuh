@@ -87,6 +87,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 			level_index[wx][k] = 0;
 			level_prev_index[wx][k] = 0;
 		}
+		__syncwarp(partMask);
 		if (lx == 1)
 		{
 			l[wx] = 3; // i.e. at level 2	l[wx] is +1 at all places
@@ -159,7 +160,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
 
 		while (level_index[wx][l[wx] - 3] < level_count[wx][l[wx] - 3]) // limits work per warp.. [0 to 32*32]
 		{
-			// __syncwarp(partMask);
+			__syncwarp(partMask);
 			if (lx == 0)
 			{
 				T *from = &(cl[num_divs_local * (l[wx] - 2)]);						  // all the current candidates
@@ -297,6 +298,7 @@ __launch_bounds__(BLOCK_DIM_X)
 	sgm_kernel_central_node_function_byNode<T, BLOCK_DIM_X, CPARTSIZE>((sm_id * CBPSM) + levelPtr,
 																	   counter, g, current, current_level, reuse, adj_enc);
 
+	__syncthreads();
 	if (threadIdx.x == 0)
 		atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
 }

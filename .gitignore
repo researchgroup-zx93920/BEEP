@@ -10,3 +10,7 @@ scripts/**
 *.tar.gz
 *.zip
 icount_execs/**
+
+
+*.log
+*.out
