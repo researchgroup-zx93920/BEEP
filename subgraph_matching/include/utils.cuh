@@ -38,6 +38,8 @@ struct GLOBAL_HANDLE
     T *reuse_stats;
     T *levelStats;
     T *adj_enc;
+    T *work_list_head;
+    T work_list_tail;
 };
 
 template <typename T, uint BLOCK_DIM_X>
@@ -47,10 +49,12 @@ struct SHARED_HANDLE
     T level_count[DEPTH];
     T level_prev_index[DEPTH];
     uint64 sg_count;
-    T lvl, src, srcStart, srcLen, srcSplit, dstIdx;
-    T num_divs_local, *cl, *reuse_offset, *encode;
+    T lvl, src, srcStart, srcLen, srcSplit, dstIdx, num_divs_local;
+    T *cl, *reuse_offset, *encode;
     T to[BLOCK_DIM_X], newIndex;
-    uint32_t sm_id, levelPtr;
+
+    // For Worker Queue
+    T state;
 };
 
 template <typename T>
@@ -63,29 +67,39 @@ struct LOCAL_HANDLE
 fundef void init_sm(SHARED_HANDLE<T, BLOCK_DIM_X> &sh,
                     GLOBAL_HANDLE<T> &gh, const T head, const int *offset)
 {
+    __syncthreads();
     if (threadIdx.x == 0)
     {
-        sh.src = gh.srcList[blockIdx.x + head].src;
-        sh.srcStart = gh.g.rowPtr[sh.src];
-        sh.srcSplit = gh.g.splitPtr[sh.src];
-        sh.srcLen = gh.g.rowPtr[sh.src + 1] - sh.srcStart;
+        T i = atomicAdd(gh.work_list_head, 1);
+        if (i < gh.work_list_tail)
+        {
+            sh.src = gh.srcList[i + head].src;
+            sh.srcStart = gh.g.rowPtr[sh.src];
+            sh.srcSplit = gh.g.splitPtr[sh.src];
+            sh.srcLen = gh.g.rowPtr[sh.src + 1] - sh.srcStart;
 
-        sh.dstIdx = blockIdx.x + head - gh.srcList[blockIdx.x + head].srcHead;
+            sh.dstIdx = i + head - gh.srcList[i + head].srcHead;
 
-        sh.num_divs_local = (sh.srcLen + 32 - 1) / 32;
-        sh.encode = &gh.adj_enc[(uint64)offset[sh.src] * NUMDIVS * MAXDEG];
-        sh.cl = &gh.current_level[(uint64)((sh.sm_id * CBPSM) + sh.levelPtr) * (NUMDIVS * 1 * MAXLEVEL)];
+            sh.num_divs_local = (sh.srcLen + 32 - 1) / 32;
+            sh.encode = &gh.adj_enc[(uint64)offset[sh.src] * NUMDIVS * MAXDEG];
+            sh.cl = &gh.current_level[(uint64)(blockIdx.x * NUMDIVS * 1 * MAXLEVEL)];
+            sh.state = 0;
+        }
+        else
+            sh.state = 100;
     }
     __syncthreads();
 }
 
 fundef void compute_triangles(SHARED_HANDLE<T, BLOCK_DIM_X> &sh, GLOBAL_HANDLE<T> &gh, LOCAL_HANDLE<T> &lh)
 {
+    __syncthreads();
     if (SYMNODE_PTR[2] == 1 && sh.dstIdx < (sh.srcSplit - sh.srcStart))
     {
         lh.go_ahead = false;
         return;
     }
+    lh.warpCount = 0;
     for (T k = threadIdx.x; k < sh.num_divs_local; k += BLOCK_DIM_X)
     {
         sh.cl[k] = get_mask(sh.srcLen, k) & unset_mask(sh.dstIdx, k);
@@ -127,6 +141,7 @@ fundef void init_stack(SHARED_HANDLE<T, BLOCK_DIM_X> &sh, GLOBAL_HANDLE<T> &gh, 
         lh.go_ahead = false;
         return;
     }
+    lh.go_ahead = true;
     for (T k = threadIdx.x; k < DEPTH; k += BLOCK_DIM_X)
     {
         sh.level_index[k] = 0;
@@ -163,6 +178,54 @@ fundef void check_terminate(SHARED_HANDLE<T, BLOCK_DIM_X> &sh, LOCAL_HANDLE<T> &
         }
     }
     __syncthreads();
+}
+
+fundef void get_newIndex(SHARED_HANDLE<T, BLOCK_DIM_X> &sh, LOCAL_HANDLE<T> &lh)
+{
+
+    if (threadIdx.x == 0)
+    {
+        T *from = &(sh.cl[sh.num_divs_local * (sh.lvl - 2)]);
+        T maskBlock = sh.level_prev_index[sh.lvl - 1] / 32;
+        T maskIndex = ~((1 << (sh.level_prev_index[sh.lvl - 1] & 0x1F)) - 1);
+
+        sh.newIndex = __ffs(from[maskBlock] & maskIndex);
+        while (sh.newIndex == 0)
+        {
+            maskIndex = 0xFFFFFFFF;
+            maskBlock++;
+            sh.newIndex = __ffs(from[maskBlock] & maskIndex);
+        }
+        sh.newIndex = 32 * maskBlock + sh.newIndex - 1;
+
+        sh.level_prev_index[sh.lvl - 1] = sh.newIndex + 1;
+        sh.level_index[sh.lvl - 3]++;
+    }
+}
+
+fundef void backtrack(SHARED_HANDLE<T, BLOCK_DIM_X> &sh, LOCAL_HANDLE<T> &lh)
+{
+    if (threadIdx.x == 0)
+    {
+        if (sh.lvl + 1 == KCCOUNT)
+            sh.sg_count += lh.warpCount;
+        else if (sh.lvl + 1 < KCCOUNT) //&& warpCount >= KCCOUNT - l[wx])
+        {
+            (sh.lvl)++;
+            sh.level_count[sh.lvl - 3] = lh.warpCount;
+            sh.level_index[sh.lvl - 3] = 0;
+            sh.level_prev_index[sh.lvl - 1] = 0;
+            T idx = sh.level_prev_index[sh.lvl - 2] - 1;
+            sh.cl[idx / 32] &= ~(1 << (idx & 0x1F));
+        }
+
+        while (sh.lvl > 4 && sh.level_index[sh.lvl - 3] >= sh.level_count[sh.lvl - 3])
+        {
+            (sh.lvl)--;
+            T idx = sh.level_prev_index[sh.lvl - 1] - 1;
+            sh.cl[idx / 32] |= 1 << (idx & 0x1F);
+        }
+    }
 }
 
 fundef void finalize_count(SHARED_HANDLE<T, BLOCK_DIM_X> &sh, GLOBAL_HANDLE<T> &gh, LOCAL_HANDLE<T> &lh)
@@ -386,12 +449,16 @@ __global__ void set_priority_l(graph::COOCSRGraph_d<T> g)
 }
 
 template <typename T>
-__global__ void map_src(mapping<T> *mapped, const graph::GraphQueue_d<T, bool> current, const T *scan, const T *degree)
+__global__ void map_src(mapping<T> *mapped,
+                        const graph::GraphQueue_d<T, bool> current,
+                        // const T *queue,
+                        const T *scan, const T *degree)
 {
     __shared__ T src, srcLen, start;
     if (threadIdx.x == 0)
     {
         src = current.queue[blockIdx.x];
+        // src = queue[blockIdx.x];
         srcLen = degree[src];
         start = (blockIdx.x > 0) ? scan[blockIdx.x - 1] : 0;
     }
