@@ -20,8 +20,7 @@ char *Names[] =
         "OTHER",
         "ALLOCATE",
         "INITIALIZE",
-        "REDUCTION",
-        "INTERSECT",
+        "TRIANGLE",
         "TRAVERSE",
         "QUEUING",
         "WAIT",
@@ -37,7 +36,8 @@ struct Counters
 template <typename T>
 static __device__ void initializeCounters(Counters *counters, const size_t lx, const T mask)
 {
-    __syncwarp(mask);
+    // __syncwarp(mask);
+    __syncthreads();
     if (lx == 0)
     {
         for (unsigned int i = 0; i < NUM_COUNTERS; ++i)
@@ -45,29 +45,34 @@ static __device__ void initializeCounters(Counters *counters, const size_t lx, c
             counters->totalTime[i] = 0;
         }
     }
-    __syncwarp(mask);
+    // __syncwarp(mask);
+    __syncthreads();
 }
 
 template <typename T>
 static __device__ void startTime(CounterName counterName, Counters *counters, const size_t lx, const T mask)
 {
-    __syncwarp(mask);
+    // __syncwarp(mask);
+    __syncthreads();
     if (lx == 0)
     {
         counters->tmp[counterName] = clock64();
     }
-    __syncwarp(mask);
+    // __syncwarp(mask);
+    __syncthreads();
 }
 
 template <typename T>
 static __device__ void endTime(CounterName counterName, Counters *counters, const size_t lx, const T mask)
 {
-    __syncwarp(mask);
+    // __syncwarp(mask);
+    __syncthreads();
     if (lx == 0)
     {
         counters->totalTime[counterName] += clock64() - counters->tmp[counterName];
     }
-    __syncwarp(mask);
+    // __syncwarp(mask);
+    __syncthreads();
 }
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
@@ -451,15 +456,25 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
         sh.state = 0;
     }
     __syncthreads();
+    endTime<T>(ALLOCATE, &times, lx, partMask);
     while (sh.state != 100)
     {
+
         LOCAL_HANDLE<T> lh;
         lh.warpCount = 0;
         lh.go_ahead = true;
         if (sh.state == 0)
         {
+            startTime<T>(ALLOCATE, &times, lx, partMask);
             init_sm(sh, gh, eq_head);
             endTime<T>(ALLOCATE, &times, lx, partMask);
+
+            __syncthreads();
+            if (threadIdx.x == 0 && sh.state == 0)
+            {
+                atomicAdd(&SM_edges[__mysmid()], 1);
+            }
+            __syncthreads();
 
             if (sh.state == 1)
             {
@@ -569,5 +584,11 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
         startTime<T>(OTHER, &times, lx, partMask);
         finalize_count(sh, gh, lh);
         endTime<T>(OTHER, &times, lx, partMask);
+    }
+
+    if (lx == 0)
+    {
+        for (int i = 0; i < NUM_COUNTERS; i++)
+            atomicAdd(&SM_times[__mysmid()].totalTime[i], times.totalTime[i]);
     }
 }
