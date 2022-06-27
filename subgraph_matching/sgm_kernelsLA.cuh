@@ -1,6 +1,7 @@
 #pragma once
 #include "include/utils.cuh"
 #include "config.cuh"
+#include "../include/queue.cuh"
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __global__ void sgm_kernel_compute_encoding(
@@ -51,33 +52,87 @@ __global__ void sgm_kernel_compute_encoding(
 
 template <typename T, uint BLOCK_DIM_X>
 __global__ void sgm_kernel_pre_encoded_byEdge(
-    GLOBAL_HANDLE<T> gh, const T head, const int *offset)
+    GLOBAL_HANDLE<T> gh, const T eq_head,
+    queue_callee(queue, tickets, head, tail))
 {
     __shared__ SHARED_HANDLE<T, BLOCK_DIM_X> sh;
 
     // will be removed later
-
+    if (threadIdx.x == 0)
+    {
+        sh.root_sm_block_id = sh.sm_block_id = blockIdx.x;
+        sh.state = 0;
+    }
+    __syncthreads();
     while (sh.state != 100)
     {
         LOCAL_HANDLE<T> lh;
         lh.warpCount = 0;
         lh.go_ahead = true;
-        init_sm(sh, gh, head, offset);
-        if (sh.state != 0)
-            continue;
 
-        // compute triangles/count till L3
-        compute_triangles(sh, gh, lh);
+        if (sh.state == 0)
+        {
+            init_sm(sh, gh, eq_head);
+            if (sh.state == 1)
+            {
+                if (threadIdx.x == 0)
+                    queue_enqueue(queue, tickets, head, tail, CB, sh.sm_block_id);
+                __syncthreads();
+                continue;
+            }
+
+            // compute triangles/count till L3
+            compute_triangles(sh, gh, lh);
+            __syncthreads();
+            if (!lh.go_ahead)
+                continue;
+        }
+        else if (sh.state == 1)
+        {
+            __syncthreads();
+            if (threadIdx.x == 0)
+            {
+                wait_for_donor(gh.work_ready[sh.sm_block_id], sh.state,
+                               queue_caller(queue, tickets, head, tail));
+            }
+            __syncthreads();
+            continue;
+        }
+        else if (sh.state == 2)
+        {
+            __syncthreads();
+
+            // if (threadIdx.x == 0)
+            // {
+            //     sh.state = 1;
+            //     queue_enqueue(queue, tickets, head, tail, CB, sh.sm_block_id);
+            // }
+            // __syncthreads();
+            // continue;
+
+            setup_stack_recepient(gh, sh);
+            __syncthreads();
+        }
         __syncthreads();
-        if (!lh.go_ahead)
-            continue;
 
+        // DFST work
         for (T j = 0; j < sh.srcLen; j++)
         {
             init_stack(sh, gh, lh, j);
             if (!lh.go_ahead)
                 continue;
 
+            // try dequeue here
+            if (threadIdx.x == 0 && sh.state == 0)
+            {
+                sh.fork = false;
+                try_dequeue(gh, sh, j, queue_caller(queue, tickets, head, tail));
+            }
+            __syncthreads();
+            if (sh.fork)
+                do_fork(gh, sh, j, queue_caller(queue, tickets, head, tail));
+
+            __syncthreads();
             compute_intersection_block<T, BLOCK_DIM_X, true>(
                 lh.warpCount, threadIdx.x, sh.num_divs_local, UINT32_MAX, sh.lvl, sh.to, sh.cl,
                 sh.level_prev_index, sh.encode);
@@ -101,6 +156,12 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
             }
             __syncthreads();
         }
+        if (threadIdx.x == 0 && sh.state == 2)
+        {
+            sh.state = 1;
+            queue_enqueue(queue, tickets, head, tail, CB, sh.sm_block_id);
+        }
+        __syncthreads();
         finalize_count(sh, gh, lh);
     }
 }

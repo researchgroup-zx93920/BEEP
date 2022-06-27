@@ -5,6 +5,8 @@
 
 #define fundef template <typename T, uint BLOCK_DIM_X> \
 __device__ __forceinline__
+
+const uint N_RECEPIENTS = 1; // Don't change
 const uint DEPTH = 10;
 
 __constant__ uint MINLEVEL;
@@ -35,11 +37,16 @@ struct GLOBAL_HANDLE
     graph::COOCSRGraph_d<T> g;
     mapping<T> *srcList;
     T *current_level;
-    T *reuse_stats;
+    MessageBlock *Message;
+    // T *reuse_stats;
+    int *offset;
     T *levelStats;
     T *adj_enc;
     T *work_list_head;
     T work_list_tail;
+
+    // for worker queue
+    cuda::atomic<uint32_t, cuda::thread_scope_device> *work_ready;
 };
 
 template <typename T, uint BLOCK_DIM_X>
@@ -54,7 +61,10 @@ struct SHARED_HANDLE
     T to[BLOCK_DIM_X], newIndex;
 
     // For Worker Queue
-    T state;
+    cuda::atomic<uint32_t, cuda::thread_scope_device> *work_ready;
+    T state, root_sm_block_id, sm_block_id, worker_pos, shared_other_sm_block_id;
+    bool fork;
+    T dequeue_offset;
 };
 
 template <typename T>
@@ -64,8 +74,13 @@ struct LOCAL_HANDLE
     bool go_ahead = true;
 };
 
+// ******************* SGM functions *******************************
+//
+//
+//
+//
 fundef void init_sm(SHARED_HANDLE<T, BLOCK_DIM_X> &sh,
-                    GLOBAL_HANDLE<T> &gh, const T head, const int *offset)
+                    GLOBAL_HANDLE<T> &gh, const T eq_head)
 {
     __syncthreads();
     if (threadIdx.x == 0)
@@ -73,20 +88,23 @@ fundef void init_sm(SHARED_HANDLE<T, BLOCK_DIM_X> &sh,
         T i = atomicAdd(gh.work_list_head, 1);
         if (i < gh.work_list_tail)
         {
-            sh.src = gh.srcList[i + head].src;
+            sh.src = gh.srcList[i + eq_head].src;
             sh.srcStart = gh.g.rowPtr[sh.src];
             sh.srcSplit = gh.g.splitPtr[sh.src];
             sh.srcLen = gh.g.rowPtr[sh.src + 1] - sh.srcStart;
 
-            sh.dstIdx = i + head - gh.srcList[i + head].srcHead;
+            sh.dstIdx = i + eq_head - gh.srcList[i + eq_head].srcHead;
 
             sh.num_divs_local = (sh.srcLen + 32 - 1) / 32;
-            sh.encode = &gh.adj_enc[(uint64)offset[sh.src] * NUMDIVS * MAXDEG];
+            sh.encode = &gh.adj_enc[(uint64)gh.offset[sh.src] * NUMDIVS * MAXDEG];
             sh.cl = &gh.current_level[(uint64)(blockIdx.x * NUMDIVS * 1 * MAXLEVEL)];
             sh.state = 0;
+            sh.dequeue_offset = 0;
         }
         else
-            sh.state = 100;
+        {
+            sh.state = 1; // 1: Block ready for other work, 100: terminate block
+        }
     }
     __syncthreads();
 }
@@ -136,6 +154,11 @@ fundef void compute_triangles(SHARED_HANDLE<T, BLOCK_DIM_X> &sh, GLOBAL_HANDLE<T
 
 fundef void init_stack(SHARED_HANDLE<T, BLOCK_DIM_X> &sh, GLOBAL_HANDLE<T> &gh, LOCAL_HANDLE<T> &lh, const T j)
 {
+    if (threadIdx.x == 0)
+    {
+        if (j % 32 == 0)
+            sh.dequeue_offset = 0;
+    }
     if ((sh.cl[sh.num_divs_local + (j / 32)] >> (j % 32)) % 2 == 0)
     {
         lh.go_ahead = false;
@@ -151,7 +174,7 @@ fundef void init_stack(SHARED_HANDLE<T, BLOCK_DIM_X> &sh, GLOBAL_HANDLE<T> &gh, 
     for (T k = threadIdx.x; k < sh.num_divs_local; k += BLOCK_DIM_X)
     {
         sh.cl[k] = get_mask(sh.srcLen, k) & unset_mask(sh.dstIdx, k) & unset_mask(j, k);
-        sh.cl[sh.num_divs_local + k] = sh.cl[sh.num_divs_local + k];
+        // sh.cl[sh.num_divs_local + k] = sh.cl[sh.num_divs_local + k];
     }
     __syncthreads();
     if (threadIdx.x == 0)
@@ -192,9 +215,8 @@ fundef void get_newIndex(SHARED_HANDLE<T, BLOCK_DIM_X> &sh, LOCAL_HANDLE<T> &lh)
         sh.newIndex = __ffs(from[maskBlock] & maskIndex);
         while (sh.newIndex == 0)
         {
-            maskIndex = 0xFFFFFFFF;
             maskBlock++;
-            sh.newIndex = __ffs(from[maskBlock] & maskIndex);
+            sh.newIndex = __ffs(from[maskBlock]);
         }
         sh.newIndex = 32 * maskBlock + sh.newIndex - 1;
 
@@ -239,21 +261,135 @@ fundef void finalize_count(SHARED_HANDLE<T, BLOCK_DIM_X> &sh, GLOBAL_HANDLE<T> &
     __syncthreads();
 }
 
-// space
 //
 //
 //
 //
 //
+//  ******************* Worker Queue Functions *****************
 //
 //
 //
 //
 //
-//
-//
-// space end
+__device__ __forceinline__ void wait_for_donor(
+    cuda::atomic<uint32_t, cuda::thread_scope_device> &work_ready, uint32_t &shared_state,
+    queue_callee(queue, tickets, head, tail))
+{
+    uint32_t ns = 8;
+    do
+    {
+        if (work_ready.load(cuda::memory_order_relaxed))
+        {
+            if (work_ready.load(cuda::memory_order_acquire))
+            {
+                shared_state = 2;
+                work_ready.store(0, cuda::memory_order_relaxed);
+                break;
+            }
+        }
+        else if (queue_full(queue, tickets, head, tail, CB))
+        {
+            shared_state = 100;
+            break;
+        }
+        // else
+        // {
+        //     printf("Block %u is waiting\n", blockIdx.x);
+        // }
+    } while (ns = my_sleep(ns));
+}
 
+fundef void try_dequeue(GLOBAL_HANDLE<T> &gh,
+                        SHARED_HANDLE<T, BLOCK_DIM_X> &sh, T j,
+                        queue_callee(queue, tickets, head, tail))
+{
+
+    while (__popc(sh.cl[sh.num_divs_local + j / 32 + sh.dequeue_offset]) == 0)
+    {
+        if ((j / 32 + sh.dequeue_offset) >= sh.num_divs_local)
+        {
+            return;
+        }
+        sh.dequeue_offset++;
+    }
+
+    if ((sh.num_divs_local - (j / 32 + sh.dequeue_offset)) > N_RECEPIENTS && gh.work_list_head[0] >= gh.work_list_tail)
+    {
+        queue_dequeue(queue, tickets, head, tail, CB, sh.fork, sh.worker_pos, N_RECEPIENTS);
+    }
+}
+
+fundef void do_fork(GLOBAL_HANDLE<T> &gh,
+                    SHARED_HANDLE<T, BLOCK_DIM_X> &sh, T j,
+                    queue_callee(queue, tickets, head, tail))
+{
+    for (T iter = 0; iter < N_RECEPIENTS; iter++)
+    {
+        if (threadIdx.x == 0)
+            queue_wait_ticket(queue, tickets, head, tail, CB, sh.worker_pos, sh.shared_other_sm_block_id);
+        __syncthreads();
+
+        T other_sm_block_id = sh.shared_other_sm_block_id;
+        auto other_level_offset = &gh.current_level[(uint64)(other_sm_block_id * NUMDIVS * 1 * MAXLEVEL)];
+
+        // reset other_level_offset
+        for (T i = threadIdx.x; i < 2 * NUMDIVS; i++)
+        {
+            other_level_offset[i] = 0;
+        }
+        __syncthreads();
+
+        // pass one chunk of candidates and reset in current block
+        if (threadIdx.x == 0)
+        {
+            other_level_offset[sh.num_divs_local + j / 32 + iter + 1 + sh.dequeue_offset] =
+                sh.cl[sh.num_divs_local + j / 32 + iter + 1 + sh.dequeue_offset];
+            sh.cl[sh.num_divs_local + j / 32 + iter + 1 + sh.dequeue_offset] = 0;
+
+            // pass shared memory to recepient block as "MessageBlock"
+            gh.Message[other_sm_block_id].src_ = sh.src;
+            gh.Message[other_sm_block_id].dstIdx_ = sh.dstIdx;
+            gh.Message[other_sm_block_id].encode_ = sh.encode;
+            gh.Message[other_sm_block_id].root_sm_block_id_ = sh.sm_block_id;
+            gh.work_ready[other_sm_block_id].store(1, cuda::memory_order_release);
+            sh.worker_pos++;
+        }
+        __syncthreads();
+    }
+}
+
+fundef void setup_stack_recepient(GLOBAL_HANDLE<T> &gh,
+                                  SHARED_HANDLE<T, BLOCK_DIM_X> &sh)
+{
+    if (threadIdx.x == 0)
+    {
+        sh.src = gh.Message[sh.sm_block_id].src_;
+        sh.dstIdx = gh.Message[sh.sm_block_id].dstIdx_;
+        sh.encode = gh.Message[sh.sm_block_id].encode_;
+        sh.root_sm_block_id = gh.Message[sh.sm_block_id].root_sm_block_id_;
+        sh.srcLen = gh.g.rowPtr[sh.src + 1] - gh.g.rowPtr[sh.src];
+
+        sh.cl = &gh.current_level[(uint64)(blockIdx.x * NUMDIVS * 1 * MAXLEVEL)];
+        sh.srcStart = gh.g.rowPtr[sh.src];
+        sh.srcSplit = gh.g.splitPtr[sh.src];
+
+        sh.num_divs_local = (sh.srcLen + 32 - 1) / 32;
+        // important clear previous count
+        sh.sg_count = 0;
+        sh.fork = false;
+    }
+}
+
+//
+//
+//
+//
+// *********************** Host Functions ***********************
+//
+//
+//
+//
 template <typename T>
 struct triplet
 {

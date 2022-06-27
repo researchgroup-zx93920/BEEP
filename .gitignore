@@ -10,7 +10,9 @@ scripts/**
 *.tar.gz
 *.zip
 icount_execs/**
-
+*.ncu-rep
 
 *.log
 *.out
+sections/**
+target/**

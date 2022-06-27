@@ -1,5 +1,6 @@
 #pragma once
 #include "../../include/GraphDataStructure.cuh"
+#include "../../include/queue.cuh"
 
 __constant__ uint KCCOUNT;
 __constant__ uint MAXDEG;
@@ -10,8 +11,17 @@ __constant__ uint NUMDIVS;
 __constant__ uint CBPSM;
 __constant__ uint ORIENTED_MAXDEG;
 __constant__ uint FIRST_SYM_LEVEL;
+__constant__ uint CB;
 
 using InBucketWinType = bool;
+
+struct MessageBlock
+{
+    unsigned int src_;
+    unsigned int dstIdx_;
+    unsigned int *encode_;
+    unsigned int root_sm_block_id_;
+};
 
 template <typename T>
 __device__ __forceinline__ T get_mask(T idx, T partition)
