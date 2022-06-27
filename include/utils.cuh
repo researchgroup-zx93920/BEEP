@@ -22,8 +22,8 @@
 #include "defs.cuh"
 #include "cuda.h"
 #include <cuda_runtime_api.h>
-#include "../cub/cub.cuh"
-// #include <cub/cub.cuh>
+// #include "../cub/cub.cuh"
+#include <cub/cub.cuh>
 
 #define CUDA_RUNTIME(ans)                     \
 	{                                         \

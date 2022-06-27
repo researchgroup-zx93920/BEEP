@@ -82,11 +82,11 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
             }
             __syncwarp(partMask);
 
-            graph::warp_sorted_count_and_encode_full<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&g.oriented_colInd[srcStart], srcLen,
-                                                                                          &g.colInd[g.rowPtr[g.oriented_colInd[srcStart + j]]],
-                                                                                          g.rowPtr[g.oriented_colInd[srcStart + j] + 1] - g.rowPtr[g.oriented_colInd[srcStart + j]],
-                                                                                          j, num_divs_local,
-                                                                                          encode);
+            warp_sorted_count_and_encode_full<T, true, CPARTSIZE>(&g.oriented_colInd[srcStart], srcLen,
+                                                                  &g.colInd[g.rowPtr[g.oriented_colInd[srcStart + j]]],
+                                                                  g.rowPtr[g.oriented_colInd[srcStart + j] + 1] - g.rowPtr[g.oriented_colInd[srcStart + j]],
+                                                                  j, num_divs_local,
+                                                                  encode);
         }
         __syncthreads(); // Done full encoding
 
@@ -223,7 +223,7 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byNode(
                     to, cl, reuse, level_prev_index[wx], encode);
 #else
                 compute_intersection<T, CPARTSIZE, true>(
-                    warpCount, offset[wx], lx, partMask,
+                    warpCount, lx, partMask,
                     num_divs_local, newIndex[wx], l[wx],
                     to, cl, level_prev_index[wx], encode);
 
@@ -369,11 +369,11 @@ __device__ __forceinline__ void sgm_kernel_central_node_function_byEdge(
                 encode[j * num_divs_local + k] = 0x00;
             }
             __syncwarp(partMask);
-            graph::warp_sorted_count_and_encode_full<WARPS_PER_BLOCK, T, true, CPARTSIZE>(&g.oriented_colInd[srcStart], srcLen,
-                                                                                          &g.colInd[g.rowPtr[g.oriented_colInd[srcStart + j]]],
-                                                                                          g.rowPtr[g.oriented_colInd[srcStart + j] + 1] - g.rowPtr[g.oriented_colInd[srcStart + j]],
-                                                                                          j, num_divs_local,
-                                                                                          encode);
+            warp_sorted_count_and_encode_full<T, true, CPARTSIZE>(&g.oriented_colInd[srcStart], srcLen,
+                                                                  &g.colInd[g.rowPtr[g.oriented_colInd[srcStart + j]]],
+                                                                  g.rowPtr[g.oriented_colInd[srcStart + j] + 1] - g.rowPtr[g.oriented_colInd[srcStart + j]],
+                                                                  j, num_divs_local,
+                                                                  encode);
         }
         __syncthreads(); // Done encoding
 
