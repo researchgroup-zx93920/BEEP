@@ -512,16 +512,16 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
             startTime<T>(QUEUING, &times, lx, partMask);
             __syncthreads();
 
-            // if (threadIdx.x == 0)
-            // {
-            //     sh.state = 1;
-            //     queue_enqueue(queue, tickets, head, tail, CB, sh.sm_block_id);
-            // }
-            // __syncthreads();
-            // continue;
-
-            setup_stack_recepient(gh, sh);
+            if (threadIdx.x == 0)
+            {
+                sh.state = 1;
+                queue_enqueue(queue, tickets, head, tail, CB, sh.sm_block_id);
+            }
             __syncthreads();
+            continue;
+
+            // setup_stack_recepient(gh, sh);
+            // __syncthreads();
             endTime<T>(QUEUING, &times, lx, partMask);
         }
         __syncthreads();
