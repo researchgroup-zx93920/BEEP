@@ -605,3 +605,42 @@ __global__ void map_src(mapping<T> *mapped,
         mapped[start + i].srcHead = start;
     }
 }
+
+template <size_t WPB, typename T, bool reduce = true, uint CPARTSIZE>
+__device__ __forceinline__ void warp_sorted_count_and_encode_full_undirected(
+    const T *const A, //!< [in] array A
+    const T aSz,      //!< [in] the number of elements in A
+    const T *const B, //!< [in] array B
+    const T bSz,      //!< [in] the number of elements in B
+    const T j,
+    const T num_divs_local,
+    T *encode)
+{
+    // if (threadIdx.x == 0)
+    // {
+    // printf("CPARTSIZE: %u\n", CPARTSIZE);
+    // }
+    const int laneIdx = threadIdx.x % CPARTSIZE; // which thread in warp
+    // cover entirety of A with warp
+    for (T i = laneIdx + j; i < aSz; i += CPARTSIZE) //+j since the graph is undirected
+    {
+        const T searchVal = A[i];
+        bool found = false;
+        const T lb = binary_search<T>(B, 0, bSz, searchVal, found);
+
+        if (found)
+        {
+            // printf("\033[0;32m Found %u, in adjacency of: %u\033[0;37m\n", searchVal, A[j]);
+            //////////////////////////////Device function ///////////////////////
+            T chunk_index = i / 32; // 32 here is the division size of the encode
+            T inChunkIndex = i % 32;
+            atomicOr(&encode[j * num_divs_local + chunk_index], 1 << inChunkIndex);
+
+            T chunk_index1 = j / 32; // 32 here is the division size of the encode
+            T inChunkIndex1 = j % 32;
+            atomicOr(&encode[i * num_divs_local + chunk_index1], 1 << inChunkIndex1);
+
+            /////////////////////////////////////////////////////////////////////
+        }
+    }
+}

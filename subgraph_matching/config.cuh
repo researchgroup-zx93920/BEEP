@@ -1,7 +1,7 @@
 #pragma once
 
 // #define IC_COUNT  //make CUTOFF infinity for this to give correct results
-#define TIMER
+// #define TIMER
 
 // #define DEGENERACY
 #define DEGREE
