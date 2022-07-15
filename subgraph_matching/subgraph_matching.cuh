@@ -1164,8 +1164,8 @@ namespace graph
                 cuMemGetInfo(&free, &total);
                 Log(debug, "max Bucket degree %u", maxDeg);
 
-                // if (!first || SCHEDULING)
-                //     current_nq.map_n_key_sort(nodeDegree.gdata());
+                if (!first || SCHEDULING)
+                    current_nq.map_n_key_sort(nodeDegree.gdata());
 
                 GPUArray<mapping<T>> src_mapping;
                 if (!first)
@@ -1295,13 +1295,10 @@ namespace graph
                 }
                 else
                 {
-                    uint oriented_maxDeg = oriented_max_dDegree.gdata()[0];
                     maxDeg = level + span < maxDeg ? level + span : maxDeg;
-
                     num_divs = (maxDeg + dv - 1) / dv;
-
+                    Log(debug, "num-divs %u", num_divs);
                     cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
-                    cudaMemcpyToSymbol(ORIENTED_MAXDEG, &oriented_maxDeg, sizeof(ORIENTED_MAXDEG));
                     cudaMemcpyToSymbol(MAXDEG, &maxDeg, sizeof(MAXDEG));
                     cudaMemcpyToSymbol(NUMPART, &numPartitions_LD, sizeof(NUMPART));
                     cudaMemcpyToSymbol(PARTSIZE, &partitionSize_LD, sizeof(PARTSIZE));

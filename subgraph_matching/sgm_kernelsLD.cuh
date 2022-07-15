@@ -56,14 +56,11 @@ __global__ void sgm_kernel_central_node_function_byNode(
 				tc = 0;
 			}
 			else
-			{
 				state = 100;
-			}
 		}
 		__syncthreads();
 		if (state == 100)
 			break;
-
 		if (lx == 0)
 		{
 			sg_count[wx] = 0;
@@ -217,10 +214,10 @@ __global__ void sgm_kernel_central_node_function_byNode(
 				wtc[wx] = atomicAdd(&(tc), 1);
 			__syncwarp(partMask);
 		}
-	}
-	if (lx == 0 && sg_count[wx] > 0)
-	{
-		atomicAdd(counter, sg_count[wx]);
+		if (lx == 0 && sg_count[wx] > 0)
+		{
+			atomicAdd(counter, sg_count[wx]);
+		}
 	}
 }
 
