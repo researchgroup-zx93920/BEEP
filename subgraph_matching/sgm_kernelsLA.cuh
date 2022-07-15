@@ -57,7 +57,6 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
 {
     __shared__ SHARED_HANDLE<T, BLOCK_DIM_X> sh;
 
-    // will be removed later
     if (threadIdx.x == 0)
     {
         sh.root_sm_block_id = sh.sm_block_id = blockIdx.x;
