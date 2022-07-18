@@ -218,53 +218,6 @@ __global__ void sgm_kernel_central_node_function_byNode(
 		{
 			atomicAdd(counter, sg_count[wx]);
 		}
+		__syncthreads();
 	}
 }
-
-#pragma region
-// template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
-// __launch_bounds__(BLOCK_DIM_X)
-// 	__global__ void sgm_kernel_central_node_base_binary(
-// 		uint64 *counter,
-// 		const graph::COOCSRGraph_d<T> g,
-// 		const graph::GraphQueue_d<T, bool> current,
-// 		T *current_level, T *reuse,
-// 		T *adj_enc)
-// {
-// 	sgm_kernel_central_node_function_byNode<T, BLOCK_DIM_X, CPARTSIZE>(blockIdx.x,
-// 																	   counter, g, current, current_level, reuse, adj_enc);
-// }
-
-// template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
-// __launch_bounds__(BLOCK_DIM_X)
-// 	__global__ void sgm_kernel_central_node_base_binary_persistant(
-// 		uint64 *counter,
-// 		const graph::COOCSRGraph_d<T> g,
-// 		const graph::GraphQueue_d<T, bool> current,
-// 		T *current_level, T *reuse,
-// 		T *levelStats,
-// 		T *adj_enc)
-// {
-
-// 	// only needed for persistant launches
-// 	__shared__ uint32_t sm_id, levelPtr;
-
-// 	if (threadIdx.x == 0)
-// 	{
-// 		sm_id = __mysmid();
-// 		levelPtr = 0;
-// 		while (atomicCAS(&(levelStats[(sm_id * CBPSM) + levelPtr]), 0, 1) != 0)
-// 		{
-// 			levelPtr++;
-// 		}
-// 	}
-// 	__syncthreads();
-
-// 	sgm_kernel_central_node_function_byNode<T, BLOCK_DIM_X, CPARTSIZE>((sm_id * CBPSM) + levelPtr,
-// 																	   counter, g, current, current_level, reuse, adj_enc);
-
-// 	__syncthreads();
-// 	if (threadIdx.x == 0)
-// 		atomicCAS(&levelStats[sm_id * CBPSM + levelPtr], 1, 0);
-// }
-#pragma endregion
