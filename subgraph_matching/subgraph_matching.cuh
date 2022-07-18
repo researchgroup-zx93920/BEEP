@@ -1237,6 +1237,7 @@ namespace graph
                         nq_head += node_grid_size;
                         T work_list_size = (eq_head > 0) ? (Degree_Scan.gdata()[nq_head - 1] - Degree_Scan.gdata()[nq_head - 1 - node_grid_size]) : Degree_Scan.gdata()[nq_head - 1] - 0;
 
+                        max_active_blocks = 0;
                         cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_active_blocks,
                                                                       sgm_kernel_pre_encoded_byEdge<T, block_size_HD>, block_size_HD,
                                                                       0);

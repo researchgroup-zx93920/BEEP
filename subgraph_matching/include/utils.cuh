@@ -343,15 +343,15 @@ fundef void do_fork(GLOBAL_HANDLE<T> &gh,
         // pass one chunk of candidates and reset in current block
         if (threadIdx.x == 0)
         {
-            // other_level_offset[sh.num_divs_local + j / 32 + iter + 1 + sh.dequeue_offset] =
-            //     sh.cl[sh.num_divs_local + j / 32 + iter + 1 + sh.dequeue_offset];
-            // sh.cl[sh.num_divs_local + j / 32 + iter + 1 + sh.dequeue_offset] = 0;
+            other_level_offset[sh.num_divs_local + j / 32 + iter + 1 + sh.dequeue_offset] =
+                sh.cl[sh.num_divs_local + j / 32 + iter + 1 + sh.dequeue_offset];
+            sh.cl[sh.num_divs_local + j / 32 + iter + 1 + sh.dequeue_offset] = 0;
 
-            // // pass shared memory to recepient block as "MessageBlock"
-            // gh.Message[other_sm_block_id].src_ = sh.src;
-            // gh.Message[other_sm_block_id].dstIdx_ = sh.dstIdx;
-            // gh.Message[other_sm_block_id].encode_ = sh.encode;
-            // gh.Message[other_sm_block_id].root_sm_block_id_ = sh.sm_block_id;
+            // pass shared memory to recepient block as "MessageBlock"
+            gh.Message[other_sm_block_id].src_ = sh.src;
+            gh.Message[other_sm_block_id].dstIdx_ = sh.dstIdx;
+            gh.Message[other_sm_block_id].encode_ = sh.encode;
+            gh.Message[other_sm_block_id].root_sm_block_id_ = sh.sm_block_id;
             gh.work_ready[other_sm_block_id].store(1, cuda::memory_order_release);
             sh.worker_pos++;
         }
