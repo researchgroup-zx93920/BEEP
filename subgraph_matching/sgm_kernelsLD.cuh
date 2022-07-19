@@ -1,7 +1,79 @@
 #pragma once
 #include "include/utils.cuh"
+#include "include/utils_LD.cuh"
 #include "include/common_utils.cuh"
 #include "config.cuh"
+
+template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
+__global__ void sgm_kernel_central_node_function(
+	GLOBAL_HANDLE<T> gh)
+{
+	constexpr T NP = BLOCK_DIM_X / CPARTSIZE;
+	const T wx = threadIdx.x / CPARTSIZE;
+	const T lx = threadIdx.x % CPARTSIZE;
+	const T partMask = ((1 << CPARTSIZE) - 1) << ((wx % (32 / CPARTSIZE)) * CPARTSIZE);
+
+	__shared__ SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> sh;
+	LOCAL_HANDLE_LD lh;
+
+	if (threadIdx.x == 0)
+	{
+		sh.state = 0;
+	}
+	__syncthreads();
+	while (sh.state != 100)
+	{
+		lh.warpCount = 0;
+
+		init_sm(sh, gh);
+
+		if (sh.state == 100)
+			break;
+		if (lx == 0)
+		{
+			sh.sg_count[wx] = 0;
+		}
+
+		encode(sh, gh);
+
+		if (lx == 0)
+			sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
+		__syncwarp(partMask);
+
+		while (sh.wtc[wx] < sh.srcLen)
+		{
+			T j = sh.wtc[wx];
+			if (!(SYMNODE_PTR[2] == 1 && j < (sh.srcSplit - sh.srcStart)))
+			{
+				T *cl = sh.level_offset + wx * (NUMDIVS * MAXLEVEL);
+				init_stack(sh, gh, partMask, j);
+
+				// get wc?
+				count_tri(lh, sh, gh, partMask, cl, j);
+
+				check_terminate(lh, sh, partMask);
+				while (sh.level_index[wx][sh.l[wx] - 3] < sh.level_count[wx][sh.l[wx] - 3])
+				{
+					get_newIndex(lh, sh, partMask, cl);
+					compute_intersection<T, CPARTSIZE, true>(
+						lh.warpCount, lx, partMask,
+						sh.num_divs_local, sh.newIndex[wx], sh.l[wx],
+						sh.to, cl, sh.level_prev_index[wx], sh.encode);
+
+					backtrack(lh, sh, partMask, cl);
+				}
+			}
+			if (lx == 0)
+				sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
+			__syncwarp(partMask);
+		}
+		if (lx == 0 && sh.sg_count[wx] > 0)
+		{
+			atomicAdd(gh.counter, sh.sg_count[wx]);
+		}
+		__syncthreads();
+	}
+}
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __global__ void sgm_kernel_central_node_function_byNode(

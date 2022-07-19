@@ -7,8 +7,8 @@
 #define DEGREE
 // #define LEX
 
-#define BLOCK_SIZE_LD 1024
-#define PARTITION_SIZE_LD 32
+#define BLOCK_SIZE_LD 256
+#define PARTITION_SIZE_LD 16
 #define BLOCK_SIZE_HD 32
 
 // #define SCHEDULING true

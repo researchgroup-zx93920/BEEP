@@ -36,14 +36,14 @@ struct GLOBAL_HANDLE
     uint64 *counter;
     graph::COOCSRGraph_d<T> g;
     mapping<T> *srcList;
+    graph::GraphQueue_d<T, bool> current;
+
     T *current_level;
     MessageBlock *Message;
-    // T *reuse_stats;
     int *offset;
-    T *levelStats;
     T *adj_enc;
-    T *work_list_head;
-    T work_list_tail;
+    uint64 *work_list_head;
+    uint64 work_list_tail;
 
     // for worker queue
     cuda::atomic<uint32_t, cuda::thread_scope_device> *work_ready;

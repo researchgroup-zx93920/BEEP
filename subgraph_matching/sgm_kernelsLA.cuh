@@ -161,6 +161,13 @@ __global__ void sgm_kernel_pre_encoded_byEdge(
             queue_enqueue(queue, tickets, head, tail, CB, sh.sm_block_id);
         }
         __syncthreads();
-        finalize_count(sh, gh, lh);
+        // finalize_count(sh, gh, lh);
+        // __syncthreads();
+        if (threadIdx.x == 0)
+        {
+            if (sh.sg_count > 0)
+                atomicAdd(gh.counter, sh.sg_count);
+        }
+        __syncthreads();
     }
 }
