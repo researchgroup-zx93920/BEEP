@@ -1281,6 +1281,7 @@ namespace graph
                         eq_head += work_list_size;
                         current_level.freeGPU();
                         node_be.freeGPU();
+                        cudaFree(work_ready);
                         queue_free(queue, tickets, head, tail);
                     }
                     encode_offset.freeGPU();
@@ -1295,17 +1296,17 @@ namespace graph
                     cudaMemcpyToSymbol(MAXDEG, &maxDeg, sizeof(MAXDEG));
                     cudaMemcpyToSymbol(NUMPART, &numPartitions_LD, sizeof(NUMPART));
                     cudaMemcpyToSymbol(PARTSIZE, &partitionSize_LD, sizeof(PARTSIZE));
-                    cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM_LD), sizeof(CBPSM));
-
-                    // auto current_q = (by_ == ByNode) ? current_nq : current_eq;
 
                     cudaOccupancyMaxActiveBlocksPerMultiprocessor(
                         &max_active_blocks,
                         sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>,
                         block_size_LD, 0);
+                    cudaMemcpyToSymbol(CBPSM, &(max_active_blocks), sizeof(CBPSM));
                     max_active_blocks *= num_SMs;
 
                     uint grid_block_size = min(current_nq.count.gdata()[0], max_active_blocks);
+                    cudaMemcpyToSymbol(CB, &(grid_block_size), sizeof(CB));
+
                     Log(debug, "current queue count %u\n", current_nq.count.gdata()[0]);
                     Log(debug, "grid size: %u", grid_block_size);
 
@@ -1329,11 +1330,14 @@ namespace graph
                     gh.current_level = current_level.gdata();
                     gh.adj_enc = node_be.gdata();
 
-                    Log(debug, "queue size: %u", gh.work_list_tail);
+                    queue_init(queue, tickets, head, tail, grid_block_size, dev_);
+                    CUDA_RUNTIME(cudaMalloc((void **)&work_ready, grid_block_size * sizeof(cuda::atomic<uint32_t, cuda::thread_scope_device>)));
+                    CUDA_RUNTIME(cudaMemset((void *)work_ready, 0, grid_block_size * sizeof(cuda::atomic<uint32_t, cuda::thread_scope_device>)));
+                    gh.work_ready = work_ready;
 
                     execKernel((sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>),
                                grid_block_size, block_size_LD, dev_, false,
-                               gh);
+                               gh, queue_caller(queue, tickets, head, tail));
                     // execKernel((sgm_kernel_central_node_function_byNode<T, block_size_LD, partitionSize_LD>),
                     //            grid_block_size, block_size_LD, dev_, false,
                     //            counter.gdata(), work_list_head.gdata(),
@@ -1345,7 +1349,9 @@ namespace graph
                     node_be.freeGPU();
                     current_level.freeGPU();
                     work_list_head.freeGPU();
-                    //}
+                    CUDA_RUNTIME(cudaFree(work_ready));
+                    queue_free(queue, tickets, head, tail);
+
                     // Print bucket stats:
                     std::cout << "\nBucket levels: " << level << " to " << maxDeg
                               << ", nodes/edges: " << current_nq.count.gdata()[0]

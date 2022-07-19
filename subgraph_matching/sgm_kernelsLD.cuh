@@ -6,7 +6,7 @@
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __global__ void sgm_kernel_central_node_function(
-	GLOBAL_HANDLE<T> gh)
+	GLOBAL_HANDLE<T> gh, queue_callee(queue, tickets, head, tail))
 {
 	constexpr T NP = BLOCK_DIM_X / CPARTSIZE;
 	const T wx = threadIdx.x / CPARTSIZE;
@@ -18,6 +18,7 @@ __global__ void sgm_kernel_central_node_function(
 
 	if (threadIdx.x == 0)
 	{
+		sh.root_sm_block_id = sh.sm_block_id = blockIdx.x;
 		sh.state = 0;
 	}
 	__syncthreads();
@@ -25,16 +26,48 @@ __global__ void sgm_kernel_central_node_function(
 	{
 		lh.warpCount = 0;
 
-		init_sm(sh, gh);
-
-		if (sh.state == 100)
-			break;
-		if (lx == 0)
+		if (sh.state == 0)
 		{
-			sh.sg_count[wx] = 0;
-		}
+			init_sm(sh, gh);
 
-		encode(sh, gh);
+			if (sh.state == 1)
+			{
+				if (threadIdx.x == 0)
+					queue_enqueue(queue, tickets, head, tail, CB, sh.sm_block_id);
+				__syncthreads();
+				continue;
+			}
+			// if (sh.state == 100)
+			// 	break;
+			if (lx == 0)
+			{
+				sh.sg_count[wx] = 0;
+			}
+
+			encode(sh, gh);
+		}
+		else if (sh.state == 1)
+		{
+			__syncthreads();
+			if (threadIdx.x == 0)
+			{
+				wait_for_donor(gh.work_ready[sh.sm_block_id], sh.state,
+							   queue_caller(queue, tickets, head, tail));
+			}
+			__syncthreads();
+			continue;
+		}
+		else if (sh.state == 2)
+		{
+			__syncthreads();
+			if (threadIdx.x == 0)
+			{
+				sh.state = 1;
+				queue_enqueue(queue, tickets, head, tail, CB, sh.sm_block_id);
+			}
+			__syncthreads();
+			continue;
+		}
 
 		if (lx == 0)
 			sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
@@ -48,7 +81,18 @@ __global__ void sgm_kernel_central_node_function(
 				T *cl = sh.level_offset + wx * (NUMDIVS * MAXLEVEL);
 				init_stack(sh, gh, partMask, j);
 
-				// get wc?
+				// try dequeue here
+				if (lx == 0 && sh.state == 0)
+				{
+					sh.fork[wx] = false;
+					LD_try_dequeue(sh, gh, j, queue_caller(queue, tickets, head, tail));
+				}
+				__syncwarp(partMask);
+				if (sh.fork[wx])
+					LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
+				__syncwarp(partMask);
+
+				// get wc
 				count_tri(lh, sh, gh, partMask, cl, j);
 
 				check_terminate(lh, sh, partMask);

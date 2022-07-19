@@ -28,8 +28,8 @@ __device__ struct SHARED_HANDLE_LD
 
     // For Worker Queue
     cuda::atomic<uint32_t, cuda::thread_scope_device> *work_ready;
-    T state, root_sm_block_id, sm_block_id, worker_pos, shared_other_sm_block_id;
-    bool fork;
+    T state, root_sm_block_id, sm_block_id, worker_pos, shared_other_sm_block_id[NP];
+    bool fork[NP];
 };
 
 fundef_LD void
@@ -54,7 +54,8 @@ init_sm(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
         }
         else
         {
-            sh.state = 100;
+            // sh.state = 100;
+            sh.state = 1; // 1: Block ready for other work, 100: terminate block
         }
     }
     __syncthreads();
@@ -223,4 +224,34 @@ backtrack(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, const T
         }
     }
     __syncwarp(partMask);
+}
+
+fundef_LD void
+LD_try_dequeue(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh,
+               const T j, queue_callee(queue, tickets, head, tail))
+{
+    constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
+    const T wx = threadIdx.x / CPARTSIZE;
+    if (gh.work_list_head[0] >= gh.work_list_tail)
+        queue_dequeue(queue, tickets, head, tail, CB, sh.fork[wx], sh.worker_pos, N_RECEPIENTS);
+}
+
+fundef_LD void
+LD_do_fork(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh,
+           const T partMask, queue_callee(queue, tickets, head, tail))
+{
+    constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
+    const T wx = threadIdx.x / CPARTSIZE;
+    const T lx = threadIdx.x % CPARTSIZE;
+    // for (T iter = 0; iter < N_RECEPIENTS; iter++)
+    // {
+    if (lx == 0)
+    {
+        queue_wait_ticket(queue, tickets, head, tail, CB, sh.worker_pos, sh.shared_other_sm_block_id[wx]);
+        T other_sm_block_id = sh.shared_other_sm_block_id[wx];
+        gh.work_ready[other_sm_block_id].store(1, cuda::memory_order_release);
+        sh.worker_pos++;
+    }
+    __syncwarp(partMask);
+    // }
 }
