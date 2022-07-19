@@ -5,8 +5,9 @@
 #include "config.cuh"
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
-__global__ void sgm_kernel_central_node_function(
-	GLOBAL_HANDLE<T> gh, queue_callee(queue, tickets, head, tail))
+__launch_bounds__(BLOCK_DIM_X)
+	__global__ void sgm_kernel_central_node_function(
+		GLOBAL_HANDLE<T> gh, queue_callee(queue, tickets, head, tail))
 {
 	constexpr T NP = BLOCK_DIM_X / CPARTSIZE;
 	const T wx = threadIdx.x / CPARTSIZE;
@@ -59,10 +60,98 @@ __global__ void sgm_kernel_central_node_function(
 		}
 		else if (sh.state == 2)
 		{
+			LD_setup_stack_recepient(sh, gh);
+
+			count_tri_block(lh, sh, gh);
+
+			if (KCCOUNT == 3)
+			{
+				if (threadIdx.x == 0 && lh.warpCount > 0)
+					atomicAdd(gh.counter, lh.warpCount);
+			}
+			else
+			{
+				if (lx == 0)
+				{
+					sh.sg_count[wx] = 0;
+					sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
+				}
+				__syncwarp(partMask);
+				while (sh.wtc[wx] < sh.srcLen)
+				{
+					T j = sh.wtc[wx];
+					if (!((sh.level_offset[sh.num_divs_local + j / 32] >> (j % 32)) % 2 == 0))
+					{
+						T *cl = sh.level_offset + wx * (NUMDIVS * MAXLEVEL);
+
+						// init stack --block
+						init_stack_block(sh, gh, cl, j);
+						__syncwarp(partMask);
+
+						compute_intersection<T, CPARTSIZE, true>(
+							lh.warpCount, lx, partMask,
+							sh.num_divs_local, UINT32_MAX, sh.l[wx], sh.to, cl,
+							sh.level_prev_index[wx], sh.encode);
+
+						if (lx == 0)
+						{
+							if (sh.l[wx] + 1 == KCCOUNT)
+								sh.sg_count[wx] += lh.warpCount;
+							else
+							{
+								sh.l[wx]++;
+								sh.level_count[wx][sh.l[wx] - 3] = lh.warpCount;
+								sh.level_index[wx][sh.l[wx] - 3] = 0;
+								sh.level_prev_index[wx][sh.l[wx] - 1] = 0;
+							}
+						}
+						__syncwarp(partMask);
+						while (sh.level_count[wx][sh.l[wx] - 3] > sh.level_index[wx][sh.l[wx] - 3])
+						{
+							get_newIndex(lh, sh, partMask, cl);
+							compute_intersection<T, CPARTSIZE, true>(
+								lh.warpCount, lx, partMask, sh.num_divs_local,
+								sh.newIndex[wx], sh.l[wx], sh.to, cl,
+								sh.level_prev_index[wx], sh.encode);
+
+							if (lx == 0)
+							{
+								if (sh.l[wx] + 1 == KCCOUNT)
+									sh.sg_count[wx] += lh.warpCount;
+								else if (sh.l[wx] + 1 < KCCOUNT) //&& warpCount >= KCCOUNT - l[wx])
+								{
+									(sh.l[wx])++;
+									sh.level_count[wx][sh.l[wx] - 3] = lh.warpCount;
+									sh.level_index[wx][sh.l[wx] - 3] = 0;
+									sh.level_prev_index[wx][sh.l[wx] - 1] = 0;
+									T idx = sh.level_prev_index[wx][sh.l[wx] - 2] - 1;
+									cl[idx / 32] &= ~(1 << (idx & 0x1F));
+								}
+
+								while (sh.l[wx] > 4 && sh.level_index[wx][sh.l[wx] - 3] >= sh.level_count[wx][sh.l[wx] - 3])
+								{
+									(sh.l[wx])--;
+									T idx = sh.level_prev_index[wx][sh.l[wx] - 1] - 1;
+									cl[idx / 32] |= 1 << (idx & 0x1F);
+								}
+							}
+							__syncwarp(partMask);
+						}
+						__syncwarp(partMask);
+					}
+					if (lx == 0)
+						sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
+					__syncwarp(partMask);
+				}
+				if (lx == 0 && sh.sg_count[wx] > 0)
+				{
+					atomicAdd(gh.counter, sh.sg_count[wx]);
+				}
+			}
 			__syncthreads();
 			if (threadIdx.x == 0)
 			{
-				sh.state = 1;
+				sh.state = 1; // done with donated task, back to inactive state
 				queue_enqueue(queue, tickets, head, tail, CB, sh.sm_block_id);
 			}
 			__syncthreads();
@@ -89,7 +178,15 @@ __global__ void sgm_kernel_central_node_function(
 				}
 				__syncwarp(partMask);
 				if (sh.fork[wx])
-					LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
+				{
+					if (lx == 0)
+					{
+						LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
+						sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
+					}
+					__syncwarp(partMask);
+					continue;
+				}
 				__syncwarp(partMask);
 
 				// get wc

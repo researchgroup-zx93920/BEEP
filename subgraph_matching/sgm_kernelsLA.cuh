@@ -4,11 +4,12 @@
 #include "../include/queue.cuh"
 
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
-__global__ void sgm_kernel_compute_encoding(
-    const graph::COOCSRGraph_d<T> g,
-    const graph::GraphQueue_d<T, bool> current,
-    const T head,
-    T *adj_enc, int *offset)
+__launch_bounds__(BLOCK_DIM_X)
+    __global__ void sgm_kernel_compute_encoding(
+        const graph::COOCSRGraph_d<T> g,
+        const graph::GraphQueue_d<T, bool> current,
+        const T head,
+        T *adj_enc, int *offset)
 {
     constexpr T numPartitions = BLOCK_DIM_X / CPARTSIZE;
     const int wx = threadIdx.x / CPARTSIZE; // which warp in thread block

@@ -340,9 +340,9 @@ fundef void do_fork(GLOBAL_HANDLE<T> &gh,
         }
         __syncthreads();
 
-        // pass one chunk of candidates and reset in current block
         if (threadIdx.x == 0)
         {
+            // pass one chunk of candidates and reset in current block
             other_level_offset[sh.num_divs_local + j / 32 + iter + 1 + sh.dequeue_offset] =
                 sh.cl[sh.num_divs_local + j / 32 + iter + 1 + sh.dequeue_offset];
             sh.cl[sh.num_divs_local + j / 32 + iter + 1 + sh.dequeue_offset] = 0;

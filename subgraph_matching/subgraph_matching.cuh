@@ -1297,6 +1297,11 @@ namespace graph
                     cudaMemcpyToSymbol(NUMPART, &numPartitions_LD, sizeof(NUMPART));
                     cudaMemcpyToSymbol(PARTSIZE, &partitionSize_LD, sizeof(PARTSIZE));
 
+                    int temp1, temp2;
+                    cudaOccupancyMaxPotentialBlockSize(&temp1, &temp2,
+                                                       sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>);
+                    Log(debug, "%d, %d", temp1, temp2);
+
                     cudaOccupancyMaxActiveBlocksPerMultiprocessor(
                         &max_active_blocks,
                         sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>,
@@ -1316,10 +1321,12 @@ namespace graph
                     GPUArray<T> node_be("Temp level Counter", AllocationTypeEnum::gpu, encode_size, dev_);
                     GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
                     GPUArray<uint64> work_list_head("Global work stealing list", AllocationTypeEnum::gpu, 1, dev_);
+                    GPUArray<MessageBlock> messages("Messages for sharing info", AllocationTypeEnum::gpu, grid_block_size, dev_);
 
                     CUDA_RUNTIME(cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T)));
                     CUDA_RUNTIME(cudaMemset(current_level.gdata(), 0, level_size * sizeof(T)));
                     CUDA_RUNTIME(cudaMemset(work_list_head.gdata(), 0, sizeof(uint64)));
+                    CUDA_RUNTIME(cudaMemset(messages.gdata(), 0, grid_block_size * sizeof(MessageBlock)));
 
                     GLOBAL_HANDLE<T> gh;
                     gh.counter = counter.gdata();
@@ -1329,6 +1336,7 @@ namespace graph
                     gh.work_list_tail = gh.current.count[0];
                     gh.current_level = current_level.gdata();
                     gh.adj_enc = node_be.gdata();
+                    gh.Message = messages.gdata();
 
                     queue_init(queue, tickets, head, tail, grid_block_size, dev_);
                     CUDA_RUNTIME(cudaMalloc((void **)&work_ready, grid_block_size * sizeof(cuda::atomic<uint32_t, cuda::thread_scope_device>)));
