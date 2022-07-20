@@ -46,6 +46,61 @@ __launch_bounds__(BLOCK_DIM_X)
 			}
 
 			encode(sh, gh);
+			if (lx == 0)
+				sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
+			__syncwarp(partMask);
+
+			while (sh.wtc[wx] < sh.srcLen)
+			{
+				T j = sh.wtc[wx];
+				if (!(SYMNODE_PTR[2] == 1 && j < (sh.srcSplit - sh.srcStart)))
+				{
+					T *cl = sh.level_offset + wx * (NUMDIVS * MAXLEVEL);
+					init_stack(sh, gh, partMask, j);
+
+					// try dequeue here
+					if (lx == 0 && sh.state == 0)
+					{
+						sh.fork[wx] = false;
+						LD_try_dequeue(sh, gh, j, queue_caller(queue, tickets, head, tail));
+					}
+					__syncwarp(partMask);
+					if (sh.fork[wx])
+					{
+						if (lx == 0)
+						{
+							LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
+							sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
+						}
+						__syncwarp(partMask);
+						continue;
+					}
+					__syncwarp(partMask);
+
+					// get wc
+					count_tri(lh, sh, gh, partMask, cl, j);
+
+					check_terminate(lh, sh, partMask);
+					while (sh.level_index[wx][sh.l[wx] - 3] < sh.level_count[wx][sh.l[wx] - 3])
+					{
+						get_newIndex(lh, sh, partMask, cl);
+						compute_intersection<T, CPARTSIZE, true>(
+							lh.warpCount, lx, partMask,
+							sh.num_divs_local, sh.newIndex[wx], sh.l[wx],
+							sh.to, cl, sh.level_prev_index[wx], sh.encode);
+
+						backtrack(lh, sh, partMask, cl);
+					}
+				}
+				if (lx == 0)
+					sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
+				__syncwarp(partMask);
+			}
+			if (lx == 0 && sh.sg_count[wx] > 0)
+			{
+				atomicAdd(gh.counter, sh.sg_count[wx]);
+			}
+			__syncthreads();
 		}
 		else if (sh.state == 1)
 		{
@@ -157,62 +212,6 @@ __launch_bounds__(BLOCK_DIM_X)
 			__syncthreads();
 			continue;
 		}
-
-		if (lx == 0)
-			sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
-		__syncwarp(partMask);
-
-		while (sh.wtc[wx] < sh.srcLen)
-		{
-			T j = sh.wtc[wx];
-			if (!(SYMNODE_PTR[2] == 1 && j < (sh.srcSplit - sh.srcStart)))
-			{
-				T *cl = sh.level_offset + wx * (NUMDIVS * MAXLEVEL);
-				init_stack(sh, gh, partMask, j);
-
-				// try dequeue here
-				if (lx == 0 && sh.state == 0)
-				{
-					sh.fork[wx] = false;
-					LD_try_dequeue(sh, gh, j, queue_caller(queue, tickets, head, tail));
-				}
-				__syncwarp(partMask);
-				if (sh.fork[wx])
-				{
-					if (lx == 0)
-					{
-						LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
-						sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
-					}
-					__syncwarp(partMask);
-					continue;
-				}
-				__syncwarp(partMask);
-
-				// get wc
-				count_tri(lh, sh, gh, partMask, cl, j);
-
-				check_terminate(lh, sh, partMask);
-				while (sh.level_index[wx][sh.l[wx] - 3] < sh.level_count[wx][sh.l[wx] - 3])
-				{
-					get_newIndex(lh, sh, partMask, cl);
-					compute_intersection<T, CPARTSIZE, true>(
-						lh.warpCount, lx, partMask,
-						sh.num_divs_local, sh.newIndex[wx], sh.l[wx],
-						sh.to, cl, sh.level_prev_index[wx], sh.encode);
-
-					backtrack(lh, sh, partMask, cl);
-				}
-			}
-			if (lx == 0)
-				sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
-			__syncwarp(partMask);
-		}
-		if (lx == 0 && sh.sg_count[wx] > 0)
-		{
-			atomicAdd(gh.counter, sh.sg_count[wx]);
-		}
-		__syncthreads();
 	}
 }
 
