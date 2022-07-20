@@ -1291,6 +1291,7 @@ namespace graph
                 {
                     maxDeg = level + span < maxDeg ? level + span : maxDeg;
                     num_divs = (maxDeg + dv - 1) / dv;
+                    Log(debug, "max-degree: %u", maxDeg);
                     Log(debug, "num-divs %u", num_divs);
                     cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
                     cudaMemcpyToSymbol(MAXDEG, &maxDeg, sizeof(MAXDEG));
@@ -1315,8 +1316,10 @@ namespace graph
                     Log(debug, "current queue count %u\n", current_nq.count.gdata()[0]);
                     Log(debug, "grid size: %u", grid_block_size);
 
-                    uint64 encode_size = grid_block_size * maxDeg * num_divs;
-                    uint64 level_size = grid_block_size * max_qDegree * num_divs * numPartitions_LD;
+                    uint64 encode_size = (uint64)grid_block_size * maxDeg * num_divs;
+                    uint64 level_size = (uint64)grid_block_size * max_qDegree * num_divs * numPartitions_LD;
+
+                    Log(debug, "%ux%ux%u=%lu", grid_block_size, maxDeg, num_divs, encode_size);
 
                     GPUArray<T> node_be("Temp level Counter", AllocationTypeEnum::gpu, encode_size, dev_);
                     GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
@@ -1342,6 +1345,10 @@ namespace graph
                     CUDA_RUNTIME(cudaMalloc((void **)&work_ready, grid_block_size * sizeof(cuda::atomic<uint32_t, cuda::thread_scope_device>)));
                     CUDA_RUNTIME(cudaMemset((void *)work_ready, 0, grid_block_size * sizeof(cuda::atomic<uint32_t, cuda::thread_scope_device>)));
                     gh.work_ready = work_ready;
+
+                    size_t free, total;
+                    cuMemGetInfo(&free, &total);
+                    Log(debug, "Free mem: %f GB, Total mem: %f GB", (free * 1.0) / (1E9), (total * 1.0) / (1E9));
 
                     execKernel((sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>),
                                grid_block_size, block_size_LD, dev_, false,

@@ -13,17 +13,3 @@
 
 #define SCHEDULING true
 // #define SCHEDULING false
-
-// template <typename T>
-// struct SHARED_HANDLE
-// {
-//     T level_index[DEPTH];
-//     T level_count[DEPTH];
-//     T level_prec_index[DEPTH];
-//     uint64 sg_count;
-//     T lvl;
-//     T src, srcStart, srcLen, srcSplit, dstIdx;
-
-//     T num_divs_local, *level_offset, *reuse_offset, *encode;
-//     T to[BLCOK_DIM_X], newIndex;
-// };

@@ -55,7 +55,8 @@ init_sm(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
         else
         {
             // sh.state = 100;
-            sh.state = 1; // 1: Block ready for other work, 100: terminate block
+            // 1: Block ready for other work, 100: terminate block
+            sh.state = 1;
         }
     }
     __syncthreads();
