@@ -59,22 +59,22 @@ __launch_bounds__(BLOCK_DIM_X)
 					init_stack(sh, gh, partMask, j);
 
 					// try dequeue here
-					// if (lx == 0 && sh.state == 0)
-					// {
-					// 	sh.fork[wx] = false;
-					// 	LD_try_dequeue(sh, gh, j, queue_caller(queue, tickets, head, tail));
-					// }
-					// __syncwarp(partMask);
-					// if (sh.fork[wx])
-					// {
-					// 	if (lx == 0)
-					// 	{
-					// 		LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
-					// 		sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
-					// 	}
-					// 	__syncwarp(partMask);
-					// 	continue;
-					// }
+					if (lx == 0 && sh.state == 0)
+					{
+						sh.fork[wx] = false;
+						LD_try_dequeue(sh, gh, j, queue_caller(queue, tickets, head, tail));
+					}
+					__syncwarp(partMask);
+					if (sh.fork[wx])
+					{
+						if (lx == 0)
+						{
+							LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
+							sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
+						}
+						__syncwarp(partMask);
+						continue;
+					}
 					__syncwarp(partMask);
 
 					// get wc
@@ -115,7 +115,7 @@ __launch_bounds__(BLOCK_DIM_X)
 		}
 		else if (sh.state == 2)
 		{
-			/*LD_setup_stack_recepient(sh, gh);
+			LD_setup_stack_recepient(sh, gh);
 
 			count_tri_block(lh, sh, gh);
 
@@ -202,7 +202,8 @@ __launch_bounds__(BLOCK_DIM_X)
 				{
 					atomicAdd(gh.counter, sh.sg_count[wx]);
 				}
-			}*/
+			}
+
 			__syncthreads();
 			if (threadIdx.x == 0)
 			{
