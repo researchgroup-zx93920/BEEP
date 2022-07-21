@@ -105,7 +105,7 @@ init_stack(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const
     __syncwarp(partMask);
     if (lx == 1)
     {
-        sh.l[wx] = 3; // i.e. at level 2	l[wx] is +1 at all places
+        sh.l[wx] = 2;
         sh.level_prev_index[wx][0] = sh.srcSplit - sh.srcStart + 1;
         sh.level_prev_index[wx][1] = j + 1;
     }
@@ -147,15 +147,15 @@ count_tri(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
     lh.warpCount = 0;
     for (T k = lx; k < sh.num_divs_local; k += CPARTSIZE)
     {
-        cl[k] = get_mask(sh.srcLen, k) & unset_mask(j, k); // unset mask returns all ones except at bit j
-                                                           // if (j == 32 * (srcLen / 32) + 1)
-        if (QEDGE_PTR[3] - QEDGE_PTR[2] == 2)              // i.e. if connected to both nodes at level 0 and 1
+        cl[k] = get_mask(sh.srcLen, k) & unset_mask(j, k);      // unset mask returns all ones except at bit j
+                                                                // if (j == 32 * (srcLen / 32) + 1)
+        if (QEDGE_PTR[sh.l[wx] + 1] - QEDGE_PTR[sh.l[wx]] == 2) // i.e. if connected to both nodes at level 0 and 1
             sh.to[threadIdx.x] = sh.encode[j * sh.num_divs_local + k];
         else
             sh.to[threadIdx.x] = cl[k]; // if only connected to central node, everything is a candidate.
 
         // Remove Redundancies
-        for (T sym_idx = SYMNODE_PTR[sh.l[wx] - 1]; sym_idx < SYMNODE_PTR[sh.l[wx]]; sym_idx++)
+        for (T sym_idx = SYMNODE_PTR[sh.l[wx]]; sym_idx < SYMNODE_PTR[sh.l[wx] + 1]; sym_idx++)
         {
             if (SYMNODE[sym_idx] > 0)
             {
@@ -163,7 +163,7 @@ count_tri(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
             }
         }
         // to[threadIdx.x] &= ~EP_mask[1 * num_divs_local + k];
-        cl[1 * sh.num_divs_local + k] = sh.to[threadIdx.x]; // candidates for level 2
+        cl[(sh.l[wx] - 1) * sh.num_divs_local + k] = sh.to[threadIdx.x]; // candidates for level 2
         lh.warpCount += __popc(sh.to[threadIdx.x]);
     }
     reduce_part<T, CPARTSIZE>(partMask, lh.warpCount);
@@ -207,14 +207,15 @@ check_terminate(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, c
     const T lx = threadIdx.x % CPARTSIZE;
     if (lx == 0)
     {
+        sh.l[wx]++;
         if (sh.l[wx] == KCCOUNT - LUNMAT) // If reached last level
         {
             sh.sg_count[wx] += lh.warpCount; // code reaches here only if counting triangles
         }
         else
         {
-            sh.level_count[wx][sh.l[wx] - 3] = lh.warpCount; // since 2 levels already finalized and l[wx] indexed from 1
-            sh.level_index[wx][sh.l[wx] - 3] = 0;            // This index to iterated from 0 to warpCount
+            sh.level_count[wx][sh.l[wx]] = lh.warpCount; // since 2 levels already finalized and l[wx] indexed from 1
+            sh.level_index[wx][sh.l[wx]] = 0;            // This index to iterated from 0 to warpCount
         }
     }
     __syncwarp(partMask); // all triangles found till here!
@@ -243,7 +244,7 @@ get_newIndex(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, cons
         sh.newIndex[wx] = 32 * maskBlock + sh.newIndex[wx] - 1; // actual new index
 
         sh.level_prev_index[wx][sh.l[wx] - 1] = sh.newIndex[wx] + 1; // level prev index is numbered from 1
-        sh.level_index[wx][sh.l[wx] - 3]++;
+        sh.level_index[wx][sh.l[wx]]++;
     }
     __syncwarp(partMask);
 }
@@ -263,16 +264,16 @@ backtrack(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, const T
         }
         else if (sh.l[wx] + 1 < KCCOUNT - LUNMAT) // Not at last level yet
         {
-            (sh.l[wx])++;                                    // go further
-            sh.level_count[wx][sh.l[wx] - 3] = lh.warpCount; // save level_count (warpcount updated during compute intersection)
-            sh.level_index[wx][sh.l[wx] - 3] = 0;            // initialize level index
-            sh.level_prev_index[wx][sh.l[wx] - 1] = 0;       // initialize level previous index
+            (sh.l[wx])++;                                // go further
+            sh.level_count[wx][sh.l[wx]] = lh.warpCount; // save level_count (warpcount updated during compute intersection)
+            sh.level_index[wx][sh.l[wx]] = 0;            // initialize level index
+            sh.level_prev_index[wx][sh.l[wx] - 1] = 0;   // initialize level previous index
 
             T idx = sh.level_prev_index[wx][sh.l[wx] - 2] - 1; //-1 since 1 is always added to level previous index
             cl[idx / 32] &= ~(1 << (idx & 0x1F));              // idx & 0x1F gives remainder after dividing by 32
                                                                // this puts the newindex at correct place in current level
         }
-        while (sh.l[wx] > 3 && sh.level_index[wx][sh.l[wx] - 3] >= sh.level_count[wx][sh.l[wx] - 3]) // reset memory since will be going out of while loop (i.e. backtracking)
+        while (sh.l[wx] > 3 && sh.level_index[wx][sh.l[wx]] >= sh.level_count[wx][sh.l[wx]]) // reset memory since will be going out of while loop (i.e. backtracking)
         {
             (sh.l[wx])--;
             T idx = sh.level_prev_index[wx][sh.l[wx] - 1] - 1;
@@ -309,6 +310,29 @@ LD_do_fork(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const
         gh.Message[other_sm_block_id].dstIdx_ = j;
         gh.Message[other_sm_block_id].encode_ = sh.encode;
         gh.Message[other_sm_block_id].root_sm_block_id_ = sh.sm_block_id;
+        gh.Message[other_sm_block_id].level_ = sh.l[wx];
+
+        gh.work_ready[other_sm_block_id].store(1, cuda::memory_order_release);
+        sh.worker_pos[wx]++;
+    }
+}
+
+fundef_LD void
+LD_do_fork_L2(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const T j,
+              queue_callee(queue, tickets, head, tail))
+{
+    constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
+    const T wx = threadIdx.x / CPARTSIZE;
+    const T lx = threadIdx.x % CPARTSIZE;
+    for (T iter = 0; iter < N_RECEPIENTS; iter++)
+    {
+        queue_wait_ticket(queue, tickets, head, tail, CB, sh.worker_pos[wx], sh.shared_other_sm_block_id[wx]);
+        T other_sm_block_id = sh.shared_other_sm_block_id[wx];
+        gh.Message[other_sm_block_id].src_ = sh.src;
+        gh.Message[other_sm_block_id].dstIdx_ = j;
+        gh.Message[other_sm_block_id].encode_ = sh.encode;
+        gh.Message[other_sm_block_id].root_sm_block_id_ = sh.sm_block_id;
+        gh.Message[other_sm_block_id].level_ = sh.l[wx];
 
         gh.work_ready[other_sm_block_id].store(1, cuda::memory_order_release);
         sh.worker_pos[wx]++;

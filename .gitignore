@@ -16,3 +16,4 @@ icount_execs/**
 *.out
 sections/**
 target/**
+profiling/**

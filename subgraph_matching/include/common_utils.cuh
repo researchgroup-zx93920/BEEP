@@ -21,6 +21,7 @@ struct MessageBlock
     unsigned int dstIdx_;
     unsigned int *encode_;
     unsigned int root_sm_block_id_;
+    unsigned int level_;
 };
 
 template <typename T>

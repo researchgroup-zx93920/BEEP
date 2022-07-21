@@ -3,7 +3,7 @@
 #include "include/common_utils.cuh"
 
 #ifdef TIMER
-#include "sgm_kernelsLA_timer.cuh"
+// #include "sgm_kernelsLA_timer.cuh"
 #include "sgm_kernelsLD_timer.cuh"
 #else
 #include "sgm_kernelsLD.cuh"
@@ -856,6 +856,7 @@ namespace graph
                 Log(debug, "sort%d TIME: %f s", 2 - (int)first, time_);
 
                 GPUArray<mapping<T>> src_mapping;
+                int max_active_blocks = 0;
                 if (!first)
                 {
                     uint count = current_nq.count.gdata()[0]; // grid size for encoding kernel
@@ -871,7 +872,7 @@ namespace graph
                     Log(debug, "map1 TIME: %f s", time_);
                 }
 
-                if (maxDeg > bound_LD)
+                /*if (maxDeg > bound_LD)
                 {
 
                     T nnodes = current_nq.count.gdata()[0];
@@ -943,7 +944,6 @@ namespace graph
                         nq_head += node_grid_size;
                         T work_list_size = (eq_head > 0) ? (Degree_Scan.gdata()[nq_head - 1] - Degree_Scan.gdata()[nq_head - 1 - node_grid_size]) : Degree_Scan.gdata()[nq_head - 1] - 0;
 
-                        int max_active_blocks = 0;
                         cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_active_blocks,
                                                                       sgm_kernel_pre_encoded_byEdge<T, block_size_HD>, block_size_HD,
                                                                       0);
@@ -1007,72 +1007,102 @@ namespace graph
                     Log(info, "HD process TIME: %f s", HD_process_time);
                 }
                 else
+                {*/
+                maxDeg = level + span < maxDeg ? level + span : maxDeg;
+
+                cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
+                cudaMemcpyToSymbol(MAXDEG, &maxDeg, sizeof(MAXDEG));
+                cudaMemcpyToSymbol(NUMPART, &numPartitions_LD, sizeof(NUMPART));
+                cudaMemcpyToSymbol(PARTSIZE, &partitionSize_LD, sizeof(PARTSIZE));
+
+                int temp1, temp2;
+                cudaOccupancyMaxPotentialBlockSize(&temp1, &temp2,
+                                                   sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>);
+                Log(debug, "%d, %d", temp1, temp2);
+
+                cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+                    &max_active_blocks,
+                    sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>,
+                    block_size_LD, 0);
+                cudaMemcpyToSymbol(CBPSM, &(max_active_blocks), sizeof(CBPSM));
+                max_active_blocks *= num_SMs;
+
+                uint grid_block_size = min(current_nq.count.gdata()[0], max_active_blocks);
+                cudaMemcpyToSymbol(CB, &(grid_block_size), sizeof(CB));
+
+                uint64 encode_size = (uint64)grid_block_size * maxDeg * num_divs;
+                uint64 level_size = (uint64)grid_block_size * max_qDegree * num_divs * numPartitions_LD;
+
+                GPUArray<T> node_be("Temp level Counter", AllocationTypeEnum::gpu, encode_size, dev_);
+                GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
+                GPUArray<uint64> work_list_head("Global work stealing list", AllocationTypeEnum::gpu, 1, dev_);
+                GPUArray<MessageBlock> messages("Messages for sharing info", AllocationTypeEnum::gpu, grid_block_size, dev_);
+                GPUArray<double> block_util("block active/inactive ratio", AllocationTypeEnum::unified, grid_block_size, dev_);
+
+                CUDA_RUNTIME(cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T)));
+                CUDA_RUNTIME(cudaMemset(current_level.gdata(), 0, level_size * sizeof(T)));
+                CUDA_RUNTIME(cudaMemset(work_list_head.gdata(), 0, sizeof(uint64)));
+                CUDA_RUNTIME(cudaMemset(messages.gdata(), 0, grid_block_size * sizeof(MessageBlock)));
+                CUDA_RUNTIME(cudaMemset(block_util.gdata(), 0, grid_block_size * sizeof(double)));
+                CUDA_RUNTIME(cudaMemset(SM_times.gdata(), 0, num_SMs * sizeof(Counters)));
+
+                GLOBAL_HANDLE<T> gh;
+                gh.counter = counter.gdata();
+                gh.g = dataGraph;
+                gh.current = current_nq.device_queue->gdata()[0];
+                gh.work_list_head = work_list_head.gdata();
+                gh.work_list_tail = gh.current.count[0];
+                gh.current_level = current_level.gdata();
+                gh.adj_enc = node_be.gdata();
+                gh.Message = messages.gdata();
+
+                queue_init(queue, tickets, head, tail, grid_block_size, dev_);
+                CUDA_RUNTIME(cudaMalloc((void **)&work_ready, grid_block_size * sizeof(cuda::atomic<uint32_t, cuda::thread_scope_device>)));
+                CUDA_RUNTIME(cudaMemset((void *)work_ready, 0, grid_block_size * sizeof(cuda::atomic<uint32_t, cuda::thread_scope_device>)));
+                gh.work_ready = work_ready;
+
+                cuMemGetInfo(&free, &total);
+                Log(debug, "Free mem: %f GB, Total mem: %f GB", (free * 1.0) / (1E9), (total * 1.0) / (1E9));
+
+                execKernel((sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>),
+                           grid_block_size, block_size_LD, dev_, false,
+                           SM_times.gdata(), block_util.gdata(),
+                           gh, queue_caller(queue, tickets, head, tail));
+
+                // print_SM_counters(SM_times.gdata(), SM_nodes.gdata());
+                // Log(info, "SM active times");
+                // for (int sm = 0; sm < num_SMs; ++sm)
+                // {
+                //     std::cout << SM_times.gdata()[sm].totalTime[ACTIVE] << std::endl;
+                // }
+
+                Log(info, "\n\n SM utilization");
+                uint64 ttotal = 0;
+                double average;
+                for (int sm = 0; sm < num_SMs; ++sm)
                 {
-                    uint oriented_maxDeg = oriented_max_dDegree.gdata()[0];
-                    maxDeg = level + span < maxDeg ? level + span : maxDeg;
-
-                    cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
-                    cudaMemcpyToSymbol(ORIENTED_MAXDEG, &oriented_maxDeg, sizeof(ORIENTED_MAXDEG));
-                    cudaMemcpyToSymbol(MAXDEG, &maxDeg, sizeof(MAXDEG));
-                    cudaMemcpyToSymbol(NUMPART, &numPartitions_LD, sizeof(NUMPART));
-                    cudaMemcpyToSymbol(PARTSIZE, &partitionSize_LD, sizeof(PARTSIZE));
-                    cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM_LD), sizeof(CBPSM));
-                    CUDA_RUNTIME(cudaMemset(d_bitmap_states.gdata(), 0, num_SMs * conc_blocks_per_SM_LD * sizeof(T)));
-                    auto current_q = (by_ == ByNode) ? current_nq : current_eq;
-                    uint64 numBlock = num_SMs * conc_blocks_per_SM_LD;
-                    bool persistant = true;
-                    if (current_nq.count.gdata()[0] < numBlock)
-                    {
-                        numBlock = current_nq.count.gdata()[0];
-                        persistant = false;
-                    }
-
-                    uint64 encode_size = numBlock * maxDeg * num_divs;
-                    uint64 level_size = numBlock * max_qDegree * num_divs * numPartitions_LD;
-
-                    GPUArray<T> node_be("Temp level Counter", AllocationTypeEnum::gpu, encode_size, dev_);
-                    GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
-                    GPUArray<T> reuse("Intersection storage for reuse", AllocationTypeEnum::gpu, level_size, dev_);
-
-                    CUDA_RUNTIME(cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T)));
-                    CUDA_RUNTIME(cudaMemset(current_level.gdata(), 0, level_size * sizeof(T)));
-                    CUDA_RUNTIME(cudaMemset(reuse.gdata(), 0, level_size * sizeof(T)));
-                    CUDA_RUNTIME(cudaMemset(per_node_count.gdata(), 0, dataGraph.numNodes * sizeof(T)));
-                    CUDA_RUNTIME(cudaMemset(intersection_count.gdata(), 0, sizeof(uint64)));
-
-                    auto grid_block_size = current_nq.count.gdata()[0];
-
-                    CUDA_RUNTIME(cudaMemset(SM_times.gdata(), 0, num_SMs * sizeof(Counters)));
-                    CUDA_RUNTIME(cudaMemset(SM_nodes.gdata(), 0, num_SMs * sizeof(uint64)));
-
-                    if (persistant)
-                    {
-                        execKernel((sgm_kernel_central_node_base_binary_persistant<T, block_size_LD, partitionSize_LD>),
-                                   grid_block_size, block_size_LD, dev_, false,
-                                   counter.gdata(), per_node_count.gdata(), intersection_count.gdata(),
-                                   dataGraph, current_q.device_queue->gdata()[0],
-                                   current_level.gdata(), reuse.gdata(),
-                                   d_bitmap_states.gdata(), node_be.gdata(),
-                                   SM_times.gdata(), SM_nodes.gdata(),
-                                   by_ == ByNode);
-                    }
-                    else
-                    {
-                        execKernel((sgm_kernel_central_node_base_binary<T, block_size_LD, partitionSize_LD>),
-                                   grid_block_size, block_size_LD, dev_, false,
-                                   counter.gdata(), per_node_count.gdata(), intersection_count.gdata(),
-                                   dataGraph, current_q.device_queue->gdata()[0],
-                                   current_level.gdata(), reuse.gdata(), node_be.gdata(),
-                                   SM_times.gdata(), SM_nodes.gdata(),
-                                   by_ == ByNode);
-                    }
-
-                    // print_SM_counters(SM_times.gdata(), SM_nodes.gdata());
-                    // cleanup
-                    node_be.freeGPU();
-                    reuse.freeGPU();
-                    current_level.freeGPU();
+                    ttotal += SM_times.gdata()[sm].totalTime[ACTIVE];
                 }
+                average = (ttotal * 1.0) / num_SMs;
+                for (int sm = 0; sm < num_SMs; ++sm)
+                {
+                    std::cout << (SM_times.gdata()[sm].totalTime[ACTIVE] * 1.0) / average << std::endl;
+                }
+
+                Log(info, "\n\n block utilization");
+                for (int b = 0; b < grid_block_size; ++b)
+                {
+                    std::cout << block_util.gdata()[b] << std::endl;
+                }
+
+                // cleanup
+                node_be.freeGPU();
+                current_level.freeGPU();
+                work_list_head.freeGPU();
+                messages.freeGPU();
+                CUDA_RUNTIME(cudaFree(work_ready));
+                queue_free(queue, tickets, head, tail);
+                // }
 
                 // Print bucket stats:
                 std::cout << "Bucket levels: " << level << " to " << maxDeg
@@ -1319,8 +1349,6 @@ namespace graph
                     uint64 encode_size = (uint64)grid_block_size * maxDeg * num_divs;
                     uint64 level_size = (uint64)grid_block_size * max_qDegree * num_divs * numPartitions_LD;
 
-                    Log(debug, "%ux%ux%u=%lu", grid_block_size, maxDeg, num_divs, encode_size);
-
                     GPUArray<T> node_be("Temp level Counter", AllocationTypeEnum::gpu, encode_size, dev_);
                     GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
                     GPUArray<uint64> work_list_head("Global work stealing list", AllocationTypeEnum::gpu, 1, dev_);
@@ -1364,6 +1392,7 @@ namespace graph
                     node_be.freeGPU();
                     current_level.freeGPU();
                     work_list_head.freeGPU();
+                    messages.freeGPU();
                     CUDA_RUNTIME(cudaFree(work_ready));
                     queue_free(queue, tickets, head, tail);
 

@@ -59,29 +59,29 @@ __launch_bounds__(BLOCK_DIM_X)
 					init_stack(sh, gh, partMask, j);
 
 					// try dequeue here
-					if (lx == 0 && sh.state == 0)
-					{
-						sh.fork[wx] = false;
-						LD_try_dequeue(sh, gh, j, queue_caller(queue, tickets, head, tail));
-					}
-					__syncwarp(partMask);
-					if (sh.fork[wx])
-					{
-						if (lx == 0)
-						{
-							LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
-							sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
-						}
-						__syncwarp(partMask);
-						continue;
-					}
-					__syncwarp(partMask);
+					// if (lx == 0 && sh.state == 0)
+					// {
+					// 	sh.fork[wx] = false;
+					// 	LD_try_dequeue(sh, gh, j, queue_caller(queue, tickets, head, tail));
+					// }
+					// __syncwarp(partMask);
+					// if (sh.fork[wx])
+					// {
+					// 	if (lx == 0)
+					// 	{
+					// 		LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
+					// 		sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
+					// 	}
+					// 	__syncwarp(partMask);
+					// 	continue;
+					// }
+					// __syncwarp(partMask);
 
 					// get wc
 					count_tri(lh, sh, gh, partMask, cl, j);
 
 					check_terminate(lh, sh, partMask);
-					while (sh.level_index[wx][sh.l[wx] - 3] < sh.level_count[wx][sh.l[wx] - 3])
+					while (sh.level_index[wx][sh.l[wx]] < sh.level_count[wx][sh.l[wx]])
 					{
 						get_newIndex(lh, sh, partMask, cl);
 						compute_intersection<T, CPARTSIZE, true>(
@@ -111,7 +111,6 @@ __launch_bounds__(BLOCK_DIM_X)
 							   queue_caller(queue, tickets, head, tail));
 			}
 			__syncthreads();
-			continue;
 		}
 		else if (sh.state == 2)
 		{
@@ -211,11 +210,14 @@ __launch_bounds__(BLOCK_DIM_X)
 				queue_enqueue(queue, tickets, head, tail, CB, sh.sm_block_id);
 			}
 			__syncthreads();
-			continue;
+		}
+		else if (sh.state == 3)
+		{
 		}
 	}
 }
 
+#pragma region
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __global__ void sgm_kernel_central_node_function_byNode(
 	uint64 *counter, uint64 *work_list_head,
@@ -323,9 +325,9 @@ __global__ void sgm_kernel_central_node_function_byNode(
 				__syncwarp(partMask);
 				if (lx == 1)
 				{
-					l[wx] = 3; // i.e. at level 2	l[wx] is +1 at all places
-					level_prev_index[wx][0] = srcSplit - srcStart + 1;
-					level_prev_index[wx][1] = j + 1;
+					l[wx] = 2;
+					level_prev_index[wx][0] = srcSplit - srcStart + 1; // possible position of src (L0)
+					level_prev_index[wx][1] = j + 1;				   // L1 node
 				}
 				__syncwarp(partMask);
 
@@ -333,15 +335,15 @@ __global__ void sgm_kernel_central_node_function_byNode(
 				uint64 warpCount = 0; // level 2 reached (base level being 0)
 				for (T k = lx; k < num_divs_local; k += CPARTSIZE)
 				{
-					cl[k] = get_mask(srcLen, k) & unset_mask(j, k); // unset mask returns all ones except at bit j
-																	// if (j == 32 * (srcLen / 32) + 1)
-					if (QEDGE_PTR[3] - QEDGE_PTR[2] == 2)			// i.e. if connected to both nodes at level 0 and 1
+					cl[k] = get_mask(srcLen, k) & unset_mask(j, k);	  // unset mask returns all ones except at bit j
+																	  // if (j == 32 * (srcLen / 32) + 1)
+					if (QEDGE_PTR[l[wx] + 1] - QEDGE_PTR[l[wx]] == 2) // i.e. if connected to both nodes at level 0 and 1
 						to[threadIdx.x] = encode[j * num_divs_local + k];
 					else
 						to[threadIdx.x] = cl[k]; // if only connected to central node, everything is a candidate.
 
 					// Remove Redundancies
-					for (T sym_idx = SYMNODE_PTR[l[wx] - 1]; sym_idx < SYMNODE_PTR[l[wx]]; sym_idx++)
+					for (T sym_idx = SYMNODE_PTR[l[wx]]; sym_idx < SYMNODE_PTR[l[wx] + 1]; sym_idx++)
 					{
 						if (SYMNODE[sym_idx] > 0)
 						{
@@ -349,26 +351,27 @@ __global__ void sgm_kernel_central_node_function_byNode(
 						}
 					}
 					// to[threadIdx.x] &= ~EP_mask[1 * num_divs_local + k];
-					cl[1 * num_divs_local + k] = to[threadIdx.x]; // candidates for level 2
+					cl[(l[wx] - 1) * num_divs_local + k] = to[threadIdx.x]; // candidates for level 2
 					warpCount += __popc(to[threadIdx.x]);
 				}
 				reduce_part<T, CPARTSIZE>(partMask, warpCount);
 
 				if (lx == 0)
 				{
+					(l[wx])++;
 					if (l[wx] == KCCOUNT - LUNMAT) // If reached last level
 					{
 						sg_count[wx] += warpCount; // code reaches here only if counting triangles
 					}
 					else
 					{
-						level_count[wx][l[wx] - 3] = warpCount; // since 2 levels already finalized and l[wx] indexed from 1
-						level_index[wx][l[wx] - 3] = 0;			// This index to iterated from 0 to warpCount
+						level_count[wx][l[wx]] = warpCount; // since 2 levels already finalized and l[wx] indexed from 1
+						level_index[wx][l[wx]] = 0;			// This index to iterated from 0 to warpCount
 					}
 				}
 				__syncwarp(partMask); // all triangles found till here!
 
-				while (level_index[wx][l[wx] - 3] < level_count[wx][l[wx] - 3]) // limits work per warp.. [0 to 32*32]
+				while (level_index[wx][l[wx]] < level_count[wx][l[wx]]) // limits work per warp.. [0 to 32*32]
 				{
 					__syncwarp(partMask);
 					if (lx == 0)
@@ -387,7 +390,7 @@ __global__ void sgm_kernel_central_node_function_byNode(
 						newIndex[wx] = 32 * maskBlock + newIndex[wx] - 1; // actual new index
 
 						level_prev_index[wx][l[wx] - 1] = newIndex[wx] + 1; // level prev index is numbered from 1
-						level_index[wx][l[wx] - 3]++;
+						level_index[wx][l[wx]]++;
 					}
 					__syncwarp(partMask);
 
@@ -404,20 +407,20 @@ __global__ void sgm_kernel_central_node_function_byNode(
 						}
 						else if (l[wx] + 1 < KCCOUNT - LUNMAT) // Not at last level yet
 						{
-							(l[wx])++;								// go further
-							level_count[wx][l[wx] - 3] = warpCount; // save level_count (warpcount updated during compute intersection)
-							level_index[wx][l[wx] - 3] = 0;			// initialize level index
-							level_prev_index[wx][l[wx] - 1] = 0;	// initialize level previous index
+							(l[wx])++;							 // go further
+							level_count[wx][l[wx]] = warpCount;	 // save level_count (warpcount updated during compute intersection)
+							level_index[wx][l[wx]] = 0;			 // initialize level index
+							level_prev_index[wx][l[wx] - 1] = 0; // initialize level previous index
 
 							T idx = level_prev_index[wx][l[wx] - 2] - 1; //-1 since 1 is always added to level previous index
 							cl[idx / 32] &= ~(1 << (idx & 0x1F));		 // idx & 0x1F gives remainder after dividing by 32
 																		 // this puts the newindex at correct place in current level
 						}
-						while (l[wx] > 3 && level_index[wx][l[wx] - 3] >= level_count[wx][l[wx] - 3]) // reset memory since will be going out of while loop (i.e. backtracking)
+						while (l[wx] > 3 && level_index[wx][l[wx]] >= level_count[wx][l[wx]]) // reset memory since will be going out of while loop (i.e. backtracking)
 						{
 							(l[wx])--;
 							T idx = level_prev_index[wx][l[wx] - 1] - 1;
-							cl[idx / 32] |= 1 << (idx & 0x1F);
+							cl[idx / 32] |= 1 << (idx & 0x1F); // reset cl for next subtree
 						}
 					}
 					__syncwarp(partMask);
@@ -434,3 +437,5 @@ __global__ void sgm_kernel_central_node_function_byNode(
 		__syncthreads();
 	}
 }
+
+#pragma endregion
