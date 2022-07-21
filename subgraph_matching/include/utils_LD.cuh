@@ -250,6 +250,34 @@ get_newIndex(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, cons
 }
 
 fundef_LD void
+get_newIndex_block(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, const T partMask, const T *cl)
+{
+    constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
+    const T wx = threadIdx.x / CPARTSIZE;
+    const T lx = threadIdx.x % CPARTSIZE;
+    __syncwarp(partMask);
+    if (lx == 0)
+    {
+        const T *from = &(cl[sh.num_divs_local * (sh.l[wx] - 2)]);                  // all the current candidates
+        T maskBlock = sh.level_prev_index[wx][sh.l[wx] - 1] / 32;                   // to identify which 32 bits to pick from num_divs_local
+        T maskIndex = ~((1 << (sh.level_prev_index[wx][sh.l[wx] - 1] & 0x1F)) - 1); // to unset previously visited index
+
+        sh.newIndex[wx] = __ffs(from[maskBlock] & maskIndex); //__ffs is find first set bit returns 0 if nothing set
+        while (sh.newIndex[wx] == 0)                          // if not found, look into next block
+        {
+            maskIndex = 0xFFFFFFFF;
+            maskBlock++;
+            sh.newIndex[wx] = __ffs(from[maskBlock] & maskIndex);
+        }
+        sh.newIndex[wx] = 32 * maskBlock + sh.newIndex[wx] - 1; // actual new index
+
+        sh.level_prev_index[wx][sh.l[wx] - 1] = sh.newIndex[wx] + 1; // level prev index is numbered from 1
+        sh.level_index[wx][sh.l[wx]]++;
+    }
+    __syncwarp(partMask);
+}
+
+fundef_LD void
 backtrack(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, const T partMask, T *cl)
 {
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
