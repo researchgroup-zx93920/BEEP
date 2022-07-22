@@ -7,7 +7,8 @@
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X)
 	__global__ void sgm_kernel_central_node_function(
-		GLOBAL_HANDLE<T> gh, queue_callee(queue, tickets, head, tail))
+		GLOBAL_HANDLE<T> gh, /*T *cpn,*/
+		queue_callee(queue, tickets, head, tail))
 {
 	constexpr T NP = BLOCK_DIM_X / CPARTSIZE;
 	const T wx = threadIdx.x / CPARTSIZE;
@@ -50,9 +51,10 @@ __launch_bounds__(BLOCK_DIM_X)
 				sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
 			__syncwarp(partMask);
 
-			while (sh.wtc[wx] < sh.srcLen)
+			// while (sh.wtc[wx] < sh.srcLen)
+			for (T j = wx; j < sh.srcLen; j += NP)
 			{
-				T j = sh.wtc[wx];
+				// T j = sh.wtc[wx];
 				if (!(SYMNODE_PTR[2] == 1 && j < (sh.srcSplit - sh.srcStart)))
 				{
 					T *cl = sh.level_offset + wx * (NUMDIVS * MAXLEVEL);
@@ -80,7 +82,7 @@ __launch_bounds__(BLOCK_DIM_X)
 					while (sh.level_index[wx][sh.l[wx]] < sh.level_count[wx][sh.l[wx]])
 					{
 						get_newIndex(lh, sh, partMask, cl);
-						/*if (sh.l[wx] == 3)
+						if (sh.l[wx] == 3 /*&& sh.src == 23*/)
 						{ // try L3 dequeue here
 							if (lx == 0)
 							{
@@ -90,6 +92,11 @@ __launch_bounds__(BLOCK_DIM_X)
 							__syncwarp(partMask);
 							if (sh.fork[wx])
 							{
+								// if (lx == 0)
+								// {
+								// 	printf("dequeued by wx: %u, L0: %u, L1: %u, L2: %u\n", wx, sh.src,
+								// 		   sh.level_prev_index[wx][1] - 1, sh.level_prev_index[wx][2] - 1);
+								// }
 								LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
 								__syncwarp(partMask);
 								if (lx == 0)
@@ -104,7 +111,7 @@ __launch_bounds__(BLOCK_DIM_X)
 								continue;
 							}
 						}
-*/
+
 						compute_intersection<T, CPARTSIZE, true>(
 							lh.warpCount, lx, partMask,
 							sh.num_divs_local, sh.newIndex[wx], sh.l[wx],
@@ -113,13 +120,14 @@ __launch_bounds__(BLOCK_DIM_X)
 						backtrack(lh, sh, partMask, cl);
 					}
 				}
-				if (lx == 0)
-					sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
+				// if (lx == 0)
+				// 	sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
 				__syncwarp(partMask);
 			}
 			if (lx == 0 && sh.sg_count[wx] > 0)
 			{
 				atomicAdd(gh.counter, sh.sg_count[wx]);
+				// atomicAdd(&cpn[sh.src], sh.sg_count[wx]);
 			}
 			__syncthreads();
 		}
@@ -157,9 +165,11 @@ __launch_bounds__(BLOCK_DIM_X)
 				sh.level_offset, sh.level_prev_index[wx], sh.encode);
 
 			// copy to all individual warp stacks;
-			for (T p = lx; p < sh.num_divs_local; p += CPARTSIZE)
-				cl[sh.num_divs_local + p] = sh.level_offset[sh.num_divs_local + p];
-
+			if (wx != 0)
+			{
+				for (T p = lx; p < sh.num_divs_local; p += CPARTSIZE)
+					cl[sh.num_divs_local * (sh.l[wx] - 1) + p] = sh.level_offset[sh.num_divs_local * (sh.l[wx] - 1) + p];
+			}
 			__syncthreads();
 
 			if (KCCOUNT == 3)
@@ -178,11 +188,12 @@ __launch_bounds__(BLOCK_DIM_X)
 				while (sh.wtc[wx] < sh.srcLen)
 				{
 					T j = sh.wtc[wx];
-					if (!((sh.level_offset[sh.num_divs_local + j / 32] >> (j % 32)) % 2 == 0))
+					__syncwarp(partMask);
+					if (!((sh.level_offset[sh.num_divs_local * (gh.Message[blockIdx.x].level_ - 1) + j / 32] >> (j % 32)) % 2 == 0))
 					{
 
 						// init stack --block
-						init_stack_block(sh, gh, cl, j);
+						init_stack_block(sh, gh, cl, j, partMask);
 						__syncwarp(partMask);
 
 						compute_intersection<T, CPARTSIZE, true>(
@@ -244,10 +255,12 @@ __launch_bounds__(BLOCK_DIM_X)
 				if (lx == 0 && sh.sg_count[wx] > 0)
 				{
 					atomicAdd(gh.counter, sh.sg_count[wx]);
+					// atomicAdd(&cpn[sh.src], sh.sg_count[wx]);
 				}
 			}
 
 			__syncthreads();
+			clear_messages(sh, gh);
 			if (threadIdx.x == 0)
 			{
 				sh.state = 1; // done with donated task, back to inactive state
@@ -255,9 +268,9 @@ __launch_bounds__(BLOCK_DIM_X)
 			}
 			__syncthreads();
 		}
-		else if (sh.state == 3)
-		{
-		}
+		// else if (sh.state == 3)
+		// {
+		// }
 	}
 }
 

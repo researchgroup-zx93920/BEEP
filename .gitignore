@@ -17,3 +17,5 @@ icount_execs/**
 sections/**
 target/**
 profiling/**
+*.csv
+main.py

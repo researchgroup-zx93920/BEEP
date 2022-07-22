@@ -113,7 +113,7 @@ init_stack(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const
 }
 
 fundef_LD void
-init_stack_block(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, T *cl, T j)
+init_stack_block(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, T *cl, T j, const T partMask)
 {
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
     const T wx = threadIdx.x / CPARTSIZE;
@@ -123,6 +123,7 @@ init_stack_block(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh,
         sh.l[wx] = gh.Message[blockIdx.x].level_ + 1;
         sh.level_prev_index[wx][sh.l[wx] - 1] = j + 1;
     }
+    __syncwarp(partMask);
     for (T k = lx + sh.l[wx]; k < DEPTH; k += CPARTSIZE)
     {
         sh.level_count[wx][k] = 0;
@@ -383,6 +384,28 @@ LD_setup_stack_L2(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh
         {
             sh.level_prev_index[wx][l] = gh.Message[blockIdx.x].level_prev_index_[l];
         }
+    }
+    __syncthreads();
+}
+
+fundef_LD void
+clear_messages(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh)
+{
+    constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
+    const T wx = threadIdx.x / CPARTSIZE;
+    const T lx = threadIdx.x % CPARTSIZE;
+    if (threadIdx.x == 0)
+    {
+        gh.Message[blockIdx.x].src_ = 0;
+        gh.Message[blockIdx.x].encode_ = 0;
+        gh.Message[blockIdx.x].root_sm_block_id_ = 0;
+        gh.Message[blockIdx.x].dstIdx_ = 0;
+        gh.Message[blockIdx.x].level_ = 0;
+    }
+    if (lx == 0)
+    {
+        for (T l = 0; l < KCCOUNT; l++)
+            gh.Message[blockIdx.x].level_prev_index_[l] = 0;
     }
     __syncthreads();
 }
