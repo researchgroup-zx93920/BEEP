@@ -1131,6 +1131,7 @@ namespace graph
     template <typename T>
     void SG_Match<T>::count_subgraphs(graph::COOCSRGraph_d<T> &dataGraph)
     {
+        // print_graph(dataGraph);
         // Initialise Kernel Dims
         CUDAContext context;
         const auto block_size_LD = BLOCK_SIZE_LD; // Block size for low degree nodes
@@ -1181,6 +1182,7 @@ namespace graph
         bool first = true;
         while (todo > 0)
         {
+
             bucket_scan(nodeDegree, dataGraph.numNodes, level, span, bucket_level_end_, current_nq, bucket_nq);
 
             if (current_nq.count.gdata()[0] > 0)

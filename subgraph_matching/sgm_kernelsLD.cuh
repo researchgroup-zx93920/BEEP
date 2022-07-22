@@ -59,19 +59,15 @@ __launch_bounds__(BLOCK_DIM_X)
 					init_stack(sh, gh, partMask, j);
 
 					// try dequeue here
-					if (lx == 0 && sh.state == 0)
+					if (lx == 0)
 					{
 						sh.fork[wx] = false;
-						LD_try_dequeue(sh, gh, j, queue_caller(queue, tickets, head, tail));
+						LD_try_dequeue(sh, gh, queue_caller(queue, tickets, head, tail));
 					}
 					__syncwarp(partMask);
 					if (sh.fork[wx])
 					{
-						if (lx == 0)
-						{
-							LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
-							sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
-						}
+						LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
 						__syncwarp(partMask);
 						continue;
 					}
@@ -84,6 +80,31 @@ __launch_bounds__(BLOCK_DIM_X)
 					while (sh.level_index[wx][sh.l[wx]] < sh.level_count[wx][sh.l[wx]])
 					{
 						get_newIndex(lh, sh, partMask, cl);
+						/*if (sh.l[wx] == 3)
+						{ // try L3 dequeue here
+							if (lx == 0)
+							{
+								sh.fork[wx] = false;
+								LD_try_dequeue(sh, gh, queue_caller(queue, tickets, head, tail));
+							}
+							__syncwarp(partMask);
+							if (sh.fork[wx])
+							{
+								LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
+								__syncwarp(partMask);
+								if (lx == 0)
+								{
+									// sh.level_prev_index[wx][sh.l[wx]] = sh.level_index[wx][sh.l[wx]];
+									// sh.l[wx]++;
+									lh.warpCount = 0;
+								}
+								__syncwarp(partMask);
+								backtrack(lh, sh, partMask, cl);
+								// get_newIndex(lh, sh, partMask, cl);
+								continue;
+							}
+						}
+*/
 						compute_intersection<T, CPARTSIZE, true>(
 							lh.warpCount, lx, partMask,
 							sh.num_divs_local, sh.newIndex[wx], sh.l[wx],
@@ -114,9 +135,32 @@ __launch_bounds__(BLOCK_DIM_X)
 		}
 		else if (sh.state == 2)
 		{
-			LD_setup_stack_recepient(sh, gh);
+			T *cl = sh.level_offset + wx * (NUMDIVS * MAXLEVEL);
+			constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
+			const T wx = threadIdx.x / CPARTSIZE;
+			const T lx = threadIdx.x % CPARTSIZE;
 
-			count_tri_block(lh, sh, gh);
+			LD_setup_stack_L2(sh, gh);
+			for (T p = threadIdx.x; p < sh.num_divs_local; p += BLOCK_DIM_X)
+			{
+				sh.level_offset[p] = get_mask(sh.srcLen, p) & unset_mask(sh.level_prev_index[wx][1] - 1, p);
+				for (T l = 2; l < sh.l[wx] - 1; l++)
+				{
+					sh.level_offset[p] &= unset_mask(sh.level_prev_index[wx][l] - 1, p);
+				}
+			}
+			__syncthreads();
+			// get_wc_block(lh, sh, gh);		works only with L2 forks
+			compute_intersection_block_LD<T, BLOCK_DIM_X, true>(
+				lh.warpCount, sh.num_divs_local,
+				sh.level_prev_index[wx][sh.l[wx] - 1] - 1, sh.l[wx], sh.to,
+				sh.level_offset, sh.level_prev_index[wx], sh.encode);
+
+			// copy to all individual warp stacks;
+			for (T p = lx; p < sh.num_divs_local; p += CPARTSIZE)
+				cl[sh.num_divs_local + p] = sh.level_offset[sh.num_divs_local + p];
+
+			__syncthreads();
 
 			if (KCCOUNT == 3)
 			{
@@ -136,7 +180,6 @@ __launch_bounds__(BLOCK_DIM_X)
 					T j = sh.wtc[wx];
 					if (!((sh.level_offset[sh.num_divs_local + j / 32] >> (j % 32)) % 2 == 0))
 					{
-						T *cl = sh.level_offset + wx * (NUMDIVS * MAXLEVEL);
 
 						// init stack --block
 						init_stack_block(sh, gh, cl, j);
@@ -162,7 +205,7 @@ __launch_bounds__(BLOCK_DIM_X)
 						__syncwarp(partMask);
 						while (sh.level_count[wx][sh.l[wx]] > sh.level_index[wx][sh.l[wx]])
 						{
-							get_newIndex_block(lh, sh, partMask, cl);
+							get_newIndex(lh, sh, partMask, cl);
 							compute_intersection<T, CPARTSIZE, true>(
 								lh.warpCount, lx, partMask, sh.num_divs_local,
 								sh.newIndex[wx], sh.l[wx], sh.to, cl,
@@ -182,7 +225,8 @@ __launch_bounds__(BLOCK_DIM_X)
 									cl[idx / 32] &= ~(1 << (idx & 0x1F));
 								}
 
-								while (sh.l[wx] > 4 && sh.level_index[wx][sh.l[wx]] >= sh.level_count[wx][sh.l[wx]])
+								while (sh.l[wx] > gh.Message[blockIdx.x].level_ + 2 &&
+									   sh.level_index[wx][sh.l[wx]] >= sh.level_count[wx][sh.l[wx]])
 								{
 									(sh.l[wx])--;
 									T idx = sh.level_prev_index[wx][sh.l[wx] - 1] - 1;
@@ -416,7 +460,8 @@ __global__ void sgm_kernel_central_node_function_byNode(
 							cl[idx / 32] &= ~(1 << (idx & 0x1F));		 // idx & 0x1F gives remainder after dividing by 32
 																		 // this puts the newindex at correct place in current level
 						}
-						while (l[wx] > 3 && level_index[wx][l[wx]] >= level_count[wx][l[wx]]) // reset memory since will be going out of while loop (i.e. backtracking)
+						// reset memory since will be going out of while loop (i.e. backtracking)
+						while (l[wx] > 3 && level_index[wx][l[wx]] >= level_count[wx][l[wx]])
 						{
 							(l[wx])--;
 							T idx = level_prev_index[wx][l[wx] - 1] - 1;

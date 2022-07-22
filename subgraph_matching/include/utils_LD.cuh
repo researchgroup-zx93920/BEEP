@@ -118,7 +118,12 @@ init_stack_block(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh,
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
     const T wx = threadIdx.x / CPARTSIZE;
     const T lx = threadIdx.x % CPARTSIZE;
-    for (T k = lx; k < DEPTH; k += CPARTSIZE)
+    if (lx == 0)
+    {
+        sh.l[wx] = gh.Message[blockIdx.x].level_ + 1;
+        sh.level_prev_index[wx][sh.l[wx] - 1] = j + 1;
+    }
+    for (T k = lx + sh.l[wx]; k < DEPTH; k += CPARTSIZE)
     {
         sh.level_count[wx][k] = 0;
         sh.level_index[wx][k] = 0;
@@ -126,14 +131,11 @@ init_stack_block(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh,
     }
     for (T k = lx; k < sh.num_divs_local; k += CPARTSIZE)
     {
-        cl[k] = get_mask(sh.srcLen, k) & unset_mask(sh.dstIdx, k) & unset_mask(j, k);
-        cl[sh.num_divs_local + k] = sh.level_offset[sh.num_divs_local + k];
-    }
-    if (lx == 0)
-    {
-        sh.l[wx] = 3;
-        sh.level_prev_index[wx][1] = sh.dstIdx + 1;
-        sh.level_prev_index[wx][2] = j + 1;
+        cl[k] = get_mask(sh.srcLen, k);
+        for (T l = 1; l < sh.l[wx]; l++)
+        {
+            cl[k] &= unset_mask(sh.level_prev_index[wx][l] - 1, k);
+        }
     }
 }
 
@@ -170,27 +172,30 @@ count_tri(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
 }
 
 fundef_LD void
-count_tri_block(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
-                GLOBAL_HANDLE<T> &gh)
+get_wc_block(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
+             GLOBAL_HANDLE<T> &gh)
 {
     lh.warpCount = 0;
+    constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
+    const T wx = threadIdx.x / CPARTSIZE;
     // count triangles
+    T dstIdx = sh.level_prev_index[wx][sh.l[wx] - 1] - 1;
     for (T k = threadIdx.x; k < sh.num_divs_local; k += BLOCK_DIM_X)
     {
-        sh.level_offset[k] = get_mask(sh.srcLen, k) & unset_mask(sh.dstIdx, k);
+        sh.level_offset[k] &= get_mask(sh.srcLen, k) & unset_mask(dstIdx, k);
 
-        if (QEDGE_PTR[3] - QEDGE_PTR[2] == 2)
-            sh.to[threadIdx.x] = sh.encode[sh.dstIdx * sh.num_divs_local + k];
+        if (QEDGE_PTR[sh.l[wx] + 1] - QEDGE_PTR[sh.l[wx]] == 2)
+            sh.to[threadIdx.x] = sh.encode[dstIdx * sh.num_divs_local + k];
         else
             sh.to[threadIdx.x] = sh.level_offset[k];
 
         // Remove Redundancies
-        for (T sym_idx = SYMNODE_PTR[2]; sym_idx < SYMNODE_PTR[3]; sym_idx++)
+        for (T sym_idx = SYMNODE_PTR[sh.l[wx]]; sym_idx < SYMNODE_PTR[sh.l[wx] + 1]; sym_idx++)
         {
             if (SYMNODE[sym_idx] > 0)
-                sh.to[threadIdx.x] &= ~(sh.level_offset[k] & get_mask(sh.dstIdx, k));
+                sh.to[threadIdx.x] &= ~(sh.level_offset[k] & get_mask(dstIdx, k));
         }
-        sh.level_offset[sh.num_divs_local + k] = sh.to[threadIdx.x];
+        sh.level_offset[sh.num_divs_local * (sh.l[wx] - 1) + k] = sh.to[threadIdx.x];
         lh.warpCount += __popc(sh.to[threadIdx.x]);
     }
     typedef cub::BlockReduce<uint64, BLOCK_DIM_X> BlockReduce;
@@ -223,34 +228,6 @@ check_terminate(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, c
 
 fundef_LD void
 get_newIndex(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, const T partMask, const T *cl)
-{
-    constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
-    const T wx = threadIdx.x / CPARTSIZE;
-    const T lx = threadIdx.x % CPARTSIZE;
-    __syncwarp(partMask);
-    if (lx == 0)
-    {
-        const T *from = &(cl[sh.num_divs_local * (sh.l[wx] - 2)]);                  // all the current candidates
-        T maskBlock = sh.level_prev_index[wx][sh.l[wx] - 1] / 32;                   // to identify which 32 bits to pick from num_divs_local
-        T maskIndex = ~((1 << (sh.level_prev_index[wx][sh.l[wx] - 1] & 0x1F)) - 1); // to unset previously visited index
-
-        sh.newIndex[wx] = __ffs(from[maskBlock] & maskIndex); //__ffs is find first set bit returns 0 if nothing set
-        while (sh.newIndex[wx] == 0)                          // if not found, look into next block
-        {
-            maskIndex = 0xFFFFFFFF;
-            maskBlock++;
-            sh.newIndex[wx] = __ffs(from[maskBlock] & maskIndex);
-        }
-        sh.newIndex[wx] = 32 * maskBlock + sh.newIndex[wx] - 1; // actual new index
-
-        sh.level_prev_index[wx][sh.l[wx] - 1] = sh.newIndex[wx] + 1; // level prev index is numbered from 1
-        sh.level_index[wx][sh.l[wx]]++;
-    }
-    __syncwarp(partMask);
-}
-
-fundef_LD void
-get_newIndex_block(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, const T partMask, const T *cl)
 {
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
     const T wx = threadIdx.x / CPARTSIZE;
@@ -313,7 +290,7 @@ backtrack(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, const T
 
 fundef_LD void
 LD_try_dequeue(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh,
-               const T j, queue_callee(queue, tickets, head, tail))
+               queue_callee(queue, tickets, head, tail))
 {
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
     const T wx = threadIdx.x / CPARTSIZE;
@@ -322,8 +299,8 @@ LD_try_dequeue(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh,
 }
 
 fundef_LD void
-LD_do_fork(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const T j,
-           queue_callee(queue, tickets, head, tail))
+LD_do_fork_bckup(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const T j,
+                 queue_callee(queue, tickets, head, tail))
 {
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
     const T wx = threadIdx.x / CPARTSIZE;
@@ -346,31 +323,44 @@ LD_do_fork(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const
 }
 
 fundef_LD void
-LD_do_fork_L2(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const T j,
-              queue_callee(queue, tickets, head, tail))
+LD_do_fork(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const T j,
+           queue_callee(queue, tickets, head, tail))
 {
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
     const T wx = threadIdx.x / CPARTSIZE;
     const T lx = threadIdx.x % CPARTSIZE;
-    for (T iter = 0; iter < N_RECEPIENTS; iter++)
+    if (lx == 0)
     {
-        queue_wait_ticket(queue, tickets, head, tail, CB, sh.worker_pos[wx], sh.shared_other_sm_block_id[wx]);
-        T other_sm_block_id = sh.shared_other_sm_block_id[wx];
-        gh.Message[other_sm_block_id].src_ = sh.src;
-        gh.Message[other_sm_block_id].dstIdx_ = j;
-        gh.Message[other_sm_block_id].encode_ = sh.encode;
-        gh.Message[other_sm_block_id].root_sm_block_id_ = sh.sm_block_id;
-        gh.Message[other_sm_block_id].level_ = sh.l[wx];
+        for (T iter = 0; iter < N_RECEPIENTS; iter++)
+        {
+            queue_wait_ticket(queue, tickets, head, tail, CB, sh.worker_pos[wx], sh.shared_other_sm_block_id[wx]);
 
-        gh.work_ready[other_sm_block_id].store(1, cuda::memory_order_release);
-        sh.worker_pos[wx]++;
+            T other_sm_block_id = sh.shared_other_sm_block_id[wx];
+            gh.Message[other_sm_block_id].src_ = sh.src;
+            gh.Message[other_sm_block_id].dstIdx_ = j;
+            gh.Message[other_sm_block_id].encode_ = sh.encode;
+            gh.Message[other_sm_block_id].root_sm_block_id_ = sh.sm_block_id;
+            gh.Message[other_sm_block_id].level_ = sh.l[wx];
+
+            for (T l = 0; l < sh.l[wx]; l++)
+            {
+                gh.Message[other_sm_block_id].level_prev_index_[l] = sh.level_prev_index[wx][l];
+            }
+
+            gh.work_ready[other_sm_block_id].store(1, cuda::memory_order_release);
+            sh.worker_pos[wx]++;
+        }
+        sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
     }
 }
 
 fundef_LD void
-LD_setup_stack_recepient(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh)
+LD_setup_stack_L2(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh)
 {
     __syncthreads();
+    constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
+    const T wx = threadIdx.x / CPARTSIZE;
+    const T lx = threadIdx.x % CPARTSIZE;
     if (threadIdx.x == 0)
     {
         sh.src = gh.Message[blockIdx.x].src_;
@@ -386,5 +376,59 @@ LD_setup_stack_recepient(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE
         sh.num_divs_local = (sh.srcLen + 32 - 1) / 32;
         sh.tc = 0;
     }
+    if (lx == 0)
+    {
+        sh.l[wx] = gh.Message[blockIdx.x].level_;
+        for (T l = 0; l < sh.l[wx]; l++)
+        {
+            sh.level_prev_index[wx][l] = gh.Message[blockIdx.x].level_prev_index_[l];
+        }
+    }
     __syncthreads();
+}
+
+template <typename T, uint BLOCK_DIM_X, bool MAT>
+__device__ __forceinline__ void compute_intersection_block_LD(
+    uint64 &wc, const T num_divs_local, const T maskIdx,
+    const T lvl, T *to, T *cl, const T *level_prev_index, const T *encode)
+{
+    wc = 0;
+    for (T k = threadIdx.x; k < num_divs_local; k += BLOCK_DIM_X)
+    {
+        to[threadIdx.x] = cl[k] & unset_mask(maskIdx, k);
+        // cl[k] &= unset_mask(level_prev_index[lvl - 1] - 1, k);
+
+        // Compute Intersection
+        if (QEDGE_PTR[lvl] + 1 == QEDGE_PTR[lvl + 1])
+        {
+            to[threadIdx.x] = cl[k];
+        }
+        else
+        {
+            for (T q_idx = QEDGE_PTR[lvl] + 1; q_idx < QEDGE_PTR[lvl + 1]; q_idx++)
+            {
+                to[threadIdx.x] &= encode[(level_prev_index[QEDGE[q_idx]] - 1) * num_divs_local + k];
+            }
+        }
+        // Remove Redundancies
+        for (T sym_idx = SYMNODE_PTR[lvl]; sym_idx < SYMNODE_PTR[lvl + 1]; sym_idx++)
+        {
+            if (SYMNODE[sym_idx] > 0)
+                to[threadIdx.x] &= ~(get_mask(level_prev_index[SYMNODE[sym_idx]] - 1, k));
+        }
+        cl[(lvl - 1) * num_divs_local + k] = to[threadIdx.x];
+        wc += __popc(to[threadIdx.x]);
+    }
+    __syncthreads();
+
+    typedef cub::BlockReduce<uint64, BLOCK_DIM_X> BlockReduce;
+    __shared__ typename BlockReduce::TempStorage temp_storage;
+    wc = BlockReduce(temp_storage).Sum(wc); // whole block performs reduction here
+    __syncthreads();
+    // if (threadIdx.x == 0 && blockIdx.x == 7)
+    // {
+    //     printf("CIBL count %lu, and level: %u\n", wc, lvl);
+    //     printf("Number: %u\n", cl[(lvl - 1) * num_divs_local]);
+    // }
+    // __syncthreads();
 }
