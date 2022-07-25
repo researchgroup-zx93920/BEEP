@@ -106,7 +106,7 @@ init_stack(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const
     if (lx == 1)
     {
         sh.l[wx] = 2;
-        sh.level_prev_index[wx][0] = sh.srcSplit - sh.srcStart + 1;
+        sh.level_prev_index[wx][0] = sh.srcSplit - sh.srcStart + 1; // for symmetry breaking purposes
         sh.level_prev_index[wx][1] = j + 1;
     }
     __syncwarp(partMask);
@@ -351,12 +351,13 @@ LD_do_fork(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const
             gh.work_ready[other_sm_block_id].store(1, cuda::memory_order_release);
             sh.worker_pos[wx]++;
         }
-        sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
+        if (sh.l[wx] < 3)
+            sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
     }
 }
 
 fundef_LD void
-LD_setup_stack_L2(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh)
+LD_setup_stack(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh)
 {
     __syncthreads();
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
@@ -448,10 +449,4 @@ __device__ __forceinline__ void compute_intersection_block_LD(
     __shared__ typename BlockReduce::TempStorage temp_storage;
     wc = BlockReduce(temp_storage).Sum(wc); // whole block performs reduction here
     __syncthreads();
-    // if (threadIdx.x == 0 && blockIdx.x == 7)
-    // {
-    //     printf("CIBL count %lu, and level: %u\n", wc, lvl);
-    //     printf("Number: %u\n", cl[(lvl - 1) * num_divs_local]);
-    // }
-    // __syncthreads();
 }

@@ -1355,13 +1355,13 @@ namespace graph
                     GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
                     GPUArray<uint64> work_list_head("Global work stealing list", AllocationTypeEnum::gpu, 1, dev_);
                     GPUArray<MessageBlock> messages("Messages for sharing info", AllocationTypeEnum::gpu, grid_block_size, dev_);
-                    // GPUArray<T> per_node_count("for debugging", AllocationTypeEnum::unified, dataGraph.numNodes, dev_);
+                    GPUArray<T> per_node_count("for debugging", AllocationTypeEnum::unified, dataGraph.numNodes, dev_);
 
                     CUDA_RUNTIME(cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T)));
                     CUDA_RUNTIME(cudaMemset(current_level.gdata(), 0, level_size * sizeof(T)));
                     CUDA_RUNTIME(cudaMemset(work_list_head.gdata(), 0, sizeof(uint64)));
                     CUDA_RUNTIME(cudaMemset(messages.gdata(), 0, grid_block_size * sizeof(MessageBlock)));
-                    // CUDA_RUNTIME(cudaMemset(per_node_count.gdata(), 0, dataGraph.numNodes * sizeof(T)));
+                    CUDA_RUNTIME(cudaMemset(per_node_count.gdata(), 0, dataGraph.numNodes * sizeof(T)));
 
                     GLOBAL_HANDLE<T> gh;
                     gh.counter = counter.gdata();
@@ -1384,7 +1384,7 @@ namespace graph
 
                     execKernel((sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>),
                                grid_block_size, block_size_LD, dev_, false,
-                               gh, /*per_node_count.gdata(),*/
+                               gh, per_node_count.gdata(),
                                queue_caller(queue, tickets, head, tail));
                     // execKernel((sgm_kernel_central_node_function_byNode<T, block_size_LD, partitionSize_LD>),
                     //            grid_block_size, block_size_LD, dev_, false,
@@ -1392,7 +1392,7 @@ namespace graph
                     //            dataGraph, current_nq.device_queue->gdata()[0],
                     //            current_level.gdata(),
                     //            node_be.gdata());
-                    // std::ofstream myFile("test_correct.csv");
+                    // std::ofstream myFile("test1.csv");
                     // for (T i = 0; i < dataGraph.numNodes; i++)
                     // {
                     //     string s = std::to_string(i) + "\t" + std::to_string(nodeDegree.gdata()[i]) + "\t" + std::to_string(per_node_count.gdata()[i]) + "\n";
@@ -1405,7 +1405,7 @@ namespace graph
                     current_level.freeGPU();
                     work_list_head.freeGPU();
                     messages.freeGPU();
-                    // per_node_count.freeGPU();
+                    per_node_count.freeGPU();
 
                     CUDA_RUNTIME(cudaFree(work_ready));
                     queue_free(queue, tickets, head, tail);

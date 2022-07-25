@@ -7,7 +7,7 @@
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X)
 	__global__ void sgm_kernel_central_node_function(
-		GLOBAL_HANDLE<T> gh, /*T *cpn,*/
+		GLOBAL_HANDLE<T> gh, T *cpn,
 		queue_callee(queue, tickets, head, tail))
 {
 	constexpr T NP = BLOCK_DIM_X / CPARTSIZE;
@@ -51,10 +51,9 @@ __launch_bounds__(BLOCK_DIM_X)
 				sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
 			__syncwarp(partMask);
 
-			// while (sh.wtc[wx] < sh.srcLen)
-			for (T j = wx; j < sh.srcLen; j += NP)
+			while (sh.wtc[wx] < sh.srcLen)
 			{
-				// T j = sh.wtc[wx];
+				T j = sh.wtc[wx];
 				if (!(SYMNODE_PTR[2] == 1 && j < (sh.srcSplit - sh.srcStart)))
 				{
 					T *cl = sh.level_offset + wx * (NUMDIVS * MAXLEVEL);
@@ -77,12 +76,13 @@ __launch_bounds__(BLOCK_DIM_X)
 
 					// get wc
 					count_tri(lh, sh, gh, partMask, cl, j);
+					__syncwarp(partMask);
 
 					check_terminate(lh, sh, partMask);
 					while (sh.level_index[wx][sh.l[wx]] < sh.level_count[wx][sh.l[wx]])
 					{
 						get_newIndex(lh, sh, partMask, cl);
-						if (sh.l[wx] == 3 /*&& sh.src == 23*/)
+						if (sh.l[wx] == 3)
 						{ // try L3 dequeue here
 							if (lx == 0)
 							{
@@ -92,22 +92,10 @@ __launch_bounds__(BLOCK_DIM_X)
 							__syncwarp(partMask);
 							if (sh.fork[wx])
 							{
-								// if (lx == 0)
-								// {
-								// 	printf("dequeued by wx: %u, L0: %u, L1: %u, L2: %u\n", wx, sh.src,
-								// 		   sh.level_prev_index[wx][1] - 1, sh.level_prev_index[wx][2] - 1);
-								// }
 								LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
-								__syncwarp(partMask);
-								if (lx == 0)
-								{
-									// sh.level_prev_index[wx][sh.l[wx]] = sh.level_index[wx][sh.l[wx]];
-									// sh.l[wx]++;
-									lh.warpCount = 0;
-								}
+								lh.warpCount = 0;
 								__syncwarp(partMask);
 								backtrack(lh, sh, partMask, cl);
-								// get_newIndex(lh, sh, partMask, cl);
 								continue;
 							}
 						}
@@ -117,18 +105,26 @@ __launch_bounds__(BLOCK_DIM_X)
 							sh.num_divs_local, sh.newIndex[wx], sh.l[wx],
 							sh.to, cl, sh.level_prev_index[wx], sh.encode);
 
+						__syncwarp(partMask);
+
 						backtrack(lh, sh, partMask, cl);
+
+						__syncwarp(partMask);
 					}
 				}
-				// if (lx == 0)
-				// 	sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
+				__syncwarp(partMask);
+				if (lx == 0)
+				{
+					sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
+				}
 				__syncwarp(partMask);
 			}
 			if (lx == 0 && sh.sg_count[wx] > 0)
 			{
 				atomicAdd(gh.counter, sh.sg_count[wx]);
-				// atomicAdd(&cpn[sh.src], sh.sg_count[wx]);
+				atomicAdd(&cpn[sh.src], sh.sg_count[wx]);
 			}
+
 			__syncthreads();
 		}
 		else if (sh.state == 1)
@@ -148,7 +144,9 @@ __launch_bounds__(BLOCK_DIM_X)
 			const T wx = threadIdx.x / CPARTSIZE;
 			const T lx = threadIdx.x % CPARTSIZE;
 
-			LD_setup_stack_L2(sh, gh);
+			LD_setup_stack(sh, gh);
+			__syncthreads();
+
 			for (T p = threadIdx.x; p < sh.num_divs_local; p += BLOCK_DIM_X)
 			{
 				sh.level_offset[p] = get_mask(sh.srcLen, p) & unset_mask(sh.level_prev_index[wx][1] - 1, p);
@@ -158,18 +156,16 @@ __launch_bounds__(BLOCK_DIM_X)
 				}
 			}
 			__syncthreads();
-			// get_wc_block(lh, sh, gh);		works only with L2 forks
+
 			compute_intersection_block_LD<T, BLOCK_DIM_X, true>(
 				lh.warpCount, sh.num_divs_local,
 				sh.level_prev_index[wx][sh.l[wx] - 1] - 1, sh.l[wx], sh.to,
 				sh.level_offset, sh.level_prev_index[wx], sh.encode);
 
 			// copy to all individual warp stacks;
-			if (wx != 0)
-			{
-				for (T p = lx; p < sh.num_divs_local; p += CPARTSIZE)
-					cl[sh.num_divs_local * (sh.l[wx] - 1) + p] = sh.level_offset[sh.num_divs_local * (sh.l[wx] - 1) + p];
-			}
+			for (T p = lx; p < sh.num_divs_local; p += CPARTSIZE)
+				cl[sh.num_divs_local * (sh.l[wx] - 1) + p] = sh.level_offset[sh.num_divs_local * (sh.l[wx] - 1) + p];
+
 			__syncthreads();
 
 			if (KCCOUNT == 3)
@@ -188,7 +184,6 @@ __launch_bounds__(BLOCK_DIM_X)
 				while (sh.wtc[wx] < sh.srcLen)
 				{
 					T j = sh.wtc[wx];
-					__syncwarp(partMask);
 					if (!((sh.level_offset[sh.num_divs_local * (gh.Message[blockIdx.x].level_ - 1) + j / 32] >> (j % 32)) % 2 == 0))
 					{
 
@@ -252,10 +247,11 @@ __launch_bounds__(BLOCK_DIM_X)
 						sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
 					__syncwarp(partMask);
 				}
+				__syncwarp(partMask);
 				if (lx == 0 && sh.sg_count[wx] > 0)
 				{
 					atomicAdd(gh.counter, sh.sg_count[wx]);
-					// atomicAdd(&cpn[sh.src], sh.sg_count[wx]);
+					atomicAdd(&cpn[sh.src], sh.sg_count[wx]);
 				}
 			}
 
@@ -268,9 +264,6 @@ __launch_bounds__(BLOCK_DIM_X)
 			}
 			__syncthreads();
 		}
-		// else if (sh.state == 3)
-		// {
-		// }
 	}
 }
 
