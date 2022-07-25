@@ -7,7 +7,7 @@
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __launch_bounds__(BLOCK_DIM_X)
 	__global__ void sgm_kernel_central_node_function(
-		GLOBAL_HANDLE<T> gh, T *cpn,
+		GLOBAL_HANDLE<T> gh, // T *cpn,
 		queue_callee(queue, tickets, head, tail))
 {
 	constexpr T NP = BLOCK_DIM_X / CPARTSIZE;
@@ -60,18 +60,20 @@ __launch_bounds__(BLOCK_DIM_X)
 					init_stack(sh, gh, partMask, j);
 
 					// try dequeue here
-					if (lx == 0)
+					if (sh.srcLen > 64)
 					{
-						sh.fork[wx] = false;
-						if (sh.srcLen > 64)
+						if (lx == 0)
+						{
+							sh.fork[wx] = false;
 							LD_try_dequeue(sh, gh, queue_caller(queue, tickets, head, tail));
-					}
-					__syncwarp(partMask);
-					if (sh.fork[wx])
-					{
-						LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
+						}
 						__syncwarp(partMask);
-						continue;
+						if (sh.fork[wx])
+						{
+							LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
+							__syncwarp(partMask);
+							continue;
+						}
 					}
 					__syncwarp(partMask);
 
@@ -124,7 +126,7 @@ __launch_bounds__(BLOCK_DIM_X)
 			if (lx == 0 && sh.sg_count[wx] > 0)
 			{
 				atomicAdd(gh.counter, sh.sg_count[wx]);
-				atomicAdd(&cpn[sh.src], sh.sg_count[wx]);
+				// atomicAdd(&cpn[sh.src], sh.sg_count[wx]);
 			}
 
 			__syncthreads();
@@ -253,7 +255,7 @@ __launch_bounds__(BLOCK_DIM_X)
 				if (lx == 0 && sh.sg_count[wx] > 0)
 				{
 					atomicAdd(gh.counter, sh.sg_count[wx]);
-					atomicAdd(&cpn[sh.src], sh.sg_count[wx]);
+					// atomicAdd(&cpn[sh.src], sh.sg_count[wx]);
 				}
 			}
 

@@ -1384,7 +1384,7 @@ namespace graph
 
                     execKernel((sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>),
                                grid_block_size, block_size_LD, dev_, false,
-                               gh, per_node_count.gdata(),
+                               gh, /*per_node_count.gdata(),*/
                                queue_caller(queue, tickets, head, tail));
                     // execKernel((sgm_kernel_central_node_function_byNode<T, block_size_LD, partitionSize_LD>),
                     //            grid_block_size, block_size_LD, dev_, false,
