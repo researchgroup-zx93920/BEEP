@@ -1037,13 +1037,17 @@ namespace graph
                 GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
                 GPUArray<uint64> work_list_head("Global work stealing list", AllocationTypeEnum::gpu, 1, dev_);
                 GPUArray<MessageBlock> messages("Messages for sharing info", AllocationTypeEnum::gpu, grid_block_size, dev_);
-                GPUArray<double> block_util("block active/inactive ratio", AllocationTypeEnum::unified, grid_block_size, dev_);
+                GPUArray<double> block_util1("block active/inactive ratio", AllocationTypeEnum::unified, grid_block_size, dev_);
+                GPUArray<double> block_util2("block active/inactive ratio", AllocationTypeEnum::unified, grid_block_size, dev_);
+                GPUArray<double> block_util3("block active/inactive ratio", AllocationTypeEnum::unified, grid_block_size, dev_);
 
                 CUDA_RUNTIME(cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T)));
                 CUDA_RUNTIME(cudaMemset(current_level.gdata(), 0, level_size * sizeof(T)));
                 CUDA_RUNTIME(cudaMemset(work_list_head.gdata(), 0, sizeof(uint64)));
                 CUDA_RUNTIME(cudaMemset(messages.gdata(), 0, grid_block_size * sizeof(MessageBlock)));
-                CUDA_RUNTIME(cudaMemset(block_util.gdata(), 0, grid_block_size * sizeof(double)));
+                CUDA_RUNTIME(cudaMemset(block_util1.gdata(), 0, grid_block_size * sizeof(double)));
+                CUDA_RUNTIME(cudaMemset(block_util2.gdata(), 0, grid_block_size * sizeof(double)));
+                CUDA_RUNTIME(cudaMemset(block_util3.gdata(), 0, grid_block_size * sizeof(double)));
                 CUDA_RUNTIME(cudaMemset(SM_times.gdata(), 0, num_SMs * sizeof(Counters)));
 
                 GLOBAL_HANDLE<T> gh;
@@ -1066,7 +1070,7 @@ namespace graph
 
                 execKernel((sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>),
                            grid_block_size, block_size_LD, dev_, false,
-                           SM_times.gdata(), block_util.gdata(),
+                           SM_times.gdata(), block_util1.gdata(), block_util2.gdata(), block_util3.gdata(),
                            gh, queue_caller(queue, tickets, head, tail));
 
                 // print_SM_counters(SM_times.gdata(), SM_nodes.gdata());
@@ -1075,24 +1079,24 @@ namespace graph
                 // {
                 //     std::cout << SM_times.gdata()[sm].totalTime[ACTIVE] << std::endl;
                 // }
-
-                Log(info, "\n\n SM utilization");
+                Log(info, "SM count %u", num_SMs);
+                Log(info, "SM Workload");
                 uint64 ttotal = 0;
                 double average;
                 for (int sm = 0; sm < num_SMs; ++sm)
                 {
-                    ttotal += SM_times.gdata()[sm].totalTime[ACTIVE];
+                    ttotal += SM_times.gdata()[sm].totalTime[TOTAL];
                 }
                 average = (ttotal * 1.0) / num_SMs;
                 for (int sm = 0; sm < num_SMs; ++sm)
                 {
-                    std::cout << (SM_times.gdata()[sm].totalTime[ACTIVE] * 1.0) / average << std::endl;
+                    std::cout << sm << "\t" << ((SM_times.gdata()[sm].totalTime[STATE1] + SM_times.gdata()[sm].totalTime[STATE2]) * 1.0) / average << std::endl;
                 }
 
                 Log(info, "\n\n block utilization");
                 for (int b = 0; b < grid_block_size; ++b)
                 {
-                    std::cout << block_util.gdata()[b] << std::endl;
+                    std::cout << block_util1.gdata()[b] << "\t" << block_util2.gdata()[b] << "\t" << block_util3.gdata()[b] << std::endl;
                 }
 
                 // cleanup
@@ -1102,6 +1106,9 @@ namespace graph
                 messages.freeGPU();
                 CUDA_RUNTIME(cudaFree(work_ready));
                 queue_free(queue, tickets, head, tail);
+                block_util1.freeGPU();
+                block_util2.freeGPU();
+                block_util3.freeGPU();
                 // }
 
                 // Print bucket stats:
