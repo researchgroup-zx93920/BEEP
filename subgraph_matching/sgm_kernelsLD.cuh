@@ -85,7 +85,7 @@ __launch_bounds__(BLOCK_DIM_X)
 					while (sh.level_index[wx][sh.l[wx]] < sh.level_count[wx][sh.l[wx]])
 					{
 						get_newIndex(lh, sh, partMask, cl);
-						if (sh.l[wx] == 3 && sh.srcLen > 64)
+						if (sh.l[wx] < KCCOUNT - 1 && sh.l[wx] <= (KCCOUNT + 1) / 2 && sh.srcLen > 64)
 						{
 							// try L3 dequeue here
 							if (lx == 0)
