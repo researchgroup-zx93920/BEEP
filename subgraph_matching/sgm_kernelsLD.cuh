@@ -63,7 +63,8 @@ __launch_bounds__(BLOCK_DIM_X)
 					if (lx == 0)
 					{
 						sh.fork[wx] = false;
-						LD_try_dequeue(sh, gh, queue_caller(queue, tickets, head, tail));
+						if (sh.srcLen > 64)
+							LD_try_dequeue(sh, gh, queue_caller(queue, tickets, head, tail));
 					}
 					__syncwarp(partMask);
 					if (sh.fork[wx])
@@ -82,8 +83,9 @@ __launch_bounds__(BLOCK_DIM_X)
 					while (sh.level_index[wx][sh.l[wx]] < sh.level_count[wx][sh.l[wx]])
 					{
 						get_newIndex(lh, sh, partMask, cl);
-						if (sh.l[wx] == 3)
-						{ // try L3 dequeue here
+						if (sh.l[wx] == 3 && sh.srcLen > 64)
+						{
+							// try L3 dequeue here
 							if (lx == 0)
 							{
 								sh.fork[wx] = false;
@@ -241,8 +243,8 @@ __launch_bounds__(BLOCK_DIM_X)
 							}
 							__syncwarp(partMask);
 						}
-						__syncwarp(partMask);
 					}
+					__syncwarp(partMask);
 					if (lx == 0)
 						sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
 					__syncwarp(partMask);
