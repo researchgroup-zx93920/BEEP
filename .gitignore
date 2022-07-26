@@ -18,4 +18,5 @@ sections/**
 target/**
 profiling/**
 *.csv
+logs/**
 main.py

@@ -110,7 +110,7 @@ __launch_bounds__(BLOCK_DIM_X)
                 sh.sg_count[wx] = 0;
             }
 
-            encode(sh, gh);
+            encode(sh, gh); // finds encoded block by itself
             if (lx == 0)
                 sh.wtc[wx] = atomicAdd(&(sh.tc), 1);
             __syncwarp(partMask);
@@ -124,7 +124,7 @@ __launch_bounds__(BLOCK_DIM_X)
                     init_stack(sh, gh, partMask, j);
 
                     // try dequeue here
-                    if (true /*&& j - sh.srcLen > NP*/)
+                    if (true /*&&  sh.srcLen - j > NP*/)
                     {
                         if (lx == 0)
                         {
@@ -149,7 +149,7 @@ __launch_bounds__(BLOCK_DIM_X)
                     while (sh.level_index[wx][sh.l[wx]] < sh.level_count[wx][sh.l[wx]])
                     {
                         get_newIndex(lh, sh, partMask, cl);
-                        if (sh.l[wx] <= (KCCOUNT + 1) / 2 /*&& sh.level_index[wx][sh.l[wx]] - sh.level_count[wx][sh.l[wx]] > NP*/)
+                        if (sh.l[wx] <= (KCCOUNT + 1) / 2)
                         {
                             // try L3 dequeue here
                             if (lx == 0)

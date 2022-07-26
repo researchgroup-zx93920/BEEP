@@ -70,6 +70,7 @@ encode(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
     const T wx = threadIdx.x / CPARTSIZE; // which warp in thread block
     const T lx = threadIdx.x % CPARTSIZE;
+
     for (T j = wx; j < sh.srcLen; j += NP)
     {
         for (T k = lx; k < sh.num_divs_local; k += CPARTSIZE)
@@ -78,6 +79,7 @@ encode(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
         }
     }
     __syncthreads();
+
     for (T j = wx; j < sh.srcLen; j += NP)
     {
         warp_sorted_count_and_encode_full_undirected<WARPS_PER_BLOCK, T, true, CPARTSIZE>(
