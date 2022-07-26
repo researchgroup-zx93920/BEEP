@@ -1,18 +1,32 @@
 #pragma once
-#include "utils.cuh"
+#include "host_utils.cuh"
 #include "../../include/Timer.h"
 #include "common_utils.cuh"
 
 #define fundef_LD template <typename T, uint BLOCK_DIM_X, uint NP> \
 __device__ __forceinline__
 
-__device__ struct LOCAL_HANDLE_LD
+template <typename T>
+struct GLOBAL_HANDLE
 {
-    uint64 warpCount = 0;
+    uint64 *counter;
+    graph::COOCSRGraph_d<T> g;
+    mapping<T> *srcList;
+    graph::GraphQueue_d<T, bool> current;
+
+    T *current_level;
+    MessageBlock *Message;
+    int *offset;
+    T *adj_enc;
+    uint64 *work_list_head;
+    uint64 work_list_tail;
+
+    // for worker queue
+    cuda::atomic<uint32_t, cuda::thread_scope_device> *work_ready;
 };
 
 template <typename T, uint BLOCK_DIM_X, uint NP>
-__device__ struct SHARED_HANDLE_LD
+__device__ struct SHARED_HANDLE
 {
     T level_index[NP][DEPTH];
     T level_count[NP][DEPTH];
@@ -32,8 +46,13 @@ __device__ struct SHARED_HANDLE_LD
     bool fork[NP];
 };
 
+__device__ struct LOCAL_HANDLE
+{
+    uint64 warpCount = 0;
+};
+
 fundef_LD void
-init_sm(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
+init_sm(SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh,
         GLOBAL_HANDLE<T> &gh)
 {
     __syncthreads();
@@ -63,7 +82,7 @@ init_sm(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
 }
 
 fundef_LD void
-encode(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
+encode(SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh,
        GLOBAL_HANDLE<T> &gh)
 {
     __syncthreads();
@@ -93,7 +112,7 @@ encode(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
 }
 
 fundef_LD void
-init_stack(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const T partMask, T j)
+init_stack(SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const T partMask, T j)
 {
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
     const T wx = threadIdx.x / CPARTSIZE;
@@ -115,7 +134,7 @@ init_stack(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const
 }
 
 fundef_LD void
-init_stack_block(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, T *cl, T j, const T partMask)
+init_stack_block(SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, T *cl, T j, const T partMask)
 {
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
     const T wx = threadIdx.x / CPARTSIZE;
@@ -143,7 +162,7 @@ init_stack_block(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh,
 }
 
 fundef_LD void
-count_tri(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
+count_tri(LOCAL_HANDLE &lh, SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh,
           GLOBAL_HANDLE<T> &gh, const T partMask, T *cl, const T j)
 {
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
@@ -175,7 +194,7 @@ count_tri(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
 }
 
 fundef_LD void
-get_wc_block(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
+get_wc_block(LOCAL_HANDLE &lh, SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh,
              GLOBAL_HANDLE<T> &gh)
 {
     lh.warpCount = 0;
@@ -208,7 +227,7 @@ get_wc_block(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh,
 }
 
 fundef_LD void
-check_terminate(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, const T partMask)
+check_terminate(LOCAL_HANDLE &lh, SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh, const T partMask)
 {
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
     const T wx = threadIdx.x / CPARTSIZE;
@@ -230,7 +249,7 @@ check_terminate(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, c
 }
 
 fundef_LD void
-get_newIndex(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, const T partMask, const T *cl)
+get_newIndex(LOCAL_HANDLE &lh, SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh, const T partMask, const T *cl)
 {
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
     const T wx = threadIdx.x / CPARTSIZE;
@@ -258,7 +277,7 @@ get_newIndex(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, cons
 }
 
 fundef_LD void
-backtrack(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, const T partMask, T *cl)
+backtrack(LOCAL_HANDLE &lh, SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh, const T partMask, T *cl)
 {
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
     const T wx = threadIdx.x / CPARTSIZE;
@@ -292,8 +311,8 @@ backtrack(LOCAL_HANDLE_LD &lh, SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, const T
 }
 
 fundef_LD void
-LD_try_dequeue(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh,
-               queue_callee(queue, tickets, head, tail))
+try_dequeue(SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh,
+            queue_callee(queue, tickets, head, tail))
 {
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
     const T wx = threadIdx.x / CPARTSIZE;
@@ -302,32 +321,8 @@ LD_try_dequeue(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh,
 }
 
 fundef_LD void
-LD_do_fork_bckup(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const T j,
-                 queue_callee(queue, tickets, head, tail))
-{
-    constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
-    const T wx = threadIdx.x / CPARTSIZE;
-    const T lx = threadIdx.x % CPARTSIZE;
-    for (T iter = 0; iter < N_RECEPIENTS; iter++)
-    {
-        queue_wait_ticket(queue, tickets, head, tail, CB, sh.worker_pos[wx], sh.shared_other_sm_block_id[wx]);
-        T other_sm_block_id = sh.shared_other_sm_block_id[wx];
-
-        // pass donors memory to recepient block
-        gh.Message[other_sm_block_id].src_ = sh.src;
-        gh.Message[other_sm_block_id].dstIdx_ = j;
-        gh.Message[other_sm_block_id].encode_ = sh.encode;
-        gh.Message[other_sm_block_id].root_sm_block_id_ = sh.sm_block_id;
-        gh.Message[other_sm_block_id].level_ = sh.l[wx];
-
-        gh.work_ready[other_sm_block_id].store(1, cuda::memory_order_release);
-        sh.worker_pos[wx]++;
-    }
-}
-
-fundef_LD void
-LD_do_fork(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const T j,
-           queue_callee(queue, tickets, head, tail))
+do_fork(SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const T j,
+        queue_callee(queue, tickets, head, tail))
 {
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
     const T wx = threadIdx.x / CPARTSIZE;
@@ -359,7 +354,7 @@ LD_do_fork(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh, const
 }
 
 fundef_LD void
-LD_setup_stack(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh)
+setup_stack(SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh)
 {
     __syncthreads();
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
@@ -392,7 +387,7 @@ LD_setup_stack(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh)
 }
 
 fundef_LD void
-clear_messages(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh)
+clear_messages(SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh)
 {
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
     const T wx = threadIdx.x / CPARTSIZE;
@@ -413,8 +408,40 @@ clear_messages(SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh)
     __syncthreads();
 }
 
+template <typename T, uint CPARTSIZE, bool MAT>
+__device__ __forceinline__ void compute_intersection(
+    uint64 &wc,
+    const size_t lx, const T partMask,
+    const T num_divs_local, const T maskIdx, const T lvl,
+    T *to, T *cl, const T *level_prev_index, const T *encode)
+{
+    wc = 0;
+    for (T k = lx; k < num_divs_local; k += CPARTSIZE)
+    {
+        to[threadIdx.x] = cl[k] & unset_mask(maskIdx, k);
+        // Compute Intersection
+        for (T q_idx = QEDGE_PTR[lvl] + 1; q_idx < QEDGE_PTR[lvl + 1]; q_idx++)
+        {
+            to[threadIdx.x] &= encode[(level_prev_index[QEDGE[q_idx]] - 1) * num_divs_local + k];
+        }
+
+        // Remove Redundancies
+        for (T sym_idx = SYMNODE_PTR[lvl]; sym_idx < SYMNODE_PTR[lvl + 1]; sym_idx++)
+        {
+            if (!MAT && SYMNODE[sym_idx] == lvl - 1)
+                continue;
+            if (SYMNODE[sym_idx] > 0)
+                to[threadIdx.x] &= ~(get_mask(level_prev_index[SYMNODE[sym_idx]] - 1, k));
+        }
+
+        wc += __popc(to[threadIdx.x]);                        // counts number of set bits
+        cl[(lvl - 1) * num_divs_local + k] = to[threadIdx.x]; // saves candidates list in cl
+    }
+    reduce_part<T, CPARTSIZE>(partMask, wc);
+}
+
 template <typename T, uint BLOCK_DIM_X, bool MAT>
-__device__ __forceinline__ void compute_intersection_block_LD(
+__device__ __forceinline__ void compute_intersection_block(
     uint64 &wc, const T num_divs_local, const T maskIdx,
     const T lvl, T *to, T *cl, const T *level_prev_index, const T *encode)
 {
@@ -422,7 +449,6 @@ __device__ __forceinline__ void compute_intersection_block_LD(
     for (T k = threadIdx.x; k < num_divs_local; k += BLOCK_DIM_X)
     {
         to[threadIdx.x] = cl[k] & unset_mask(maskIdx, k);
-        // cl[k] &= unset_mask(level_prev_index[lvl - 1] - 1, k);
 
         // Compute Intersection
         if (QEDGE_PTR[lvl] + 1 == QEDGE_PTR[lvl + 1])

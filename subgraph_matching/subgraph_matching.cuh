@@ -3,11 +3,9 @@
 #include "include/common_utils.cuh"
 
 #ifdef TIMER
-// #include "sgm_kernelsLA_timer.cuh"
 #include "sgm_kernelsLD_timer.cuh"
 #else
 #include "sgm_kernelsLD.cuh"
-#include "sgm_kernelsLA.cuh"
 #endif
 #include "thrust/sort.h"
 // #include <stdint.h>
@@ -769,28 +767,23 @@ namespace graph
 
         // Initialise Kernel Dims
         CUDAContext context;
-        const auto block_size_LD = BLOCK_SIZE_LD; // Block size for low degree nodes
-        const T partitionSize_LD = PARTITION_SIZE_LD;
-        const T numPartitions_LD = block_size_LD / partitionSize_LD;
-        const auto block_size_HD = BLOCK_SIZE_HD; // Block size for high degree nodes
+        const auto block_size = BLOCK_SIZE; // Block size for low degree nodes
+        const T partitionSize = PARTITION_SIZE;
+        const T numPartitions = block_size / partitionSize;
 
         const T bound_LD = cutoff_;
-        const T bound_HD = 32768 + 16384;
         const uint dv = 32;
 
         // CUDA Initialise, gather runtime Info.
 
         T num_SMs = context.num_SMs;
         Log(debug, "Num SMs: %u", num_SMs);
-        T conc_blocks_per_SM_LD = context.GetConCBlocks(block_size_LD);
-        T conc_blocks_per_SM_HD = context.GetConCBlocks(block_size_HD);
+        T conc_blocks_per_SM = context.GetConCBlocks(block_size);
 
         GPUArray<Counters> SM_times("SM times", unified, num_SMs, dev_);
         GPUArray<uint64> SM_nodes("nodes processed per SM", unified, num_SMs, dev_);
         CUDA_RUNTIME(cudaMemset(SM_times.gdata(), 0, num_SMs * sizeof(Counters)));
         CUDA_RUNTIME(cudaMemset(SM_nodes.gdata(), 0, num_SMs * sizeof(uint64)));
-
-        GPUArray<T> d_bitmap_states("bmp bitmap stats", AllocationTypeEnum::gpu, num_SMs * max(conc_blocks_per_SM_LD, conc_blocks_per_SM_HD), dev_);
 
         // template information in GPU Constant memory
         cudaMemcpyToSymbol(KCCOUNT, &(query_sequence->N), sizeof(KCCOUNT));
@@ -872,158 +865,22 @@ namespace graph
                     Log(debug, "map1 TIME: %f s", time_);
                 }
 
-                /*if (maxDeg > bound_LD)
-                {
-
-                    T nnodes = current_nq.count.gdata()[0];
-                    T nedges = Degree_Scan.gdata()[nnodes - 1];
-                    GPUArray<int> encode_offset("Encoding offset", gpu, dataGraph.numNodes, dev_);
-
-                    // // accuracy check
-                    // T temp_total = 0;
-                    // for (int i = 0; i < nnodes; i++)
-                    // {
-                    //     T Node_id = current_nq.device_queue->gdata()->queue[i];
-                    //     T degree = dataGraph.rowPtr[Node_id + 1] - dataGraph.rowPtr[Node_id];
-                    //     T src = (i > 0) ? src_mapping.gdata()[Degree_Scan.gdata()[i - 1]].src : src_mapping.gdata()[0].src;
-                    //     T srcDegree = dataGraph.rowPtr[src + 1] - dataGraph.rowPtr[src];
-                    //     // printf("%u, %u, %u, %u\n", Node_id, degree, src, srcDegree);
-                    //     temp_total += degree;
-                    //     assert(Node_id == src);
-                    //     assert(temp_total == Degree_Scan.gdata()[i]);
-                    // }
-                    // assert(temp_total == nedges);
-
-                    time_ = t_.elapsed_and_reset();
-                    Log(debug, "check TIME: %f s", time_);
-
-                    // start loop
-                    T nq_head = 0;
-                    T eq_head = 0;
-
-                    double encode_time = 0, HD_process_time = 0;
-
-                    while (nq_head < current_nq.count.gdata()[0])
-                    {
-
-                        T stride_degree, max_blocks;
-                        stride_degree = (nq_head > 0) ? Degree_Scan.gdata()[nq_head] - Degree_Scan.gdata()[nq_head - 1] : Degree_Scan.gdata()[0] - 0;
-
-                        num_divs = (stride_degree + dv - 1) / dv;
-
-                        get_max_blocks<T>(stride_degree, max_blocks, num_divs, max_qDegree);
-                        cudaMemcpyToSymbol(NUMPART, &numPartitions_LD, sizeof(NUMPART));
-                        cudaMemcpyToSymbol(PARTSIZE, &partitionSize_LD, sizeof(PARTSIZE));
-                        cudaMemcpyToSymbol(MAXDEG, &stride_degree, sizeof(MAXDEG));
-                        cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
-
-                        T node_grid_size = min(nnodes, max_blocks);
-                        Log(info, "processing %u nodes of %u", node_grid_size, nnodes);
-                        size_t encode_size = (size_t)node_grid_size * stride_degree * num_divs;
-                        GPUArray<T> node_be("Temp level Counter", AllocationTypeEnum::gpu, encode_size, dev_);
-                        CUDA_RUNTIME(cudaMemset(SM_times.gdata(), 0, num_SMs * sizeof(Counters)));
-                        CUDA_RUNTIME(cudaMemset(SM_nodes.gdata(), 0, num_SMs * sizeof(uint64)));
-                        CUDA_RUNTIME(cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T)));
-                        CUDA_RUNTIME(cudaMemset(encode_offset.gdata(), -1, dataGraph.numNodes * sizeof(int)));
-
-                        execKernel((sgm_kernel_compute_encoding<T, block_size_LD, partitionSize_LD>), node_grid_size,
-                                   block_size_LD, dev_, false,
-                                   dataGraph, current_nq.device_queue->gdata()[0], nq_head,
-                                   node_be.gdata(), encode_offset.gdata(), SM_times.gdata(), SM_nodes.gdata());
-
-                        // if (eq_head == 0)
-                        //     print_SM_counters(SM_times.gdata(), SM_nodes.gdata());
-
-                        encode_time += t_.elapsed_and_reset();
-                        Log(debug, "Compute encoding succesful");
-
-                        CUDA_RUNTIME(cudaMemset(SM_times.gdata(), 0, num_SMs * sizeof(Counters)));
-                        CUDA_RUNTIME(cudaMemset(SM_nodes.gdata(), 0, num_SMs * sizeof(uint64)));
-
-                        nnodes -= node_grid_size;
-                        nq_head += node_grid_size;
-                        T work_list_size = (eq_head > 0) ? (Degree_Scan.gdata()[nq_head - 1] - Degree_Scan.gdata()[nq_head - 1 - node_grid_size]) : Degree_Scan.gdata()[nq_head - 1] - 0;
-
-                        cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_active_blocks,
-                                                                      sgm_kernel_pre_encoded_byEdge<T, block_size_HD>, block_size_HD,
-                                                                      0);
-                        max_active_blocks *= num_SMs;
-                        Log(debug, "Max active blocks from API %d", max_active_blocks);
-                        T edge_grid_size = min(work_list_size, max_active_blocks);
-                        uint64 level_size = edge_grid_size * max_qDegree * num_divs;
-                        GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
-                        GPUArray<MessageBlock> messages("Global messages", AllocationTypeEnum::gpu, edge_grid_size * sizeof(MessageBlock), dev_);
-                        GPUArray<T> listhead("Work list head", AllocationTypeEnum::gpu, 1, dev_);
-
-                        CUDA_RUNTIME(cudaMemset(current_level.gdata(), 0, level_size * sizeof(T)));
-                        CUDA_RUNTIME(cudaMemset(messages.gdata(), 0, edge_grid_size * sizeof(MessageBlock)));
-                        CUDA_RUNTIME(cudaMemset(listhead.gdata(), 0, sizeof(T)));
-                        cudaMemcpyToSymbol(CB, &(edge_grid_size), sizeof(CB));
-
-                        GLOBAL_HANDLE<T> gh;
-                        gh.counter = counter.gdata();
-                        gh.g = dataGraph;
-                        gh.srcList = src_mapping.gdata();
-                        gh.current_level = current_level.gdata();
-                        gh.Message = messages.gdata();
-                        gh.offset = encode_offset.gdata();
-                        gh.adj_enc = node_be.gdata();
-                        gh.work_list_head = listhead.gdata();
-                        gh.work_list_tail = work_list_size;
-
-                        // for worker queue
-                        queue_init(queue, tickets, head, tail, edge_grid_size, dev_);
-                        CUDA_RUNTIME(cudaMalloc((void **)&work_ready, edge_grid_size * sizeof(cuda::atomic<uint32_t, cuda::thread_scope_device>)));
-                        CUDA_RUNTIME(cudaMemset((void *)work_ready, 0, edge_grid_size * sizeof(cuda::atomic<uint32_t, cuda::thread_scope_device>)));
-                        gh.work_ready = work_ready;
-                        //
-                        execKernel((sgm_kernel_pre_encoded_byEdge<T, block_size_HD>),
-                                   edge_grid_size, block_size_HD, dev_, false, gh, eq_head,
-                                   SM_times.gdata(), SM_nodes.gdata(),
-                                   queue_caller(queue, tickets, head, tail));
-                        // execKernel((sgm_kernel_pre_encoded_byEdge<T, block_size_LD, partitionSize_LD>),
-                        //            edge_grid_size, block_size_LD, dev_, false,
-                        //            counter.gdata(), dataGraph, src_mapping.gdata(), eq_head,
-                        //            current_level.gdata(),
-                        //            d_bitmap_states.gdata(), node_be.gdata(), per_node_count.gdata(),
-                        //            offset.gdata(), SM_times.gdata(), SM_nodes.gdata());
-
-                        if (eq_head == 0)
-                            print_SM_counters(SM_times.gdata(), SM_nodes.gdata());
-
-                        nedges -= work_list_size;
-                        eq_head += work_list_size;
-
-                        current_level.freeGPU();
-                        node_be.freeGPU();
-                        messages.freeGPU();
-                        listhead.freeGPU();
-                        queue_free(queue, tickets, head, tail);
-                        HD_process_time += t_.elapsed_and_reset();
-                    }
-                    encode_offset.freeGPU();
-
-                    Log(info, "Encode TIME: %f s", encode_time);
-                    Log(info, "HD process TIME: %f s", HD_process_time);
-                }
-                else
-                {*/
                 maxDeg = level + span < maxDeg ? level + span : maxDeg;
 
                 cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
                 cudaMemcpyToSymbol(MAXDEG, &maxDeg, sizeof(MAXDEG));
-                cudaMemcpyToSymbol(NUMPART, &numPartitions_LD, sizeof(NUMPART));
-                cudaMemcpyToSymbol(PARTSIZE, &partitionSize_LD, sizeof(PARTSIZE));
+                cudaMemcpyToSymbol(NUMPART, &numPartitions, sizeof(NUMPART));
+                cudaMemcpyToSymbol(PARTSIZE, &partitionSize, sizeof(PARTSIZE));
 
                 int temp1, temp2;
                 cudaOccupancyMaxPotentialBlockSize(&temp1, &temp2,
-                                                   sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>);
+                                                   sgm_kernel_central_node_function<T, block_size, partitionSize>);
                 Log(debug, "%d, %d", temp1, temp2);
 
                 cudaOccupancyMaxActiveBlocksPerMultiprocessor(
                     &max_active_blocks,
-                    sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>,
-                    block_size_LD, 0);
+                    sgm_kernel_central_node_function<T, block_size, partitionSize>,
+                    block_size, 0);
                 cudaMemcpyToSymbol(CBPSM, &(max_active_blocks), sizeof(CBPSM));
                 max_active_blocks *= num_SMs;
 
@@ -1031,7 +888,7 @@ namespace graph
                 cudaMemcpyToSymbol(CB, &(grid_block_size), sizeof(CB));
 
                 uint64 encode_size = (uint64)grid_block_size * maxDeg * num_divs;
-                uint64 level_size = (uint64)grid_block_size * max_qDegree * num_divs * numPartitions_LD;
+                uint64 level_size = (uint64)grid_block_size * max_qDegree * num_divs * numPartitions;
 
                 GPUArray<T> node_be("Temp level Counter", AllocationTypeEnum::gpu, encode_size, dev_);
                 GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
@@ -1070,8 +927,8 @@ namespace graph
                 cuMemGetInfo(&free, &total);
                 Log(debug, "Free mem: %f GB, Total mem: %f GB", (free * 1.0) / (1E9), (total * 1.0) / (1E9));
 
-                execKernel((sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>),
-                           grid_block_size, block_size_LD, dev_, false,
+                execKernel((sgm_kernel_central_node_function<T, block_size, partitionSize>),
+                           grid_block_size, block_size, dev_, false,
                            SM_times.gdata(), block_util1.gdata(), block_util2.gdata(), block_util3.gdata(),
                            gh, queue_caller(queue, tickets, head, tail));
 
@@ -1089,7 +946,6 @@ namespace graph
                 {
                     ttotal += SM_times.gdata()[sm].totalTime[STATE1] + SM_times.gdata()[sm].totalTime[STATE2];
                 }
-
                 average = (ttotal * 1.0) / num_SMs;
                 for (int sm = 0; sm < num_SMs; ++sm)
                 {
@@ -1112,7 +968,6 @@ namespace graph
                 block_util1.freeGPU();
                 block_util2.freeGPU();
                 block_util3.freeGPU();
-                // }
 
                 // Print bucket stats:
                 std::cout << "Bucket levels: " << level << " to " << maxDeg
@@ -1120,7 +975,6 @@ namespace graph
                           << ", Counter: " << counter.gdata()[0] << std::endl;
             }
             level += span;
-            span = bound_HD;
             todo -= current_nq.count.gdata()[0];
             // todo = 0;    //disable HD
             first = false;
@@ -1130,7 +984,6 @@ namespace graph
 
         counter.freeGPU();
         per_node_count.freeGPU();
-        d_bitmap_states.freeGPU();
         intersection_count.freeGPU();
         SM_times.freeGPU();
         SM_nodes.freeGPU();
@@ -1144,20 +997,17 @@ namespace graph
         // print_graph(dataGraph);
         // Initialise Kernel Dims
         CUDAContext context;
-        const auto block_size_LD = BLOCK_SIZE_LD; // Block size for low degree nodes
-        const T partitionSize_LD = PARTITION_SIZE_LD;
-        const T numPartitions_LD = block_size_LD / partitionSize_LD;
-        const auto block_size_HD = BLOCK_SIZE_HD;
+        const auto block_size = BLOCK_SIZE; // Block size for low degree nodes
+        const T partitionSize = PARTITION_SIZE;
+        const T numPartitions = block_size / partitionSize;
 
         const T bound_LD = cutoff_;
-        const T bound_HD = 32768 + 16384;
         const uint dv = 32;
 
         // CUDA Initialise, gather runtime Info.
 
         T num_SMs = context.num_SMs;
-        T conc_blocks_per_SM_LD = context.GetConCBlocks(block_size_LD);
-        T conc_blocks_per_SM_HD = context.GetConCBlocks(block_size_HD);
+        T conc_blocks_per_SM = context.GetConCBlocks(block_size);
 
         // template information in GPU Constant memory
         cudaMemcpyToSymbol(KCCOUNT, &(query_sequence->N), sizeof(KCCOUNT));
@@ -1203,234 +1053,99 @@ namespace graph
                 int max_active_blocks = 0;
 
                 size_t free = 0, total = 0;
-                cuMemGetInfo(&free, &total);
                 Log(debug, "max Bucket degree %u", maxDeg);
 
                 if (!first || SCHEDULING)
                     current_nq.map_n_key_sort(nodeDegree.gdata());
 
-                GPUArray<mapping<T>> src_mapping;
-                if (!first)
-                {
-                    uint count = current_nq.count.gdata()[0]; // grid size for encoding kernel
-                    Degree_Scan.initialize("Inclusive Sum scan for edge per block grid", unified, count, dev_);
-                    Degree_Scan.setAll(0, current_nq.count.gdata()[0]);
-                    current_nq.i_scan(Degree_Scan.gdata(), nodeDegree.gdata());
-                    uint len = Degree_Scan.gdata()[count - 1]; // for pre encoded kernel
-                    src_mapping.initialize("mapping edges with sources", unified, len, dev_);
-                    execKernel((map_src<T>), count, 256, dev_, false, src_mapping.gdata(),
-                               current_nq.device_queue->gdata()[0],
-                               Degree_Scan.gdata(), nodeDegree.gdata());
-                }
-                if (maxDeg > bound_LD)
-                {
-                    T nnodes = current_nq.count.gdata()[0];
-                    T nedges = Degree_Scan.gdata()[nnodes - 1];
-                    Log(debug, "Nodes: %u, Edges: %u", nnodes, nedges);
-                    GPUArray<int> encode_offset("Encoding offset", gpu, dataGraph.numNodes, dev_);
+                maxDeg = level + span < maxDeg ? level + span : maxDeg;
+                num_divs = (maxDeg + dv - 1) / dv;
+                Log(debug, "max-degree: %u", maxDeg);
+                Log(debug, "num-divs %u", num_divs);
+                cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
+                cudaMemcpyToSymbol(MAXDEG, &maxDeg, sizeof(MAXDEG));
+                cudaMemcpyToSymbol(NUMPART, &numPartitions, sizeof(NUMPART));
+                cudaMemcpyToSymbol(PARTSIZE, &partitionSize, sizeof(PARTSIZE));
 
-#pragma region // check
-               //  T temp_total = 0;
-               //  for (int i = 0; i < nnodes; i++)
-               //  {
-               //      T Node_id = current_nq.device_queue->gdata()->queue[i];
-               //      T degree = dataGraph.rowPtr[Node_id + 1] - dataGraph.rowPtr[Node_id];
-               //      T src = (i > 0) ? src_mapping.gdata()[Degree_Scan.gdata()[i - 1]].src : src_mapping.gdata()[0].src;
-               //      T srcDegree = dataGraph.rowPtr[src + 1] - dataGraph.rowPtr[src];
-               //      // printf("%u, %u, %u, %u\n", Node_id, degree, src, srcDegree);
-               //      temp_total += degree;
-               //      assert(Node_id == src);
-               //      assert(temp_total == Degree_Scan.gdata()[i]);
-               //  }
-               //  assert(temp_total == nedges);
-#pragma endregion
+                int temp1, temp2;
+                cudaOccupancyMaxPotentialBlockSize(&temp1, &temp2,
+                                                   sgm_kernel_central_node_function<T, block_size, partitionSize>);
+                Log(debug, "%d, %d", temp1, temp2);
 
-                    // start loop
-                    T nq_head = 0;
-                    T eq_head = 0;
-                    GPUArray<uint64> listhead("Work list head", AllocationTypeEnum::gpu, 1, dev_);
+                cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+                    &max_active_blocks,
+                    sgm_kernel_central_node_function<T, block_size, partitionSize>,
+                    block_size, 0);
+                cudaMemcpyToSymbol(CBPSM, &(max_active_blocks), sizeof(CBPSM));
+                max_active_blocks *= num_SMs;
 
-                    while (nq_head < current_nq.count.gdata()[0])
-                    {
-                        T stride_degree, max_blocks;
-                        stride_degree = (nq_head > 0) ? Degree_Scan.gdata()[nq_head] - Degree_Scan.gdata()[nq_head - 1] : Degree_Scan.gdata()[0] - 0;
-                        num_divs = (stride_degree + dv - 1) / dv;
+                uint grid_block_size = min(current_nq.count.gdata()[0], max_active_blocks);
+                cudaMemcpyToSymbol(CB, &(grid_block_size), sizeof(CB));
 
-                        get_max_blocks<T>(stride_degree, max_blocks, num_divs, max_qDegree);
-                        cudaMemcpyToSymbol(NUMPART, &numPartitions_LD, sizeof(NUMPART));
-                        cudaMemcpyToSymbol(PARTSIZE, &partitionSize_LD, sizeof(PARTSIZE));
-                        cudaMemcpyToSymbol(MAXDEG, &stride_degree, sizeof(MAXDEG));
-                        cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
+                Log(debug, "current queue count %u\n", current_nq.count.gdata()[0]);
+                Log(debug, "grid size: %u", grid_block_size);
 
-                        T node_grid_size = min(nnodes, max_blocks);
-                        Log(debug, "processing %u nodes of %u", node_grid_size, nnodes);
-                        size_t encode_size = (size_t)node_grid_size * stride_degree * num_divs;
-                        GPUArray<T> node_be("Temp level Counter", AllocationTypeEnum::gpu, encode_size, dev_);
-                        cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T));
-                        cudaMemset(encode_offset.gdata(), -1, dataGraph.numNodes * sizeof(int));
+                uint64 encode_size = (uint64)grid_block_size * maxDeg * num_divs;
+                uint64 level_size = (uint64)grid_block_size * max_qDegree * num_divs * numPartitions;
 
-                        execKernel((sgm_kernel_compute_encoding<T, block_size_LD, partitionSize_LD>), node_grid_size,
-                                   block_size_LD, dev_, false,
-                                   dataGraph, current_nq.device_queue->gdata()[0], nq_head,
-                                   node_be.gdata(), encode_offset.gdata());
-                        Log(debug, "Compute encoding succesful");
+                GPUArray<T> node_be("Temp level Counter", AllocationTypeEnum::gpu, encode_size, dev_);
+                GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
+                GPUArray<uint64> work_list_head("Global work stealing list", AllocationTypeEnum::gpu, 1, dev_);
+                GPUArray<MessageBlock> messages("Messages for sharing info", AllocationTypeEnum::gpu, grid_block_size, dev_);
+                GPUArray<T> per_node_count("for debugging", AllocationTypeEnum::unified, dataGraph.numNodes, dev_);
 
-                        nnodes -= node_grid_size;
-                        nq_head += node_grid_size;
-                        uint64 work_list_size = (eq_head > 0) ? (Degree_Scan.gdata()[nq_head - 1] - Degree_Scan.gdata()[nq_head - 1 - node_grid_size]) : Degree_Scan.gdata()[nq_head - 1] - 0;
+                CUDA_RUNTIME(cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T)));
+                CUDA_RUNTIME(cudaMemset(current_level.gdata(), 0, level_size * sizeof(T)));
+                CUDA_RUNTIME(cudaMemset(work_list_head.gdata(), 0, sizeof(uint64)));
+                CUDA_RUNTIME(cudaMemset(messages.gdata(), 0, grid_block_size * sizeof(MessageBlock)));
+                CUDA_RUNTIME(cudaMemset(per_node_count.gdata(), 0, dataGraph.numNodes * sizeof(T)));
 
-                        max_active_blocks = 0;
-                        cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_active_blocks,
-                                                                      sgm_kernel_pre_encoded_byEdge<T, block_size_HD>, block_size_HD,
-                                                                      0);
-                        max_active_blocks *= num_SMs;
-                        Log(debug, "Max active blocks from API %d", max_active_blocks);
-                        // T edge_grid_size = min(work_list_size, num_SMs * conc_blocks_per_SM_HD);
-                        T edge_grid_size = min(work_list_size, (uint64)max_active_blocks);
-                        uint64 level_size = edge_grid_size * max_qDegree * num_divs;
-                        GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
-                        GPUArray<MessageBlock> messages("Global messages", AllocationTypeEnum::gpu, edge_grid_size * sizeof(MessageBlock), dev_);
+                GLOBAL_HANDLE<T> gh;
+                gh.counter = counter.gdata();
+                gh.g = dataGraph;
+                gh.current = current_nq.device_queue->gdata()[0];
+                gh.work_list_head = work_list_head.gdata();
+                gh.work_list_tail = gh.current.count[0];
+                gh.current_level = current_level.gdata();
+                gh.adj_enc = node_be.gdata();
+                gh.Message = messages.gdata();
 
-                        CUDA_RUNTIME(cudaMemset(current_level.gdata(), 0, level_size * sizeof(T)));
-                        CUDA_RUNTIME(cudaMemset(messages.gdata(), 0, edge_grid_size * sizeof(MessageBlock)));
-                        CUDA_RUNTIME(cudaMemset(listhead.gdata(), 0, sizeof(uint64)));
+                queue_init(queue, tickets, head, tail, grid_block_size, dev_);
+                CUDA_RUNTIME(cudaMalloc((void **)&work_ready, grid_block_size * sizeof(cuda::atomic<uint32_t, cuda::thread_scope_device>)));
+                CUDA_RUNTIME(cudaMemset((void *)work_ready, 0, grid_block_size * sizeof(cuda::atomic<uint32_t, cuda::thread_scope_device>)));
+                gh.work_ready = work_ready;
 
-                        cudaMemcpyToSymbol(CBPSM, &(conc_blocks_per_SM_HD), sizeof(CBPSM));
-                        cudaMemcpyToSymbol(CB, &(edge_grid_size), sizeof(CB));
+                cuMemGetInfo(&free, &total);
+                Log(debug, "Free mem: %f GB, Total mem: %f GB", (free * 1.0) / (1E9), (total * 1.0) / (1E9));
 
-                        GLOBAL_HANDLE<T> gh;
-                        gh.counter = counter.gdata();
-                        gh.g = dataGraph;
-                        gh.srcList = src_mapping.gdata();
-                        gh.current_level = current_level.gdata();
-                        gh.Message = messages.gdata();
-                        gh.offset = encode_offset.gdata();
-                        gh.adj_enc = node_be.gdata();
-                        gh.work_list_head = listhead.gdata();
-                        gh.work_list_tail = work_list_size;
+                execKernel((sgm_kernel_central_node_function<T, block_size, partitionSize>),
+                           grid_block_size, block_size, dev_, false,
+                           gh, /*per_node_count.gdata(),*/
+                           queue_caller(queue, tickets, head, tail));
+                // execKernel((sgm_kernel_central_node_function_byNode<T, block_size_LD, partitionSize_LD>),
+                //            grid_block_size, block_size_LD, dev_, false,
+                //            counter.gdata(), work_list_head.gdata(),
+                //            dataGraph, current_nq.device_queue->gdata()[0],
+                //            current_level.gdata(),
+                //            node_be.gdata());
 
-                        // for worker queue
-                        queue_init(queue, tickets, head, tail, edge_grid_size, dev_);
-                        CUDA_RUNTIME(cudaMalloc((void **)&work_ready, edge_grid_size * sizeof(cuda::atomic<uint32_t, cuda::thread_scope_device>)));
-                        CUDA_RUNTIME(cudaMemset((void *)work_ready, 0, edge_grid_size * sizeof(cuda::atomic<uint32_t, cuda::thread_scope_device>)));
-                        gh.work_ready = work_ready;
+                // cleanup
+                node_be.freeGPU();
+                current_level.freeGPU();
+                work_list_head.freeGPU();
+                messages.freeGPU();
+                per_node_count.freeGPU();
 
-                        execKernel((sgm_kernel_pre_encoded_byEdge<T, block_size_HD>),
-                                   edge_grid_size, block_size_HD, dev_, false, gh, eq_head,
-                                   queue_caller(queue, tickets, head, tail));
+                CUDA_RUNTIME(cudaFree(work_ready));
+                queue_free(queue, tickets, head, tail);
 
-                        nedges -= work_list_size;
-                        eq_head += work_list_size;
-                        current_level.freeGPU();
-                        node_be.freeGPU();
-                        cudaFree(work_ready);
-                        queue_free(queue, tickets, head, tail);
-                    }
-                    encode_offset.freeGPU();
-                    listhead.freeGPU();
-                }
-                else
-                {
-                    maxDeg = level + span < maxDeg ? level + span : maxDeg;
-                    num_divs = (maxDeg + dv - 1) / dv;
-                    Log(debug, "max-degree: %u", maxDeg);
-                    Log(debug, "num-divs %u", num_divs);
-                    cudaMemcpyToSymbol(NUMDIVS, &num_divs, sizeof(NUMDIVS));
-                    cudaMemcpyToSymbol(MAXDEG, &maxDeg, sizeof(MAXDEG));
-                    cudaMemcpyToSymbol(NUMPART, &numPartitions_LD, sizeof(NUMPART));
-                    cudaMemcpyToSymbol(PARTSIZE, &partitionSize_LD, sizeof(PARTSIZE));
+                // Print bucket stats:
+                std::cout << "\nBucket levels: " << level << " to " << maxDeg
+                          << ", nodes/edges: " << current_nq.count.gdata()[0]
+                          << ", Counter: " << counter.gdata()[0] << std::endl;
 
-                    int temp1, temp2;
-                    cudaOccupancyMaxPotentialBlockSize(&temp1, &temp2,
-                                                       sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>);
-                    Log(debug, "%d, %d", temp1, temp2);
-
-                    cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-                        &max_active_blocks,
-                        sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>,
-                        block_size_LD, 0);
-                    cudaMemcpyToSymbol(CBPSM, &(max_active_blocks), sizeof(CBPSM));
-                    max_active_blocks *= num_SMs;
-
-                    uint grid_block_size = min(current_nq.count.gdata()[0], max_active_blocks);
-                    cudaMemcpyToSymbol(CB, &(grid_block_size), sizeof(CB));
-
-                    Log(debug, "current queue count %u\n", current_nq.count.gdata()[0]);
-                    Log(debug, "grid size: %u", grid_block_size);
-
-                    uint64 encode_size = (uint64)grid_block_size * maxDeg * num_divs;
-                    uint64 level_size = (uint64)grid_block_size * max_qDegree * num_divs * numPartitions_LD;
-
-                    GPUArray<T> node_be("Temp level Counter", AllocationTypeEnum::gpu, encode_size, dev_);
-                    GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, dev_);
-                    GPUArray<uint64> work_list_head("Global work stealing list", AllocationTypeEnum::gpu, 1, dev_);
-                    GPUArray<MessageBlock> messages("Messages for sharing info", AllocationTypeEnum::gpu, grid_block_size, dev_);
-                    GPUArray<T> per_node_count("for debugging", AllocationTypeEnum::unified, dataGraph.numNodes, dev_);
-
-                    CUDA_RUNTIME(cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T)));
-                    CUDA_RUNTIME(cudaMemset(current_level.gdata(), 0, level_size * sizeof(T)));
-                    uint64 wl_head = (first_sym_level > 2) ? 0 : 1;
-                    // CUDA_RUNTIME(cudaMemset(work_list_head.gdata(), 0, sizeof(uint64)));
-                    CUDA_RUNTIME(cudaMemcpy(work_list_head.gdata(), &wl_head, sizeof(uint64), cudaMemcpyHostToDevice));
-                    CUDA_RUNTIME(cudaMemset(messages.gdata(), 0, grid_block_size * sizeof(MessageBlock)));
-                    CUDA_RUNTIME(cudaMemset(per_node_count.gdata(), 0, dataGraph.numNodes * sizeof(T)));
-
-                    GLOBAL_HANDLE<T> gh;
-                    gh.counter = counter.gdata();
-                    gh.g = dataGraph;
-                    gh.current = current_nq.device_queue->gdata()[0];
-                    gh.work_list_head = work_list_head.gdata();
-                    gh.work_list_tail = gh.current.count[0];
-                    gh.current_level = current_level.gdata();
-                    gh.adj_enc = node_be.gdata();
-                    gh.Message = messages.gdata();
-
-                    queue_init(queue, tickets, head, tail, grid_block_size, dev_);
-                    CUDA_RUNTIME(cudaMalloc((void **)&work_ready, grid_block_size * sizeof(cuda::atomic<uint32_t, cuda::thread_scope_device>)));
-                    CUDA_RUNTIME(cudaMemset((void *)work_ready, 0, grid_block_size * sizeof(cuda::atomic<uint32_t, cuda::thread_scope_device>)));
-                    gh.work_ready = work_ready;
-
-                    size_t free, total;
-                    cuMemGetInfo(&free, &total);
-                    Log(debug, "Free mem: %f GB, Total mem: %f GB", (free * 1.0) / (1E9), (total * 1.0) / (1E9));
-
-                    execKernel((sgm_kernel_central_node_function<T, block_size_LD, partitionSize_LD>),
-                               grid_block_size, block_size_LD, dev_, false,
-                               gh, /*per_node_count.gdata(),*/
-                               queue_caller(queue, tickets, head, tail));
-                    // execKernel((sgm_kernel_central_node_function_byNode<T, block_size_LD, partitionSize_LD>),
-                    //            grid_block_size, block_size_LD, dev_, false,
-                    //            counter.gdata(), work_list_head.gdata(),
-                    //            dataGraph, current_nq.device_queue->gdata()[0],
-                    //            current_level.gdata(),
-                    //            node_be.gdata());
-                    // std::ofstream myFile("test1.csv");
-                    // for (T i = 0; i < dataGraph.numNodes; i++)
-                    // {
-                    //     string s = std::to_string(i) + "\t" + std::to_string(nodeDegree.gdata()[i]) + "\t" + std::to_string(per_node_count.gdata()[i]) + "\n";
-                    //     myFile << s;
-                    // }
-                    // myFile.close();
-
-                    // cleanup
-                    node_be.freeGPU();
-                    current_level.freeGPU();
-                    work_list_head.freeGPU();
-                    messages.freeGPU();
-                    per_node_count.freeGPU();
-
-                    CUDA_RUNTIME(cudaFree(work_ready));
-                    queue_free(queue, tickets, head, tail);
-
-                    // Print bucket stats:
-                    std::cout << "\nBucket levels: " << level << " to " << maxDeg
-                              << ", nodes/edges: " << current_nq.count.gdata()[0]
-                              << ", Counter: " << counter.gdata()[0] << std::endl;
-                }
                 level += span;
-                span = bound_HD;
                 todo -= current_nq.count.gdata()[0];
-                // todo = 0; // disable HD
                 first = false;
             }
         }

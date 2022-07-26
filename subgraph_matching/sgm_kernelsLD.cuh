@@ -1,6 +1,6 @@
 #pragma once
-#include "include/utils.cuh"
-#include "include/utils_LD.cuh"
+#include "include/host_utils.cuh"
+#include "include/device_utils.cuh"
 #include "include/common_utils.cuh"
 #include "config.cuh"
 
@@ -14,9 +14,8 @@ __launch_bounds__(BLOCK_DIM_X)
 	const T wx = threadIdx.x / CPARTSIZE;
 	const T lx = threadIdx.x % CPARTSIZE;
 	const T partMask = ((1 << CPARTSIZE) - 1) << ((wx % (32 / CPARTSIZE)) * CPARTSIZE);
-
-	__shared__ SHARED_HANDLE_LD<T, BLOCK_DIM_X, NP> sh;
-	LOCAL_HANDLE_LD lh;
+	__shared__ SHARED_HANDLE<T, BLOCK_DIM_X, NP> sh;
+	LOCAL_HANDLE lh;
 
 	if (threadIdx.x == 0)
 	{
@@ -39,8 +38,6 @@ __launch_bounds__(BLOCK_DIM_X)
 				__syncthreads();
 				continue;
 			}
-			// if (sh.state == 100)
-			// 	break;
 			if (lx == 0)
 			{
 				sh.sg_count[wx] = 0;
@@ -64,12 +61,12 @@ __launch_bounds__(BLOCK_DIM_X)
 					if (lx == 0)
 					{
 						sh.fork[wx] = false;
-						LD_try_dequeue(sh, gh, queue_caller(queue, tickets, head, tail));
+						try_dequeue(sh, gh, queue_caller(queue, tickets, head, tail));
 					}
 					__syncwarp(partMask);
 					if (sh.fork[wx])
 					{
-						LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
+						do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
 						__syncwarp(partMask);
 						continue;
 					}
@@ -90,12 +87,12 @@ __launch_bounds__(BLOCK_DIM_X)
 							if (lx == 0)
 							{
 								sh.fork[wx] = false;
-								LD_try_dequeue(sh, gh, queue_caller(queue, tickets, head, tail));
+								try_dequeue(sh, gh, queue_caller(queue, tickets, head, tail));
 							}
 							__syncwarp(partMask);
 							if (sh.fork[wx])
 							{
-								LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
+								do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
 								lh.warpCount = 0;
 								__syncwarp(partMask);
 								backtrack(lh, sh, partMask, cl);
@@ -147,7 +144,7 @@ __launch_bounds__(BLOCK_DIM_X)
 			const T wx = threadIdx.x / CPARTSIZE;
 			const T lx = threadIdx.x % CPARTSIZE;
 
-			LD_setup_stack(sh, gh);
+			setup_stack(sh, gh);
 			__syncthreads();
 
 			for (T p = threadIdx.x; p < sh.num_divs_local; p += BLOCK_DIM_X)
@@ -160,7 +157,7 @@ __launch_bounds__(BLOCK_DIM_X)
 			}
 			__syncthreads();
 
-			compute_intersection_block_LD<T, BLOCK_DIM_X, true>(
+			compute_intersection_block<T, BLOCK_DIM_X, true>(
 				lh.warpCount, sh.num_divs_local,
 				sh.level_prev_index[wx][sh.l[wx] - 1] - 1, sh.l[wx], sh.to,
 				sh.level_offset, sh.level_prev_index[wx], sh.encode);
@@ -270,6 +267,7 @@ __launch_bounds__(BLOCK_DIM_X)
 	}
 }
 
+// baseline
 #pragma region
 template <typename T, uint BLOCK_DIM_X, uint CPARTSIZE>
 __global__ void sgm_kernel_central_node_function_byNode(
