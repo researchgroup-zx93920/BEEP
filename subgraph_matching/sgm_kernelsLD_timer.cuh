@@ -124,23 +124,21 @@ __launch_bounds__(BLOCK_DIM_X)
                     init_stack(sh, gh, partMask, j);
 
                     // try dequeue here
-                    if (true /*&&  sh.srcLen - j > NP*/)
+
+                    if (lx == 0)
                     {
-                        if (lx == 0)
-                        {
-                            sh.fork[wx] = false;
-                            LD_try_dequeue(sh, gh, queue_caller(queue, tickets, head, tail));
-                        }
-                        __syncwarp(partMask);
-                        if (sh.fork[wx])
-                        {
-                            LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
-                            __syncwarp(partMask);
-                            continue;
-                        }
+                        sh.fork[wx] = false;
+                        LD_try_dequeue(sh, gh, queue_caller(queue, tickets, head, tail));
                     }
                     __syncwarp(partMask);
+                    if (sh.fork[wx])
+                    {
+                        LD_do_fork(sh, gh, j, queue_caller(queue, tickets, head, tail));
+                        __syncwarp(partMask);
+                        continue;
+                    }
 
+                    __syncwarp(partMask);
                     // get wc
                     count_tri(lh, sh, gh, partMask, cl, j);
                     __syncwarp(partMask);

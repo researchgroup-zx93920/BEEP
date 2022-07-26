@@ -1089,6 +1089,7 @@ namespace graph
                 {
                     ttotal += SM_times.gdata()[sm].totalTime[STATE1] + SM_times.gdata()[sm].totalTime[STATE2];
                 }
+
                 average = (ttotal * 1.0) / num_SMs;
                 for (int sm = 0; sm < num_SMs; ++sm)
                 {
@@ -1368,7 +1369,9 @@ namespace graph
 
                     CUDA_RUNTIME(cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T)));
                     CUDA_RUNTIME(cudaMemset(current_level.gdata(), 0, level_size * sizeof(T)));
-                    CUDA_RUNTIME(cudaMemset(work_list_head.gdata(), 0, sizeof(uint64)));
+                    uint64 wl_head = (first_sym_level > 2) ? 0 : 1;
+                    // CUDA_RUNTIME(cudaMemset(work_list_head.gdata(), 0, sizeof(uint64)));
+                    CUDA_RUNTIME(cudaMemcpy(work_list_head.gdata(), &wl_head, sizeof(uint64), cudaMemcpyHostToDevice));
                     CUDA_RUNTIME(cudaMemset(messages.gdata(), 0, grid_block_size * sizeof(MessageBlock)));
                     CUDA_RUNTIME(cudaMemset(per_node_count.gdata(), 0, dataGraph.numNodes * sizeof(T)));
 
