@@ -20,6 +20,7 @@ struct GLOBAL_HANDLE
     T *adj_enc;
     uint64 *work_list_head;
     uint64 work_list_tail;
+    T stride;
 
     // for worker queue
     cuda::atomic<uint32_t, cuda::thread_scope_device> *work_ready;
@@ -58,7 +59,7 @@ init_sm(SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh,
     __syncthreads();
     if (threadIdx.x == 0)
     {
-        uint64 index = atomicAdd(gh.work_list_head, 1);
+        uint64 index = atomicAdd(gh.work_list_head, gh.stride);
         if (index < gh.work_list_tail)
         {
             sh.src = gh.current.queue[index];
