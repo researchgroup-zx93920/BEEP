@@ -17,10 +17,10 @@ DEPS := $(OBJS:.o=.d)
 #INCL_DIRS := $(shell find $(INC_DIRS) -type d) ./include $(FREESTAND_DIR)/include 
 INCL_DIRS := #./include $(FREESTAND_DIR)/include 
 INC_FLAGS := $(addprefix -I,$(INCL_DIRS))
-LDFLAGS := -L./nauty/ -l:nauty.a -lcuda
+LDFLAGS := -L./nauty/ -l:nauty.a -lcuda -lgomp
 CPPFLAGS ?= $(INC_FLAGS) -g -Wall -pthread -MMD -MP -shared -fPIC -std=c++11 -O3 -mavx -ftree-vectorize -fopt-info-vec
-CUDAFLAGS = $(INC_FLAGS) -g -w -Xcompiler -rdynamic -lineinfo -O3 -DCUDA -DNOT_IMPL -arch=sm_80 -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_80,code=compute_80
-CUDADEBUGFLAGS = $(INC_DIRS) -g -w -G -std=c++11 -DCUDA -DNOT_IMPL -arch=sm_80 -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_80,code=compute_80
+CUDAFLAGS = $(INC_FLAGS) -g -w -Xcompiler -fopenmp -lineinfo -O3 -DCUDA -DNOT_IMPL -arch=sm_70 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_70,code=compute_70
+CUDADEBUGFLAGS = $(INC_DIRS) -g -w -G -std=c++11 -DCUDA -DNOT_IMPL -arch=sm_70 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_70,code=compute_70
 
 all: objs release_exes
 

@@ -36,6 +36,7 @@ struct Config
     ProcessingElementEnum processElement;
     KcliqueConfig kcConfig;
     bool isSmall;
+    int ndev;
 };
 
 static MAINTASK parseMainTask(const char *s)
@@ -346,6 +347,7 @@ static Config parseArgs(int argc, char **argv)
     config.k = 5;
     config.sortEdges = false;
     config.cutoff = 768;
+    config.ndev = 1;
 
     config.processBy = ByNode;
     config.processElement = BlockWarp;
@@ -357,7 +359,7 @@ static Config parseArgs(int argc, char **argv)
 
     // printf("parsing configuration .... \n");
 
-    while ((opt = getopt(argc, argv, "g:r:d:m:x:o:a:k:h:v:s:p:e:q:w:t:c:")) >= 0)
+    while ((opt = getopt(argc, argv, "g:r:d:m:x:o:a:k:h:v:s:p:e:q:w:t:c:n:")) >= 0)
     {
         switch (opt)
         {
@@ -408,6 +410,9 @@ static Config parseArgs(int argc, char **argv)
             break;
         case 'c':
             config.cutoff = atoi(optarg);
+            break;
+        case 'n':
+            config.ndev = atoi(optarg);
             break;
         case 'h':
             usage();

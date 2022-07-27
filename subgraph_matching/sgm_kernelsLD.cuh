@@ -19,7 +19,6 @@ __launch_bounds__(BLOCK_DIM_X)
 
 	if (threadIdx.x == 0)
 	{
-		printf("Block: %u says hi!\n", blockIdx.x);
 		sh.root_sm_block_id = sh.sm_block_id = blockIdx.x;
 		sh.state = 0;
 	}
@@ -34,6 +33,10 @@ __launch_bounds__(BLOCK_DIM_X)
 
 			__syncthreads();
 
+			// if (sh.state == 100)
+			// {
+			// 	continue;
+			// }
 			if (sh.state == 1)
 			{
 				if (threadIdx.x == 0)
@@ -41,12 +44,14 @@ __launch_bounds__(BLOCK_DIM_X)
 				__syncthreads();
 				continue;
 			}
-			if (threadIdx.x == 0)
-			{
-				// int devID;
-				// cudaGetDevice(&devID);
-				printf("Block: %u from device %d got src: %u\n", blockIdx.x, 1, sh.src);
-			}
+
+			// if (threadIdx.x == 0)
+			// {
+			// 	// int devID;
+			// 	// cudaGetDevice(&devID);
+			// 	printf("Block: %u from device %d got src: %u with KCCOUNT %u\n", blockIdx.x, 1, sh.src, KCCOUNT);
+			// }
+
 			__syncthreads();
 			if (lx == 0)
 			{

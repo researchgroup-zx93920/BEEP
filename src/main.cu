@@ -331,7 +331,7 @@ int main(int argc, char **argv)
         patG.rowInd->cdata() = patCsrcoo.row_ind();
         patG.colInd->cdata() = patCsrcoo.col_ind();
 
-        graph::SG_Match<uint> *sgm = new graph::SG_Match<uint>(config.mt, config.processBy, config.deviceId, config.cutoff);
+        graph::SG_Match<uint> *sgm = new graph::SG_Match<uint>(config.mt, config.processBy, config.deviceId, config.cutoff, config.ndev);
         sgm->run(*gd, patG);
 
         // Clean up

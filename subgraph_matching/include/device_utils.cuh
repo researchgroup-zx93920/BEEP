@@ -9,6 +9,7 @@ __device__ __forceinline__
 template <typename T>
 struct GLOBAL_HANDLE
 {
+    uint64* global_counter;
     uint64 *counter;
     graph::COOCSRGraph_d<T> g;
     mapping<T> *srcList;
@@ -53,13 +54,12 @@ __device__ struct LOCAL_HANDLE
 };
 
 fundef_LD void
-init_sm(SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh,
-        GLOBAL_HANDLE<T> &gh)
+init_sm(SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh,GLOBAL_HANDLE<T> &gh)
 {
     __syncthreads();
     if (threadIdx.x == 0)
     {
-        uint64 index = atomicAdd(gh.work_list_head, gh.stride);
+        uint64 index = atomicAdd(gh.work_list_head,(uint64) gh.stride);
         if (index < gh.work_list_tail)
         {
             sh.src = gh.current.queue[index];

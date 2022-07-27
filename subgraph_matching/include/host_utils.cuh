@@ -247,3 +247,8 @@ __device__ __forceinline__ void warp_sorted_count_and_encode_full_undirected(
         }
     }
 }
+
+__global__ void final_counter(uint64* glob, uint64* dev)
+{
+    atomicAdd(glob, dev[0]);
+}
