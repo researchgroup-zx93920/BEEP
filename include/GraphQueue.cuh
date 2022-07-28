@@ -11,6 +11,19 @@ __global__ void map_degree(T *Degree, T len, T *mapping, T *data)
 		mapping[gtid] = Degree[data[gtid]];
 	}
 }
+
+template <typename T>
+__global__ void map_degree_log(T *Degree, T len, T *mapping, T *data)
+{
+	uint gtid = blockIdx.x * blockDim.x + threadIdx.x;
+	if (gtid < len)
+	{
+		// mapping[gtid] =  Degree[data[gtid]]*((T) (sqrt((float) Degree[data[gtid]])));
+		// mapping[gtid] =  Degree[data[gtid]]*((T) (__log2f(Degree[data[gtid]])+1));
+		mapping[gtid] =  Degree[data[gtid]]*Degree[data[gtid]];
+	}
+}
+
 namespace graph
 {
 	template <typename T, typename MarkType = bool>
@@ -142,13 +155,14 @@ namespace graph
 			auto gridsize = (len + block_dim - 1) / block_dim;
 
 			CUDA_RUNTIME(cudaMemcpy(queue, device_queue->gdata()->queue, len * sizeof(T), cudaMemcpyDeviceToDevice));
-			execKernel(map_degree<uint>, gridsize, block_dim, dev_, false, degree, len, mapping, queue);
+			execKernel(map_degree_log<uint>, gridsize, block_dim, dev_, false, degree, len, mapping, queue);
 
 			void *d_temp_storage = NULL;
 			size_t temp_storage_bytes = 0;
 			cub::DeviceScan::InclusiveSum(d_temp_storage, temp_storage_bytes, mapping, scanned, len);
 			cudaMalloc(&d_temp_storage, temp_storage_bytes);
 			cub::DeviceScan::InclusiveSum(d_temp_storage, temp_storage_bytes, mapping, scanned, len);
+			CUDA_RUNTIME(cudaDeviceSynchronize());
 
 			cudaFree(mapping);
 			cudaFree(queue);

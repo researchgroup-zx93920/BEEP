@@ -293,6 +293,40 @@ namespace graph
 			}
 		}
 
+		uint binary_search_rec(T searchVal, uint l, uint r){
+			if(r>=l){
+				uint mid = l + (r - l) / 2;
+				if (gpu_data[mid] == searchVal)
+            return mid;
+				if(gpu_data[mid]>searchVal)
+					return binary_search_rec(searchVal, l, mid-1);
+				else
+					return binary_search_rec(searchVal, mid+1, r);
+			}
+			else return l;
+		}
+
+		uint binary_search(T searchVal){
+			return binary_search_rec(searchVal, 0, (uint)N);
+		}
+
+		void print(){
+			if(N<30){
+			std::cout<<name<<": "<<std::endl;
+			for(uint i=0; i< N; i++){
+				std::cout<<gpu_data[i]<<", ";
+			}
+			std::cout<<std::endl;}
+			else{
+				std::cout<<name<<": "<<std::endl;
+			for(uint i=0; i< 30; i++){
+				std::cout<<gpu_data[i]<<", ";
+			}
+			std::cout<<std::endl;
+				printf("Array too large to print, ignoring last %lu elements\n", N-30);
+			}
+		}
+
 		T *&gdata()
 		{
 			return gpu_data;

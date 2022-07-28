@@ -1,4 +1,5 @@
 #pragma once
+#include <omp.h>
 #include "../../include/GraphDataStructure.cuh"
 #include "../../include/queue.cuh"
 

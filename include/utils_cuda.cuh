@@ -83,6 +83,15 @@ __device__ inline uint getEdgeId(uint *rowPtr, uint *colInd, uint sn, const uint
         CUDA_RUNTIME(cudaDeviceSynchronize());                          \
     }
 
+#define execKernelAsync(kernel, gridSize, blockSize, deviceId, streamId, verbose, ...) \
+  {                                                                                    \
+    dim3 grid(gridSize);                                                               \
+    dim3 block(blockSize);                                                             \
+    CUDA_RUNTIME(cudaSetDevice(deviceId));                                             \
+    kernel<<<grid, block, 0, streamId>>>(__VA_ARGS__);                                 \
+    CUDA_RUNTIME(cudaGetLastError());                                                   \
+  }
+
 #define execKernel2(kernel, gridSize, blockSize, deviceId, verbose, ...)   \
     {                                                                      \
         float singleKernelTime;                                            \

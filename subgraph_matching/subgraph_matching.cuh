@@ -1,7 +1,6 @@
 #pragma once
 #include "config.cuh"
 #include "include/common_utils.cuh"
-#include <omp.h>
 
 #ifdef TIMER
 #include "sgm_kernelsLD_timer.cuh"
@@ -109,12 +108,11 @@ namespace graph
 		}
 
 	public:
-		
 		// Constructors
-		SG_Match(MAINTASK task = GRAPH_MATCH, ProcessBy by = ByNode, int dev = 0, uint cutoff = 768, int ndev=1) : task_(task),
-																																																	 by_(by),
-																																																	 dev_(dev),
-																																																	 ndev_(ndev)
+		SG_Match(MAINTASK task = GRAPH_MATCH, ProcessBy by = ByNode, int dev = 0, uint cutoff = 768, int ndev = 1) : task_(task),
+																																																								 by_(by),
+																																																								 dev_(dev),
+																																																								 ndev_(ndev)
 		{
 			query_sequence = new GPUArray<T>("Query Sequence", cpuonly);
 			query_degree = new GPUArray<T>("Query degree", cpuonly);
@@ -982,10 +980,12 @@ namespace graph
 	template <typename T>
 	void SG_Match<T>::count_subgraphs(graph::COOCSRGraph_d<T> &dataGraph)
 	{
-		// print_graph(dataGraph);
+
 		// Initialise Kernel Dims
 		const int first_d = dev_; // temp
-
+		uint m = dataGraph.numEdges, n = dataGraph.numNodes;
+		if (n < 30)
+			print_graph(dataGraph);
 		CUDAContext context;
 		const auto block_size = BLOCK_SIZE; // Block size for low degree nodes
 		const T partitionSize = PARTITION_SIZE;
@@ -1000,7 +1000,7 @@ namespace graph
 		T conc_blocks_per_SM = context.GetConCBlocks(block_size);
 
 #pragma omp parallel for
-		for (int d = first_d; d < first_d+ ndev_; d++)
+		for (int d = first_d; d < first_d + ndev_; d++)
 		{
 			// template information in GPU Constant memory
 			CUDA_RUNTIME(cudaSetDevice(d));
@@ -1034,7 +1034,6 @@ namespace graph
 		span -= level;
 
 		// Loop over different buckets
-		bool first = true;
 		while (todo > 0)
 		{
 
@@ -1050,8 +1049,35 @@ namespace graph
 				size_t free = 0, total = 0;
 				Log(debug, "max Bucket degree %u", maxDeg);
 
-				if (!first || SCHEDULING)
+				if (SCHEDULING)
 					current_nq.map_n_key_sort(nodeDegree.gdata());
+
+				T nq_len = current_nq.count.gdata()[0];
+				GPUArray<T> scanned("scanned array", unified, nq_len, dev_);
+				GPUArray<uint64> tails("tails for work lists", unified, ndev_, dev_);
+				CUDA_RUNTIME(cudaMemset(scanned.gdata(), 0, nq_len * sizeof(T)));
+				CUDA_RUNTIME(cudaMemset(tails.gdata(), 0, ndev_ * sizeof(uint64)));
+				current_nq.i_scan(scanned.gdata(), nodeDegree.gdata());
+				// scanned.print();
+				T temp_scan_total = scanned.gdata()[nq_len - 1];
+				T temp_target = temp_scan_total / ndev_;
+#pragma omp parallel for
+				for (int d = first_d; d < first_d + ndev_; d++)
+				{
+					T target = temp_target * (d - first_d + 1);
+					tails.gdata()[d - first_d] = (uint64)scanned.binary_search(temp_target * (d - first_d + 1));
+					if ((ndev_ - (d - first_d)) == 1 || ndev_==1) // last device or only device
+					{
+						tails.gdata()[d - first_d] = (uint64)nq_len;
+					}
+					if (ndev_ - d == 0)
+						Log(debug, "device %d takes: %.2f %%",d, (tails.gdata()[d - first_d] * 1.0) / nq_len*100) ;
+					else
+					{
+						Log(debug, "device %d takes: %.2f %%",d, ((tails.gdata()[d - first_d] - tails.gdata()[d - first_d - 1]) * 1.0) / nq_len * 100);
+					}
+				}
+				scanned.freeGPU();
 
 				maxDeg = level + span < maxDeg ? level + span : maxDeg;
 				num_divs = (maxDeg + dv - 1) / dv;
@@ -1086,16 +1112,15 @@ namespace graph
 				Log(debug, "grid size: %u", grid_block_size);
 
 				// multidevice implementation
-				// cudaMallocManaged((void **)&work_list_head, sizeof(uint64), cudaMemAttachHost);
-				GPUArray<uint64> work_list_head("Global work stealing list", AllocationTypeEnum::unified, 1, dev_);
-				uint64 wl_head = (first_sym_level > 2) ? 0 : 1;
-				work_list_head.gdata()[0] = wl_head;
-				uint m = dataGraph.numEdges, n = dataGraph.numNodes;
-				// cudaMemAdvise(dataGraph.oriented_colInd, (m) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
-				// cudaMemAdvise(dataGraph.colInd, (m) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
-  			// cudaMemAdvise(dataGraph.splitPtr, (n) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
-  			// cudaMemAdvise(dataGraph.rowPtr, (n + 1) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
-  			// cudaMemAdvise(dataGraph.rowInd, (m) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
+				// GPUArray<uint64> work_list_head("Global work stealing list", AllocationTypeEnum::unified, 1, dev_);
+				// uint64 wl_head = (first_sym_level > 2) ? 0 : 1;
+				// work_list_head.gdata()[0] = wl_head;
+
+				cudaMemAdvise(dataGraph.oriented_colInd, (m) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
+				cudaMemAdvise(dataGraph.colInd, (m) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
+				cudaMemAdvise(dataGraph.splitPtr, (n) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
+				cudaMemAdvise(dataGraph.rowPtr, (n + 1) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
+				cudaMemAdvise(dataGraph.rowInd, (m) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
 
 #pragma omp parallel for
 				for (int d = first_d; d < first_d + ndev_; d++)
@@ -1113,9 +1138,13 @@ namespace graph
 					GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, d);
 					GPUArray<MessageBlock> messages("Messages for sharing info", AllocationTypeEnum::gpu, grid_block_size, d);
 					GPUArray<T> per_node_count("for debugging", AllocationTypeEnum::unified, dataGraph.numNodes, d);
-					
 
-					
+					GPUArray<uint64> work_list_head("Global work stealing list", AllocationTypeEnum::unified, 1, d);
+					uint64 wl_head = (first_sym_level > 2) ? 0 : 1;
+					// wl_head += d - first_d;
+					if (d - first_d > 0)
+						wl_head = tails.gdata()[d - first_d - 1];
+					CUDA_RUNTIME(cudaMemcpy(work_list_head.gdata(), &wl_head, sizeof(uint64), cudaMemcpyHostToDevice));
 					CUDA_RUNTIME(cudaMemset(dev_counter.gdata(), 0, sizeof(uint64)));
 					CUDA_RUNTIME(cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T)));
 					CUDA_RUNTIME(cudaMemset(current_level.gdata(), 0, level_size * sizeof(T)));
@@ -1128,7 +1157,8 @@ namespace graph
 					gh.g = dataGraph;
 					gh.current = current_nq.device_queue->gdata()[0];
 					gh.work_list_head = work_list_head.gdata();
-					gh.work_list_tail = gh.current.count[0];
+					// gh.work_list_tail = gh.current.count[0];
+					gh.work_list_tail = tails.gdata()[d - first_d];
 					gh.current_level = current_level.gdata();
 					gh.adj_enc = node_be.gdata();
 					gh.Message = messages.gdata();
@@ -1141,14 +1171,16 @@ namespace graph
 
 					cuMemGetInfo(&free, &total);
 					Log(debug, "Free mem: %f GB, Total mem: %f GB", (free * 1.0) / (1E9), (total * 1.0) / (1E9));
+					Log(debug, "device%d: my head; %lu, my tail: %lu\n", d, gh.work_list_head[0], gh.work_list_tail);
 
+					Timer devt;
 					execKernel((sgm_kernel_central_node_function<T, block_size, partitionSize>),
 										 grid_block_size, block_size, d, false,
 										 gh, /*per_node_count.gdata(),*/
 										 queue_caller(queue, tickets, head, tail));
-					
-					execKernel(final_counter, 1, 1, d, false, gh.global_counter, gh.counter);
 
+					execKernel(final_counter, 1, 1, d, false, gh.global_counter, gh.counter);
+					Log(debug, "device %d time: %f s", d, (double) devt.elapsed());
 					// execKernel((sgm_kernel_central_node_function_byNode<T, block_size_LD, partitionSize_LD>),
 					//            grid_block_size, block_size_LD, d, false,
 					//            counter.gdata(), work_list_head.gdata(),
@@ -1163,15 +1195,15 @@ namespace graph
 					per_node_count.freeGPU();
 					dev_counter.freeGPU();
 					CUDA_RUNTIME(cudaFree(work_ready));
-					queue_free(queue, tickets, head, tail);				
+					queue_free(queue, tickets, head, tail);
+					work_list_head.freeGPU();
 				}
 				// Print bucket stats:
 				std::cout << "\nBucket levels: " << level << " to " << maxDeg
-										<< ", nodes/edges: " << current_nq.count.gdata()[0]
-										<< ", Counter: " << counter.gdata()[0] << std::endl;
+									<< ", nodes/edges: " << current_nq.count.gdata()[0]
+									<< ", Counter: " << counter.gdata()[0] << std::endl;
 				level += span;
 				todo -= current_nq.count.gdata()[0];
-				first = false;
 				todo = 0;
 			}
 		}

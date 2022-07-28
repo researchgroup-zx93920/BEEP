@@ -21,6 +21,8 @@ __launch_bounds__(BLOCK_DIM_X)
 	{
 		sh.root_sm_block_id = sh.sm_block_id = blockIdx.x;
 		sh.state = 0;
+		sh.encode = &gh.adj_enc[(uint64)blockIdx.x * NUMDIVS * MAXDEG];
+		sh.level_offset = &gh.current_level[(uint64)(blockIdx.x * NUMDIVS * NP * MAXLEVEL)];
 	}
 	__syncthreads();
 	while (sh.state != 100)
@@ -31,7 +33,7 @@ __launch_bounds__(BLOCK_DIM_X)
 		{
 			init_sm(sh, gh);
 
-			__syncthreads();
+
 
 			// if (sh.state == 100)
 			// {
@@ -45,14 +47,6 @@ __launch_bounds__(BLOCK_DIM_X)
 				continue;
 			}
 
-			// if (threadIdx.x == 0)
-			// {
-			// 	// int devID;
-			// 	// cudaGetDevice(&devID);
-			// 	printf("Block: %u from device %d got src: %u with KCCOUNT %u\n", blockIdx.x, 1, sh.src, KCCOUNT);
-			// }
-
-			__syncthreads();
 			if (lx == 0)
 			{
 				sh.sg_count[wx] = 0;

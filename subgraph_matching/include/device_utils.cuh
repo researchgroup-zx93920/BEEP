@@ -66,10 +66,7 @@ init_sm(SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh,GLOBAL_HANDLE<T> &gh)
             sh.srcStart = gh.g.rowPtr[sh.src];
             sh.srcSplit = gh.g.splitPtr[sh.src];
             sh.srcLen = gh.g.rowPtr[sh.src + 1] - sh.srcStart;
-
             sh.num_divs_local = (sh.srcLen + 32 - 1) / 32;
-            sh.encode = &gh.adj_enc[(uint64)blockIdx.x * NUMDIVS * MAXDEG];
-            sh.level_offset = &gh.current_level[(uint64)(blockIdx.x * NUMDIVS * NP * MAXLEVEL)];
             sh.tc = 0;
         }
         else
