@@ -18,9 +18,9 @@ __global__ void map_degree_log(T *Degree, T len, T *mapping, T *data)
 	uint gtid = blockIdx.x * blockDim.x + threadIdx.x;
 	if (gtid < len)
 	{
-		// mapping[gtid] =  Degree[data[gtid]]*((T) (sqrt((float) Degree[data[gtid]])));
+		mapping[gtid] =  Degree[data[gtid]]*((T) (sqrt((float) Degree[data[gtid]])));
 		// mapping[gtid] =  Degree[data[gtid]]*((T) (__log2f(Degree[data[gtid]])+1));
-		mapping[gtid] =  Degree[data[gtid]]*Degree[data[gtid]];
+		// mapping[gtid] =  Degree[data[gtid]]*Degree[data[gtid]];
 	}
 }
 
@@ -104,12 +104,13 @@ namespace graph
 			cub::DoubleBuffer<T> d_keys(mapping, aux_mapping);
 			cub::DoubleBuffer<T> d_values(queue, aux_queue);
 			// Dummy run to estimate memory
+			// CUDA_RUNTIME(cub::DeviceRadixSort::SortPairsDescending(d_temp_storage, temp_storage_bytes, d_keys, d_values, len));
 			CUDA_RUNTIME(cub::DeviceRadixSort::SortPairsDescending(d_temp_storage, temp_storage_bytes, d_keys, d_values, len));
 			CUDA_RUNTIME(cudaMalloc((void **)&d_temp_storage, temp_storage_bytes));
 
 			// Final run to sort
+			// CUDA_RUNTIME(cub::DeviceRadixSort::SortPairsDescending(d_temp_storage, temp_storage_bytes, d_keys, d_values, len));
 			CUDA_RUNTIME(cub::DeviceRadixSort::SortPairsDescending(d_temp_storage, temp_storage_bytes, d_keys, d_values, len));
-
 			CUDA_RUNTIME(cudaMemcpy(device_queue->gdata()->queue, d_values.Current(), len * sizeof(T), cudaMemcpyDeviceToDevice));
 			cudaFree(mapping);
 			cudaFree(aux_mapping);
