@@ -85,6 +85,8 @@ __launch_bounds__(BLOCK_DIM_X)
 	{
 		sh.root_sm_block_id = sh.sm_block_id = blockIdx.x;
 		sh.state = 0;
+		sh.encode = &gh.adj_enc[(uint64)blockIdx.x * NUMDIVS * MAXDEG];
+		sh.level_offset = &gh.current_level[(uint64)(blockIdx.x * NUMDIVS * NP * MAXLEVEL)];
 	}
 	__syncthreads();
 	while (sh.state != 100)
