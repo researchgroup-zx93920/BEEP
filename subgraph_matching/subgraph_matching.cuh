@@ -782,24 +782,22 @@ namespace graph
 		Log(debug, "Num SMs: %u", num_SMs);
 		T conc_blocks_per_SM = context.GetConCBlocks(block_size);
 
-	
-
 		for (int d = first_d; d < first_d + ndev_; d++)
 		{
-		// template information in GPU Constant memory
-		CUDA_RUNTIME(cudaSetDevice(d));
-		cudaMemcpyToSymbol(KCCOUNT, &(query_sequence->N), sizeof(KCCOUNT));
-		cudaMemcpyToSymbol(LUNMAT, &(unmat_level), sizeof(LUNMAT));
-		cudaMemcpyToSymbol(MAXLEVEL, &max_qDegree, sizeof(MAXLEVEL));
-		cudaMemcpyToSymbol(MINLEVEL, &min_qDegree, sizeof(MINLEVEL));
-		cudaMemcpyToSymbol(QEDGE, &(query_edges->cdata()[0]), query_edges->N * sizeof(QEDGE[0]));
-		cudaMemcpyToSymbol(QEDGE_PTR, &(query_edge_ptr->cdata()[0]), query_edge_ptr->N * sizeof(QEDGE_PTR[0]));
-		cudaMemcpyToSymbol(SYMNODE, &(sym_nodes->cdata()[0]), sym_nodes->N * sizeof(SYMNODE[0]));
-		cudaMemcpyToSymbol(SYMNODE_PTR, &(sym_nodes_ptr->cdata()[0]), sym_nodes_ptr->N * sizeof(SYMNODE_PTR[0]));
-		cudaMemcpyToSymbol(QDEG, &(query_degree->cdata()[0]), query_degree->N * sizeof(QDEG[0]));
-		cudaMemcpyToSymbol(QREUSE, &(reuse_level->cdata()[0]), reuse_level->N * sizeof(uint));
-		cudaMemcpyToSymbol(QREUSABLE, &(q_reusable->cdata()[0]), q_reusable->N * sizeof(bool));
-		cudaMemcpyToSymbol(REUSE_PTR, &(reuse_ptr->cdata()[0]), reuse_ptr->N * sizeof(uint));
+			// template information in GPU Constant memory
+			CUDA_RUNTIME(cudaSetDevice(d));
+			cudaMemcpyToSymbol(KCCOUNT, &(query_sequence->N), sizeof(KCCOUNT));
+			cudaMemcpyToSymbol(LUNMAT, &(unmat_level), sizeof(LUNMAT));
+			cudaMemcpyToSymbol(MAXLEVEL, &max_qDegree, sizeof(MAXLEVEL));
+			cudaMemcpyToSymbol(MINLEVEL, &min_qDegree, sizeof(MINLEVEL));
+			cudaMemcpyToSymbol(QEDGE, &(query_edges->cdata()[0]), query_edges->N * sizeof(QEDGE[0]));
+			cudaMemcpyToSymbol(QEDGE_PTR, &(query_edge_ptr->cdata()[0]), query_edge_ptr->N * sizeof(QEDGE_PTR[0]));
+			cudaMemcpyToSymbol(SYMNODE, &(sym_nodes->cdata()[0]), sym_nodes->N * sizeof(SYMNODE[0]));
+			cudaMemcpyToSymbol(SYMNODE_PTR, &(sym_nodes_ptr->cdata()[0]), sym_nodes_ptr->N * sizeof(SYMNODE_PTR[0]));
+			cudaMemcpyToSymbol(QDEG, &(query_degree->cdata()[0]), query_degree->N * sizeof(QDEG[0]));
+			cudaMemcpyToSymbol(QREUSE, &(reuse_level->cdata()[0]), reuse_level->N * sizeof(uint));
+			cudaMemcpyToSymbol(QREUSABLE, &(q_reusable->cdata()[0]), q_reusable->N * sizeof(bool));
+			cudaMemcpyToSymbol(REUSE_PTR, &(reuse_ptr->cdata()[0]), reuse_ptr->N * sizeof(uint));
 		}
 		CUDA_RUNTIME(cudaSetDevice(first_d));
 		// Initialise Queueing
@@ -844,9 +842,9 @@ namespace graph
 				cuMemGetInfo(&free, &total);
 				Log(debug, "max Bucket degree %u", maxDeg);
 
-				if ( SCHEDULING)
+				if (SCHEDULING)
 					current_nq.map_n_key_sort(nodeDegree.gdata());
-				
+
 				T nq_len = current_nq.count.gdata()[0];
 				GPUArray<T> scanned("scanned array", unified, nq_len, dev_);
 				GPUArray<uint64> tails("tails for work lists", unified, ndev_, dev_);
@@ -855,20 +853,20 @@ namespace graph
 				current_nq.i_scan(scanned.gdata(), nodeDegree.gdata());
 				T temp_scan_total = scanned.gdata()[nq_len - 1];
 				T temp_target = temp_scan_total / ndev_;
-				#pragma omp parallel for
+#pragma omp parallel for
 				for (int d = first_d; d < first_d + ndev_; d++)
 				{
 					T target = temp_target * (d - first_d + 1);
 					tails.gdata()[d - first_d] = (uint64)scanned.binary_search(temp_target * (d - first_d + 1));
-					if ((ndev_ - (d - first_d)) == 1 || ndev_==1) // last device or only device
+					if ((ndev_ - (d - first_d)) == 1 || ndev_ == 1) // last device or only device
 					{
 						tails.gdata()[d - first_d] = (uint64)nq_len;
 					}
 					if (ndev_ - d == 0)
-						Log(debug, "device %d takes: %.2f %%",d, (tails.gdata()[d - first_d] * 1.0) / nq_len*100) ;
+						Log(debug, "device %d takes: %.2f %%", d, (tails.gdata()[d - first_d] * 1.0) / nq_len * 100);
 					else
 					{
-						Log(debug, "device %d takes: %.2f %%",d, ((tails.gdata()[d - first_d] - tails.gdata()[d - first_d - 1]) * 1.0) / nq_len * 100);
+						Log(debug, "device %d takes: %.2f %%", d, ((tails.gdata()[d - first_d] - tails.gdata()[d - first_d - 1]) * 1.0) / nq_len * 100);
 					}
 				}
 				scanned.freeGPU();
@@ -912,8 +910,6 @@ namespace graph
 				cudaMemAdvise(dataGraph.rowPtr, (n + 1) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
 				cudaMemAdvise(dataGraph.rowInd, (m) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
 
-				
-
 #pragma omp parallel for
 				for (int d = first_d; d < first_d + ndev_; d++)
 				{
@@ -933,7 +929,6 @@ namespace graph
 					GPUArray<double> block_util1("block active/inactive ratio", AllocationTypeEnum::unified, grid_block_size, d);
 					GPUArray<double> block_util2("block active/inactive ratio", AllocationTypeEnum::unified, grid_block_size, d);
 					GPUArray<double> block_util3("block active/inactive ratio", AllocationTypeEnum::unified, grid_block_size, d);
-
 
 					GPUArray<Counters> SM_times("SM times", unified, num_SMs, d);
 					GPUArray<uint64> SM_nodes("nodes processed per SM", unified, num_SMs, d);
@@ -976,18 +971,18 @@ namespace graph
 					Log(debug, "device%d: my head; %lu, my tail: %lu\n", d, gh.work_list_head[0], gh.work_list_tail);
 
 					Timer devt;
-					if(d==1)
-						execKernel((sgm_kernel_central_node_function<T, block_size, partitionSize>),
-										grid_block_size, block_size, dev_, false,
-										SM_times.gdata(), block_util1.gdata(), block_util2.gdata(), block_util3.gdata(),
-										gh, queue_caller(queue, tickets, head, tail));
-					
+					execKernel((sgm_kernel_central_node_function<T, block_size, partitionSize>),
+										 grid_block_size, block_size, dev_, false,
+										 SM_times.gdata(), block_util1.gdata(), block_util2.gdata(), block_util3.gdata(),
+										 gh, queue_caller(queue, tickets, head, tail));
+
 					execKernel(final_counter, 1, 1, d, false, gh.global_counter, gh.counter);
-					Log(debug, "device %d time: %f s", d, (double) devt.elapsed());
-				
-					if(d==1){
+					Log(debug, "device %d time: %f s", d, (double)devt.elapsed());
+
+					if (d == 1)
+					{
 						// print_SM_counters(SM_times.gdata(), SM_nodes.gdata());
-						
+
 						Log(info, "SM count %u", num_SMs);
 						Log(info, "SM Workload");
 						uint64 ttotal = 0;
@@ -1020,7 +1015,7 @@ namespace graph
 					block_util3.freeGPU();
 					SM_times.freeGPU();
 					SM_nodes.freeGPU();
-			}
+				}
 				// Print bucket stats:
 				std::cout << "Bucket levels: " << level << " to " << maxDeg
 									<< ", nodes/edges: " << current_nq.count.gdata()[0]
@@ -1034,22 +1029,17 @@ namespace graph
 		std::cout << "------------- Counter = " << counter.gdata()[0] << "\n";
 
 		counter.freeGPU();
-		
-		
 	}
 
 #else
-
 	template <typename T>
 	void SG_Match<T>::count_subgraphs(graph::COOCSRGraph_d<T> &dataGraph)
 	{
-
-		
 		const int first_d = dev_; // temp
 		uint m = dataGraph.numEdges, n = dataGraph.numNodes;
 		if (n < 30)
 			print_graph(dataGraph);
-		
+
 		// Initialise Kernel Dims
 		CUDAContext context;
 		const auto block_size = BLOCK_SIZE; // Block size for low degree nodes
@@ -1114,35 +1104,35 @@ namespace graph
 				size_t free = 0, total = 0;
 				Log(debug, "max Bucket degree %u", maxDeg);
 
-				// if (SCHEDULING)
-				// 	current_nq.map_n_key_sort(nodeDegree.gdata());
+				if (SCHEDULING)
+					current_nq.map_n_key_sort(nodeDegree.gdata());
 
-			// 				T nq_len = current_nq.count.gdata()[0];
-			// 				GPUArray<T> scanned("scanned array", unified, nq_len, dev_);
-			// 				GPUArray<uint64> tails("tails for work lists", unified, ndev_, dev_);
-			// 				CUDA_RUNTIME(cudaMemset(scanned.gdata(), 0, nq_len * sizeof(T)));
-			// 				CUDA_RUNTIME(cudaMemset(tails.gdata(), 0, ndev_ * sizeof(uint64)));
-			// 				current_nq.i_scan(scanned.gdata(), nodeDegree.gdata());
-			// 				// scanned.print();
-			// 				T temp_scan_total = scanned.gdata()[nq_len - 1];
-			// 				T temp_target = temp_scan_total / ndev_;
-			// #pragma omp parallel for
-			// 				for (int d = first_d; d < first_d + ndev_; d++)
-			// 				{
-			// 					T target = temp_target * (d - first_d + 1);
-			// 					tails.gdata()[d - first_d] = (uint64)scanned.binary_search(temp_target * (d - first_d + 1));
-			// 					if ((ndev_ - (d - first_d)) == 1 || ndev_==1) // last device or only device
-			// 					{
-			// 						tails.gdata()[d - first_d] = (uint64)nq_len;
-			// 					}
-			// 					if (ndev_ - d == 0)
-			// 						Log(debug, "device %d takes: %.2f %%",d, (tails.gdata()[d - first_d] * 1.0) / nq_len*100) ;
-			// 					else
-			// 					{
-			// 						Log(debug, "device %d takes: %.2f %%",d, ((tails.gdata()[d - first_d] - tails.gdata()[d - first_d - 1]) * 1.0) / nq_len * 100);
-			// 					}
-			// 				}
-			// 				scanned.freeGPU();
+				// 				T nq_len = current_nq.count.gdata()[0];
+				// 				GPUArray<T> scanned("scanned array", unified, nq_len, dev_);
+				// 				GPUArray<uint64> tails("tails for work lists", unified, ndev_, dev_);
+				// 				CUDA_RUNTIME(cudaMemset(scanned.gdata(), 0, nq_len * sizeof(T)));
+				// 				CUDA_RUNTIME(cudaMemset(tails.gdata(), 0, ndev_ * sizeof(uint64)));
+				// 				current_nq.i_scan(scanned.gdata(), nodeDegree.gdata());
+				// 				// scanned.print();
+				// 				T temp_scan_total = scanned.gdata()[nq_len - 1];
+				// 				T temp_target = temp_scan_total / ndev_;
+				// #pragma omp parallel for
+				// 				for (int d = first_d; d < first_d + ndev_; d++)
+				// 				{
+				// 					T target = temp_target * (d - first_d + 1);
+				// 					tails.gdata()[d - first_d] = (uint64)scanned.binary_search(temp_target * (d - first_d + 1));
+				// 					if ((ndev_ - (d - first_d)) == 1 || ndev_==1) // last device or only device
+				// 					{
+				// 						tails.gdata()[d - first_d] = (uint64)nq_len;
+				// 					}
+				// 					if (ndev_ - d == 0)
+				// 						Log(debug, "device %d takes: %.2f %%",d, (tails.gdata()[d - first_d] * 1.0) / nq_len*100) ;
+				// 					else
+				// 					{
+				// 						Log(debug, "device %d takes: %.2f %%",d, ((tails.gdata()[d - first_d] - tails.gdata()[d - first_d - 1]) * 1.0) / nq_len * 100);
+				// 					}
+				// 				}
+				// 				scanned.freeGPU();
 
 				maxDeg = level + span < maxDeg ? level + span : maxDeg;
 				num_divs = (maxDeg + dv - 1) / dv;
@@ -1239,14 +1229,13 @@ namespace graph
 					// Log(debug, "device%d: my head; %lu, my tail: %lu\n", d, gh.work_list_head[0], gh.work_list_tail);
 
 					Timer devt;
-					if(d==1)
-						execKernel((sgm_kernel_central_node_function<T, block_size, partitionSize>),
-											grid_block_size, block_size, d, false,
-											gh, /*per_node_count.gdata(),*/
-											queue_caller(queue, tickets, head, tail));
+					execKernel((sgm_kernel_central_node_function<T, block_size, partitionSize>),
+										 grid_block_size, block_size, d, false,
+										 gh, /*per_node_count.gdata(),*/
+										 queue_caller(queue, tickets, head, tail));
 
 					execKernel(final_counter, 1, 1, d, false, gh.global_counter, gh.counter);
-					Log(debug, "device %d time: %f s", d, (double) devt.elapsed());
+					Log(debug, "device %d time: %f s", d, (double)devt.elapsed());
 					// execKernel((sgm_kernel_central_node_function_byNode<T, block_size_LD, partitionSize_LD>),
 					//            grid_block_size, block_size_LD, d, false,
 					//            counter.gdata(), work_list_head.gdata(),
