@@ -145,7 +145,7 @@ namespace graph
 			cudaFree(queue);
 			cudaFree(d_temp_storage);
 		}
-		void i_scan(T *scanned, T *degree)
+		void i_scan(uint64 *scanned, T *degree)
 		{
 			T len = count.gdata()[0];
 			T *mapping;

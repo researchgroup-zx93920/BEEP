@@ -293,37 +293,47 @@ namespace graph
 			}
 		}
 
-		uint binary_search_rec(T searchVal, uint l, uint r){
-			if(r>=l){
-				uint mid = l + (r - l) / 2;
+		T binary_search_rec(T searchVal, T l, T r)
+		{
+			if (r >= l && r != 0)
+			{
+				T mid = l + (r - l) / 2;
 				if (gpu_data[mid] == searchVal)
-            return mid;
-				if(gpu_data[mid]>searchVal)
-					return binary_search_rec(searchVal, l, mid-1);
+					return mid;
+				if (gpu_data[mid] > searchVal)
+					return binary_search_rec(searchVal, l, mid - 1);
 				else
-					return binary_search_rec(searchVal, mid+1, r);
+					return binary_search_rec(searchVal, mid + 1, r);
 			}
-			else return l;
+			else
+				return l;
 		}
 
-		uint binary_search(T searchVal){
-			return binary_search_rec(searchVal, 0, (uint)N);
+		T binary_search(T searchVal)
+		{
+			return binary_search_rec(searchVal, 0, N - 1);
 		}
 
-		void print(){
-			if(N<30){
-			std::cout<<name<<": "<<std::endl;
-			for(uint i=0; i< N; i++){
-				std::cout<<gpu_data[i]<<", ";
+		void print()
+		{
+			if (N < 30)
+			{
+				std::cout << name << ": " << std::endl;
+				for (uint i = 0; i < N; i++)
+				{
+					std::cout << gpu_data[i] << ", ";
+				}
+				std::cout << std::endl;
 			}
-			std::cout<<std::endl;}
-			else{
-				std::cout<<name<<": "<<std::endl;
-			for(uint i=0; i< 30; i++){
-				std::cout<<gpu_data[i]<<", ";
-			}
-			std::cout<<std::endl;
-				printf("Array too large to print, ignoring last %lu elements\n", N-30);
+			else
+			{
+				std::cout << name << ": " << std::endl;
+				for (uint i = 0; i < 30; i++)
+				{
+					std::cout << gpu_data[i] << ", ";
+				}
+				std::cout << std::endl;
+				printf("Array too large to print, ignoring last %lu elements\n", N - 30);
 			}
 		}
 

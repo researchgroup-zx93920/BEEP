@@ -1110,32 +1110,35 @@ namespace graph
 				if (SCHEDULING)
 					current_nq.map_n_key_sort(nodeDegree.gdata());
 
-				T nq_len = current_nq.count.gdata()[0];
-				GPUArray<T> scanned("scanned array", unified, nq_len, dev_);
+				uint64 nq_len = (uint64)current_nq.count.gdata()[0];
+				GPUArray<uint64> scanned("scanned array", unified, nq_len, dev_);
 				GPUArray<uint64> tails("tails for work lists", unified, ndev_, dev_);
 				CUDA_RUNTIME(cudaMemset(scanned.gdata(), 0, nq_len * sizeof(T)));
 				CUDA_RUNTIME(cudaMemset(tails.gdata(), 0, ndev_ * sizeof(uint64)));
 				current_nq.i_scan(scanned.gdata(), nodeDegree.gdata());
 				// scanned.print();
-				T temp_scan_total = scanned.gdata()[nq_len - 1];
-				T temp_target = temp_scan_total / ndev_;
+				uint64 temp_scan_total = scanned.gdata()[nq_len - 1];
+				uint64 temp_target = temp_scan_total / 3;
 #pragma omp parallel for
 				for (int d = first_d; d < first_d + ndev_; d++)
 				{
-					T target = temp_target * (d - first_d + 1);
-					tails.gdata()[d - first_d] = (uint64)scanned.binary_search(temp_target * (d - first_d + 1));
+					uint64 target = temp_target * (d - first_d + 1);
+					tails.gdata()[d - first_d] = scanned.binary_search(temp_target * (d - first_d + 1));
+					if (tails.gdata()[d - first_d] == 0) //nothing to first device
+						tails.gdata()[d - first_d]++;
+
 					if ((ndev_ - (d - first_d)) == 1 || ndev_ == 1) // last device or only device
-					{
 						tails.gdata()[d - first_d] = (uint64)nq_len;
-					}
-					if (first_d - d == 0) // first device
-						Log(info, "device %d takes: %.2f %%", d, (tails.gdata()[d - first_d] * 1.0) / nq_len * 100);
-					else
-					{
-						Log(info, "device %d takes: %.2f %%", d, ((tails.gdata()[d - first_d] - tails.gdata()[d - first_d - 1]) * 1.0) / nq_len * 100);
-					}
 				}
 				scanned.freeGPU();
+				for (int d = first_d; d < first_d + ndev_; d++)
+				{
+					if (d == first_d || ndev_ == 1) // first device
+						Log(info, "device %d takes: %lu out of %u", d, tails.gdata()[d - first_d], nq_len);
+					else
+						Log(info, "device %d takes: %lu out of %u", d, (tails.gdata()[d - first_d] - tails.gdata()[d - first_d - 1]), nq_len);
+					// Log(info, "device %d takes: %lu/%lu", d, (tails.gdata()[d - first_d] - tails.gdata()[d - first_d - 1]), nq_len);
+				}
 
 				maxDeg = level + span < maxDeg ? level + span : maxDeg;
 				num_divs = (maxDeg + dv - 1) / dv;
