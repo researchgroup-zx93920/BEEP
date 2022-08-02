@@ -298,12 +298,17 @@ namespace graph
 			if (r >= l && r != 0)
 			{
 				T mid = l + (r - l) / 2;
-				if (gpu_data[mid] == searchVal)
-					return mid;
-				if (gpu_data[mid] > searchVal)
-					return binary_search_rec(searchVal, l, mid - 1);
+				if (mid > 0)
+				{
+					if (gpu_data[mid] == searchVal)
+						return mid;
+					if (gpu_data[mid] > searchVal)
+						return binary_search_rec(searchVal, l, mid - 1);
+					else
+						return binary_search_rec(searchVal, mid + 1, r);
+				}
 				else
-					return binary_search_rec(searchVal, mid + 1, r);
+					return mid;
 			}
 			else
 				return l;

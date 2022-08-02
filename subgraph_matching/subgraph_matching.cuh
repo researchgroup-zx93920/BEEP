@@ -1124,7 +1124,7 @@ namespace graph
 				{
 					uint64 target = temp_target * (d - first_d + 1);
 					tails.gdata()[d - first_d] = scanned.binary_search(temp_target * (d - first_d + 1));
-					if (tails.gdata()[d - first_d] == 0) //nothing to first device
+					if (tails.gdata()[d - first_d] == 0) // nothing to first device
 						tails.gdata()[d - first_d]++;
 
 					if ((ndev_ - (d - first_d)) == 1 || ndev_ == 1) // last device or only device
