@@ -1109,8 +1109,9 @@ namespace graph
 
 				if (SCHEDULING)
 					current_nq.map_n_key_sort(nodeDegree.gdata());
+				// for unequal partitioning approach
 
-				uint64 nq_len = (uint64)current_nq.count.gdata()[0];
+				/*uint64 nq_len = (uint64)current_nq.count.gdata()[0];
 				GPUArray<uint64> scanned("scanned array", unified, nq_len, dev_);
 				GPUArray<uint64> tails("tails for work lists", unified, ndev_, dev_);
 				CUDA_RUNTIME(cudaMemset(scanned.gdata(), 0, nq_len * sizeof(T)));
@@ -1138,7 +1139,7 @@ namespace graph
 					else
 						Log(info, "device %d takes: %lu out of %u", d, (tails.gdata()[d - first_d] - tails.gdata()[d - first_d - 1]), nq_len);
 					// Log(info, "device %d takes: %lu/%lu", d, (tails.gdata()[d - first_d] - tails.gdata()[d - first_d - 1]), nq_len);
-				}
+				}*/
 
 				maxDeg = level + span < maxDeg ? level + span : maxDeg;
 				num_divs = (maxDeg + dv - 1) / dv;
@@ -1182,7 +1183,12 @@ namespace graph
 				cudaMemAdvise(dataGraph.splitPtr, (n) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
 				cudaMemAdvise(dataGraph.rowPtr, (n + 1) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
 				cudaMemAdvise(dataGraph.rowInd, (m) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
-
+				// for (int d = first_d; d < first_d + ndev_; d++)
+				// {
+				// 	uint64 wl_head = (first_sym_level > 2) ? 0 : 1;
+				// 	if (wl_head == tails.gdata()[d - first_d])
+				// 		tails.gdata()[d - first_d]++;
+				// }
 #pragma omp parallel for
 				for (int d = first_d; d < first_d + ndev_; d++)
 				{
@@ -1199,13 +1205,13 @@ namespace graph
 					GPUArray<T> current_level("Temp level Counter", AllocationTypeEnum::gpu, level_size, d);
 					GPUArray<MessageBlock> messages("Messages for sharing info", AllocationTypeEnum::gpu, grid_block_size, d);
 					GPUArray<T> per_node_count("for debugging", AllocationTypeEnum::unified, dataGraph.numNodes, d);
-
 					GPUArray<uint64> work_list_head("Global work stealing list", AllocationTypeEnum::gpu, 1, d);
-					uint64 wl_head = (first_sym_level > 2) ? 0 : 1;
-					wl_head += d - first_d;
-					if (d - first_d > 0)
-						wl_head = tails.gdata()[d - first_d - 1];
-					CUDA_RUNTIME(cudaMemcpy(work_list_head.gdata(), &wl_head, sizeof(uint64), cudaMemcpyHostToDevice));
+
+					uint64 temp_head = (first_sym_level > 2) ? 0 : 1;
+					// if (d - first_d > 0)
+					// 	temp_head = tails.gdata()[d - first_d - 1];
+					temp_head += d - first_d;
+					CUDA_RUNTIME(cudaMemcpy(work_list_head.gdata(), &temp_head, sizeof(uint64), cudaMemcpyHostToDevice));
 					CUDA_RUNTIME(cudaMemset(dev_counter.gdata(), 0, sizeof(uint64)));
 					CUDA_RUNTIME(cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T)));
 					CUDA_RUNTIME(cudaMemset(current_level.gdata(), 0, level_size * sizeof(T)));
@@ -1218,12 +1224,13 @@ namespace graph
 					gh.g = dataGraph;
 					gh.current = current_nq.device_queue->gdata()[0];
 					gh.work_list_head = work_list_head.gdata();
-					// gh.work_list_tail = gh.current.count[0];
-					gh.work_list_tail = tails.gdata()[d - first_d];
+					gh.work_list_tail = gh.current.count[0];
+					// gh.work_list_tail = tails.gdata()[d - first_d];
 					gh.current_level = current_level.gdata();
 					gh.adj_enc = node_be.gdata();
 					gh.Message = messages.gdata();
-					gh.stride = 1;
+					// gh.stride = 1;
+					gh.stride = ndev_;
 
 					queue_init(queue, tickets, head, tail, grid_block_size, d);
 					CUDA_RUNTIME(cudaMalloc((void **)&work_ready, grid_block_size * sizeof(cuda::atomic<uint32_t, cuda::thread_scope_device>)));
