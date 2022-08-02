@@ -18,9 +18,9 @@ __global__ void map_degree_log(T *Degree, T len, T *mapping, T *data)
 	uint gtid = blockIdx.x * blockDim.x + threadIdx.x;
 	if (gtid < len)
 	{
-		mapping[gtid] =  Degree[data[gtid]]*((T) (sqrt((float) Degree[data[gtid]])));
+		// mapping[gtid] =  Degree[data[gtid]]*((T) (sqrt((float) Degree[data[gtid]])));
 		// mapping[gtid] =  Degree[data[gtid]]*((T) (__log2f(Degree[data[gtid]])+1));
-		// mapping[gtid] =  Degree[data[gtid]]*Degree[data[gtid]];
+		mapping[gtid] = Degree[data[gtid]] * Degree[data[gtid]];
 	}
 }
 
