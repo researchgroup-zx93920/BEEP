@@ -9,7 +9,7 @@ __device__ __forceinline__
 template <typename T>
 struct GLOBAL_HANDLE
 {
-    uint64* global_counter;
+    uint64 *global_counter;
     uint64 *counter;
     graph::COOCSRGraph_d<T> g;
     mapping<T> *srcList;
@@ -19,9 +19,13 @@ struct GLOBAL_HANDLE
     MessageBlock *Message;
     int *offset;
     T *adj_enc;
-    uint64 *work_list_head;
+    uint64 *work_list_head1;
+    uint64 *work_list_head2;
     uint64 work_list_tail;
+    int devId;
     T stride;
+    T boundary;
+    T cutoff;
 
     // for worker queue
     cuda::atomic<uint32_t, cuda::thread_scope_device> *work_ready;
@@ -54,15 +58,15 @@ __device__ struct LOCAL_HANDLE
 };
 
 fundef_LD void
-init_sm(SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh,GLOBAL_HANDLE<T> &gh)
+init_sm(SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh)
 {
     __syncthreads();
     if (threadIdx.x == 0)
     {
-        uint64 index = atomicAdd(gh.work_list_head,(uint64) gh.stride);
-        if (index < gh.work_list_tail)
+        uint64 pos = atomicAdd(gh.work_list_head1, 1);
+        if (pos < gh.boundary)
         {
-            sh.src = gh.current.queue[index];
+            sh.src = gh.current.queue[pos];
             sh.srcStart = gh.g.rowPtr[sh.src];
             sh.srcSplit = gh.g.splitPtr[sh.src];
             sh.srcLen = gh.g.rowPtr[sh.src + 1] - sh.srcStart;
@@ -71,9 +75,22 @@ init_sm(SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh,GLOBAL_HANDLE<T> &gh)
         }
         else
         {
-            // sh.state = 100;
-            // 1: Block ready for other work, 100: terminate block
-            sh.state = 1;
+            uint64 index = atomicAdd(gh.work_list_head2, (uint64)gh.stride);
+            if (index < gh.work_list_tail)
+            {
+                sh.src = gh.current.queue[index];
+                sh.srcStart = gh.g.rowPtr[sh.src];
+                sh.srcSplit = gh.g.splitPtr[sh.src];
+                sh.srcLen = gh.g.rowPtr[sh.src + 1] - sh.srcStart;
+                sh.num_divs_local = (sh.srcLen + 32 - 1) / 32;
+                sh.tc = 0;
+            }
+            else
+            {
+                // sh.state = 100;
+                // 1: Block ready for other work, 100: terminate block
+                sh.state = 1;
+            }
         }
     }
     __syncthreads();
@@ -314,7 +331,7 @@ try_dequeue(SHARED_HANDLE<T, BLOCK_DIM_X, NP> &sh, GLOBAL_HANDLE<T> &gh,
 {
     constexpr T CPARTSIZE = BLOCK_DIM_X / NP;
     const T wx = threadIdx.x / CPARTSIZE;
-    if (gh.work_list_head[0] >= gh.work_list_tail)
+    if (gh.work_list_head2[0] >= gh.work_list_tail)
         queue_dequeue(queue, tickets, head, tail, CB, sh.fork[wx], sh.worker_pos[wx], N_RECEPIENTS);
 }
 

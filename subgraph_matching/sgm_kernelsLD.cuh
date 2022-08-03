@@ -28,12 +28,9 @@ __launch_bounds__(BLOCK_DIM_X)
 	while (sh.state != 100)
 	{
 		lh.warpCount = 0;
-
 		if (sh.state == 0)
 		{
 			init_sm(sh, gh);
-
-
 
 			// if (sh.state == 100)
 			// {
@@ -60,13 +57,12 @@ __launch_bounds__(BLOCK_DIM_X)
 			while (sh.wtc[wx] < sh.srcLen)
 			{
 				T j = sh.wtc[wx];
-				if (!(SYMNODE_PTR[2] == 1 && j < (sh.srcSplit - sh.srcStart)))
+				if ((!(SYMNODE_PTR[2] == 1 && j < (sh.srcSplit - sh.srcStart))) && ((sh.srcLen > gh.cutoff && (j % gh.stride) == gh.devId) || sh.srcLen <= gh.cutoff))
 				{
 					T *cl = sh.level_offset + wx * (NUMDIVS * MAXLEVEL);
 					init_stack(sh, gh, partMask, j);
 
 					// try dequeue here
-
 					if (lx == 0)
 					{
 						sh.fork[wx] = false;
