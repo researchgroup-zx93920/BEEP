@@ -1115,14 +1115,19 @@ namespace graph
 
 				T iter = 0;
 				T temp_degree = nodeDegree.gdata()[sorted_src.cdata()[iter]];
-				// Log(debug, "iter: %u, degree: %u", iter, temp_degree);
+
+				// printf("Degrees:\n");
 				while (temp_degree > cutoff_)
 				{
 					iter++;
 					temp_degree = nodeDegree.gdata()[sorted_src.cdata()[iter]];
-					// Log(debug, "iter: %u, degree: %u", iter, temp_degree);
+					// printf("%u, ", temp_degree);
 				}
 				T boundary = iter; //split nodes till this boundary
+				// printf("\n");
+				Log(debug, "Boundary: %u", boundary);
+				Log(debug, "Cutoff at Boundary: %u", cutoff_);
+
 				sorted_src.freeCPU();
 
 				maxDeg = level + span < maxDeg ? level + span : maxDeg;

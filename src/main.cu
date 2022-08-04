@@ -127,45 +127,11 @@ int main(int argc, char **argv)
 
     Log(info, "Read graph time: %f s", read_graph_timer.elapsed());
 
-    /// Now we need to orient the graph
-    Timer total_timer;
-
-    graph::COOCSRGraph_d<uint> *gd = (graph::COOCSRGraph_d<uint> *)malloc(sizeof(graph::COOCSRGraph_d<uint>));
-
-    gd->numNodes = g.numNodes;
-    gd->numEdges = g.numEdges;
-    gd->capacity = g.capacity;
-
-    size_t mf, ma;
-    g.rowPtr->switch_to_gpu(config.deviceId, g.numNodes + 1);
-    cudaDeviceSynchronize();
-    Log(debug, "Moved rowPtr to device memory");
-    cudaMemGetInfo(&mf, &ma);
-    // std::cout << "free: " << mf << " total: " << ma << std::endl;
-    gd->rowPtr = g.rowPtr->gdata();
-
-    g.rowInd->switch_to_gpu(config.deviceId, g.numEdges);
-    cudaDeviceSynchronize();
-    Log(debug, "Moved rowIndices to device memory");
-    cudaMemGetInfo(&mf, &ma);
-    // std::cout << "free: " << mf << " total: " << ma << std::endl;)
-    g.colInd->switch_to_gpu(config.deviceId, g.numEdges);
-    cudaDeviceSynchronize();
-    Log(debug, "Moved colIndices to device memory");
-    cudaMemGetInfo(&mf, &ma);
-    // std::cout << "free: " << mf << " total: " << ma << std::endl;
-    gd->rowInd = g.rowInd->gdata();
-    gd->colInd = g.colInd->gdata();
-
-    Log(debug, "Moved graph to device memory");
-    cudaFreeHost(rp);
-    cudaFreeHost(ri);
-    cudaFreeHost(ci);
-
-    Log(info, "Transfer Time: %f s", total_timer.elapsed());
-
     uint dv = 32;
     typedef unsigned int ttt;
+    config.cutoff = get_stats(m, n, n, g.rowPtr->cdata(), g.colInd->cdata());
+    Log(debug, "cutoff: %u", config.cutoff);
+
     if (config.printStats)
     {
         MatrixStats(m, n, n, g.rowPtr->cdata(), g.colInd->cdata());
@@ -304,6 +270,42 @@ int main(int argc, char **argv)
             }
         }
     }
+
+    Timer total_timer;
+
+    graph::COOCSRGraph_d<uint> *gd = (graph::COOCSRGraph_d<uint> *)malloc(sizeof(graph::COOCSRGraph_d<uint>));
+
+    gd->numNodes = g.numNodes;
+    gd->numEdges = g.numEdges;
+    gd->capacity = g.capacity;
+
+    size_t mf, ma;
+    g.rowPtr->switch_to_gpu(config.deviceId, g.numNodes + 1);
+    cudaDeviceSynchronize();
+    Log(debug, "Moved rowPtr to device memory");
+    cudaMemGetInfo(&mf, &ma);
+    // std::cout << "free: " << mf << " total: " << ma << std::endl;
+    gd->rowPtr = g.rowPtr->gdata();
+
+    g.rowInd->switch_to_gpu(config.deviceId, g.numEdges);
+    cudaDeviceSynchronize();
+    Log(debug, "Moved rowIndices to device memory");
+    cudaMemGetInfo(&mf, &ma);
+    // std::cout << "free: " << mf << " total: " << ma << std::endl;)
+    g.colInd->switch_to_gpu(config.deviceId, g.numEdges);
+    cudaDeviceSynchronize();
+    Log(debug, "Moved colIndices to device memory");
+    cudaMemGetInfo(&mf, &ma);
+    // std::cout << "free: " << mf << " total: " << ma << std::endl;
+    gd->rowInd = g.rowInd->gdata();
+    gd->colInd = g.colInd->gdata();
+
+    Log(debug, "Moved graph to device memory");
+    cudaFreeHost(rp);
+    cudaFreeHost(ri);
+    cudaFreeHost(ci);
+
+    Log(info, "Transfer Time: %f s", total_timer.elapsed());
 
     if (config.mt == GRAPH_MATCH || config.mt == GRAPH_COUNT)
     {

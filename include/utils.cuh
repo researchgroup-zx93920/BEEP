@@ -16,7 +16,6 @@
 #include <stdarg.h>
 
 #include <cstdio>
-#include <string>
 // freestanding specific
 
 #include "defs.cuh"
@@ -181,6 +180,84 @@ void MatrixStats(T nnz, T nr, T nc, T *csrRowPointers, T *csrColumns)
 
 	printf("%u,%u,%u,%u,%.1f,%.1f,%u,%u,%u,%u,%u\n",
 				 nnz, nr, nc, minRow, mean, sd, median, maxRow, countMin, countMedian, countMax);
+}
+
+template <typename T>
+T get_stats(T nnz, T nr, T nc, T *csrRowPointers, T *csrColumns)
+{
+	std::map<T, T> dictionary;
+
+	T minRow = 0;
+	T maxRow = 1;
+	T totalRow = 0;
+	T median = 0;
+
+	T countMin = 0;
+	T countMax = 0;
+	T countMedian = 0;
+	double sq_sum = 0;
+
+	T _nr = nr;
+
+	for (uint64 i = 0; i < nr; i++)
+	{
+		T start = csrRowPointers[i] - 1;
+		T end = csrRowPointers[i + 1] - 1;
+		T rowCount = (end - start);
+
+		if (dictionary.count(rowCount) < 1)
+			dictionary[rowCount] = 1;
+		else
+			dictionary[rowCount]++;
+
+		if (rowCount == 0)
+			_nr--;
+	}
+
+	typedef typename std::map<T, T>::iterator it_type;
+	for (it_type iterator = dictionary.begin(); iterator != dictionary.end(); iterator++)
+	{
+		if (iterator->first == 0)
+			continue;
+
+		if (minRow == 0)
+		{
+			minRow = iterator->first;
+			countMin = iterator->second;
+		}
+
+		if (countMedian < iterator->second)
+		{
+			median = iterator->first;
+			countMedian = iterator->second;
+		}
+
+		totalRow += iterator->second * iterator->first;
+
+		maxRow = iterator->first;
+		countMax = iterator->second;
+	}
+
+	double mean = 1.0 * totalRow / nr;
+	// double sd = std::sqrt( (sq_sum / nr) - (mean * mean));
+	double sd = 0;
+	for (uint64 i = 0; i < nr; i++)
+	{
+		T start = csrRowPointers[i];
+		T end = csrRowPointers[i + 1];
+		T rowCount = (end - start);
+
+		double diff = rowCount - mean;
+		sd += diff * diff;
+	}
+
+	double variance = sd / nr;
+	sd = std::sqrt(variance);
+
+	printf("%u,%u,%u,%u,%.1f,%.1f,%u,%u,%u,%u,%u\n",
+				 nnz, nr, nc, minRow, mean, sd, median, maxRow, countMin, countMedian, countMax);
+
+	return ceil(mean + 6.0 * sd);
 }
 
 template <typename T>
