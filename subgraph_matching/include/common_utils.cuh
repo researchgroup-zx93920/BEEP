@@ -13,6 +13,7 @@ __constant__ uint CBPSM;
 __constant__ uint ORIENTED_MAXDEG;
 __constant__ uint FIRST_SYM_LEVEL;
 __constant__ uint CB;
+__constant__ uint NDEV;
 
 using InBucketWinType = bool;
 

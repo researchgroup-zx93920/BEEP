@@ -1123,7 +1123,7 @@ namespace graph
 					temp_degree = nodeDegree.gdata()[sorted_src.cdata()[iter]];
 					// printf("%u, ", temp_degree);
 				}
-				T boundary = iter; //split nodes till this boundary
+				T boundary = iter; // split nodes till this boundary
 				// printf("\n");
 				Log(debug, "Boundary: %u", boundary);
 				Log(debug, "Cutoff at Boundary: %u", cutoff_);
@@ -1156,6 +1156,7 @@ namespace graph
 					CUDA_RUNTIME(cudaMemcpyToSymbol(PARTSIZE, &partitionSize, sizeof(PARTSIZE)));
 					CUDA_RUNTIME(cudaMemcpyToSymbol(CBPSM, &(max_active_blocks), sizeof(CBPSM)));
 					CUDA_RUNTIME(cudaMemcpyToSymbol(CB, &(grid_block_size), sizeof(CB)));
+					CUDA_RUNTIME(cudaMemcpyToSymbol(NDEV, &(ndev_), sizeof(NDEV)));
 				}
 				CUDA_RUNTIME(cudaSetDevice(first_d));
 
@@ -1163,9 +1164,10 @@ namespace graph
 				Log(debug, "grid size: %u", grid_block_size);
 
 				// multidevice implementation with work stealing
-				// GPUArray<uint64> work_list_head("Global work stealing head", AllocationTypeEnum::unified, 1, dev_);
+				GPUArray<uint64> work_list_head2("Global work stealing head", AllocationTypeEnum::unified, 1, dev_);
 				// uint64 wl_head = (first_sym_level > 2) ? 0 : 1;
-				// work_list_head.gdata()[0] = wl_head;
+				uint64 wl_head = boundary;
+				work_list_head2.gdata()[0] = wl_head;
 
 				cudaMemAdvise(dataGraph.oriented_colInd, (m) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
 				cudaMemAdvise(dataGraph.colInd, (m) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
@@ -1194,15 +1196,15 @@ namespace graph
 					GPUArray<MessageBlock> messages("Messages for sharing info", AllocationTypeEnum::gpu, grid_block_size, d);
 					GPUArray<T> per_node_count("for debugging", AllocationTypeEnum::unified, dataGraph.numNodes, d);
 					GPUArray<uint64> work_list_head1("Global work stealing list", AllocationTypeEnum::gpu, 1, d);
-					GPUArray<uint64> work_list_head2("Global work stealing list", AllocationTypeEnum::gpu, 1, d);
+					// GPUArray<uint64> work_list_head2("Global work stealing list", AllocationTypeEnum::gpu, 1, d);
 
 					uint64 temp_head1 = (first_sym_level > 2) ? 0 : 1;
 					// if (d - first_d > 0)
 					// 	temp_head = tails.gdata()[d - first_d - 1];
 					// temp_head += d - first_d;
-					uint64 temp_head2 = boundary + d - first_d;
+					// uint64 temp_head2 = boundary + d - first_d;
 					CUDA_RUNTIME(cudaMemcpy(work_list_head1.gdata(), &temp_head1, sizeof(uint64), cudaMemcpyHostToDevice));
-					CUDA_RUNTIME(cudaMemcpy(work_list_head2.gdata(), &temp_head2, sizeof(uint64), cudaMemcpyHostToDevice));
+					// CUDA_RUNTIME(cudaMemcpy(work_list_head2.gdata(), &temp_head2, sizeof(uint64), cudaMemcpyHostToDevice));
 					CUDA_RUNTIME(cudaMemset(dev_counter.gdata(), 0, sizeof(uint64)));
 					CUDA_RUNTIME(cudaMemset(node_be.gdata(), 0, encode_size * sizeof(T)));
 					CUDA_RUNTIME(cudaMemset(current_level.gdata(), 0, level_size * sizeof(T)));
@@ -1221,9 +1223,9 @@ namespace graph
 					gh.current_level = current_level.gdata();
 					gh.adj_enc = node_be.gdata();
 					gh.Message = messages.gdata();
-					// gh.stride = 1;
+					gh.stride = 1;
 					gh.devId = d - first_d;
-					gh.stride = ndev_;
+					// gh.stride = ndev_;
 					gh.boundary = boundary;
 					gh.cutoff = cutoff_;
 
@@ -1261,7 +1263,7 @@ namespace graph
 					CUDA_RUNTIME(cudaFree(work_ready));
 					queue_free(queue, tickets, head, tail);
 					work_list_head1.freeGPU();
-					work_list_head2.freeGPU();
+					// work_list_head2.freeGPU();
 				}
 				// Print bucket stats:
 				// std::cout << "\nBucket levels: " << level << " to " << maxDeg

@@ -57,7 +57,7 @@ __launch_bounds__(BLOCK_DIM_X)
 			while (sh.wtc[wx] < sh.srcLen)
 			{
 				T j = sh.wtc[wx];
-				if ((!(SYMNODE_PTR[2] == 1 && j < (sh.srcSplit - sh.srcStart))) && ((sh.srcLen > gh.cutoff && (j % gh.stride) == gh.devId) || sh.srcLen <= gh.cutoff))
+				if ((!(SYMNODE_PTR[2] == 1 && j < (sh.srcSplit - sh.srcStart))) && ((sh.srcLen > gh.cutoff && (j % NDEV) == gh.devId) || sh.srcLen <= gh.cutoff))
 				{
 					T *cl = sh.level_offset + wx * (NUMDIVS * MAXLEVEL);
 					init_stack(sh, gh, partMask, j);
