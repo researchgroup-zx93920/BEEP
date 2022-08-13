@@ -25,8 +25,8 @@
 // #include "../cub/cub.cuh"
 #include <cub/cub.cuh>
 
-#define CUDA_RUNTIME(ans)                     \
-	{                                         \
+#define CUDA_RUNTIME(ans)                 \
+	{                                       \
 		gpuAssert((ans), __FILE__, __LINE__); \
 	}
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort = false)
@@ -40,11 +40,11 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort =
 	}
 }
 
-#define PRINT_ERROR                                              \
-	do                                                           \
-	{                                                            \
+#define PRINT_ERROR                                          \
+	do                                                         \
+	{                                                          \
 		fprintf(stderr, "Error at line %d, file %s (%d) [%s]\n", \
-				__LINE__, __FILE__, errno, strerror(errno));     \
+						__LINE__, __FILE__, errno, strerror(errno));     \
 		exit(1);                                                 \
 	} while (0)
 
@@ -68,7 +68,7 @@ __device__ __forceinline__ unsigned int getnsmid()
 {
 	unsigned int r;
 	asm("mov.u32 %0, %%nsmid;"
-		: "=r"(r));
+			: "=r"(r));
 	return r;
 }
 
@@ -77,7 +77,7 @@ __device__ __forceinline__ unsigned int getsmid()
 {
 	unsigned int r;
 	asm("mov.u32 %0, %%smid;"
-		: "=r"(r));
+			: "=r"(r));
 	return r;
 }
 
@@ -86,7 +86,7 @@ __device__ __forceinline__ unsigned int getwarpid()
 {
 	unsigned int r;
 	asm("mov.u32 %0, %%warpid;"
-		: "=r"(r));
+			: "=r"(r));
 	return r;
 }
 
@@ -95,7 +95,7 @@ __device__ __forceinline__ unsigned int getlaneid()
 {
 	unsigned int r;
 	asm("mov.u32 %0, %%laneid;"
-		: "=r"(r));
+			: "=r"(r));
 	return r;
 }
 
@@ -180,7 +180,7 @@ void MatrixStats(T nnz, T nr, T nc, T *csrRowPointers, T *csrColumns)
 	sd = std::sqrt(variance);
 
 	printf("%u,%u,%u,%u,%.1f,%.1f,%u,%u,%u,%u,%u\n",
-		   nnz, nr, nc, minRow, mean, sd, median, maxRow, countMin, countMedian, countMax);
+				 nnz, nr, nc, minRow, mean, sd, median, maxRow, countMin, countMedian, countMax);
 }
 
 template <typename T>

@@ -160,6 +160,72 @@ void key_sort_ascending(T *mapping, T *queue, T len)
     cudaDeviceSynchronize();
 }
 
+template <typename T>
+void quicksort1_triplet(triplet<T> *data, T start, T end)
+{
+    if ((end - start + 1) > 1)
+    {
+        T left = start, right = end;
+        T pivot = data[right].priority;
+        while (left <= right)
+        {
+            while (data[left].priority < pivot)
+            {
+                left = left + 1;
+            }
+            while (data[right].priority > pivot)
+            {
+                right = right - 1;
+            }
+            if (left <= right)
+            {
+                // swap data
+                triplet<T> tmpData = data[left];
+                data[left] = data[right];
+                data[right] = tmpData;
+
+                left = left + 1;
+                right = right - 1;
+            }
+        }
+        quicksort1_triplet(data, start, right);
+        quicksort1_triplet(data, left, end);
+    }
+}
+
+template <typename T>
+void quicksort2_triplet(triplet<T> *data, T start, T end)
+{
+    if ((end - start + 1) > 1)
+    {
+        T left = start, right = end;
+        T pivot = data[right].partition;
+        while (left <= right)
+        {
+            while (data[left].partition < pivot)
+            {
+                left = left + 1;
+            }
+            while (data[right].partition > pivot)
+            {
+                right = right - 1;
+            }
+            if (left <= right)
+            {
+                // swap data
+                triplet<T> tmpData = data[left];
+                data[left] = data[right];
+                data[right] = tmpData;
+
+                left = left + 1;
+                right = right - 1;
+            }
+        }
+        quicksort2_triplet(data, start, right);
+        quicksort2_triplet(data, left, end);
+    }
+}
+
 template <typename T, bool ASCENDING>
 __global__ void set_priority(graph::COOCSRGraph_d<T> g, T *priority)
 {
