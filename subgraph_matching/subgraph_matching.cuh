@@ -1169,11 +1169,11 @@ namespace graph
                 uint64 wl_head = boundary;
                 work_list_head2.gdata()[0] = wl_head;
 
-                cudaMemAdvise(dataGraph.oriented_colInd, (m) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
-                cudaMemAdvise(dataGraph.colInd, (m) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
-                cudaMemAdvise(dataGraph.splitPtr, (n) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
-                cudaMemAdvise(dataGraph.rowPtr, (n + 1) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
-                cudaMemAdvise(dataGraph.rowInd, (m) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/);
+                CUDA_RUNTIME(cudaMemAdvise(dataGraph.oriented_colInd, (m) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/));
+                CUDA_RUNTIME(cudaMemAdvise(dataGraph.colInd, (m) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/));
+                CUDA_RUNTIME(cudaMemAdvise(dataGraph.splitPtr, (n) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/));
+                CUDA_RUNTIME(cudaMemAdvise(dataGraph.rowPtr, (n + 1) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/));
+                CUDA_RUNTIME(cudaMemAdvise(dataGraph.rowInd, (m) * sizeof(uint), cudaMemAdviseSetReadMostly, dev_ /*ignored*/));
                 // for (int d = first_d; d < first_d + ndev_; d++)
                 // {
                 // 	uint64 wl_head = (first_sym_level > 2) ? 0 : 1;
@@ -1330,7 +1330,7 @@ namespace graph
         else
             thrust::stable_sort(thrust::host, triplet_array.gdata(), triplet_array.gdata() + m, comparePartition<T>());
 
-        CUDA_RUNTIME(cudaMalloc(&g.oriented_colInd, m * sizeof(T)));
+        CUDA_RUNTIME(cudaMallocManaged(&g.oriented_colInd, m * sizeof(T)));
         execKernel((map_back<T>), edge_gridSize, blockSize, dev_, false, triplet_array.gdata(), g);
         triplet_array.freeGPU();
     }
