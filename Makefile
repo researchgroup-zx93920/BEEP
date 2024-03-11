@@ -1,7 +1,8 @@
 NVCC = nvcc
 TARGET_EXEC ?= a.out
 
-BUILD_DIR ?= ./race
+ARCH := $(shell ./get_SM.sh)
+BUILD_DIR ?= ./build
 SRC_DIRS ?= ./src
 INC_DIRS ?= 
 EXE_DIR ?= $(BUILD_DIR)/exec
@@ -19,8 +20,8 @@ INCL_DIRS := #./include $(FREESTAND_DIR)/include
 INC_FLAGS := $(addprefix -I,$(INCL_DIRS))
 LDFLAGS := -L./nauty/ -l:nauty.a -lcuda -lgomp
 CPPFLAGS ?= $(INC_FLAGS) -g -Wall -pthread -MMD -MP -shared -fPIC -std=c++11 -O3 -mavx -ftree-vectorize -fopt-info-vec
-CUDAFLAGS = $(INC_FLAGS) -g -w -Xcompiler -fopenmp -lineinfo -O3 -DCUDA -DNOT_IMPL -arch=sm_80 -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_80,code=compute_80
-CUDADEBUGFLAGS = $(INC_DIRS) -g -w -G -std=c++11 -DCUDA -DNOT_IMPL -arch=sm_80 -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_80,code=compute_80
+CUDAFLAGS = $(INC_FLAGS) -g -w -Xcompiler -fopenmp -lineinfo -O3 -DCUDA -DNOT_IMPL -arch=sm_$(ARCH) -gencode=arch=compute_$(ARCH),code=sm_$(ARCH) -gencode=arch=compute_$(ARCH),code=compute_$(ARCH)
+CUDADEBUGFLAGS = $(INC_DIRS) -g -w -G -std=c++11 -DCUDA -DNOT_IMPL -arch=sm_$(ARCH) -gencode=arch=compute_$(ARCH),code=sm_$(ARCH) -gencode=arch=compute_$(ARCH),code=compute_$(ARCH)
 
 all: objs release_exes
 
