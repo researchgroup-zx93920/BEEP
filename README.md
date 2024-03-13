@@ -49,7 +49,19 @@ Below is a stepwise illustration to convert cit-patents from .txt to .bel (Use $
 
 ## Getting Template/Query Graphs:
 BEEP supports query graphs with a central node (see Figure 5 in the paper).
-The query graph has to be input in ```.mtx``` format. (Use a similar process to convert to any valid query graph to .mtx)
+The query graph has to be input in ```.mtx``` format. (Use a similar process to convert any valid query graph to .mtx)
+The query graph is treated as a directed graph, hence the mtx file should have forward and backward edges.
+
+For example, a .mtx file for Triangle would be:
+```
+3 3 6
+0 1
+0 2
+1 0
+1 2
+2 0
+2 1
+```
 
 ## Running BEEP
 Once the query and data graphs are ready, BEEP can be minimally run using
