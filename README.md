@@ -104,3 +104,7 @@ We support open-source code, feel free to contact the author for any questions.
 Author info: Samiran Kawtikwar (samiran2@illinois.edu)
 
 https://samiran-kawtikwar.github.io/
+
+## Reference
+Samiran Kawtikwar, Mohammad Almasri, Wen-Mei Hwu, Rakesh Nagi, and Jinjun Xiong. 2023. BEEP: Balanced Efficient subgraph Enumeration in Parallel. In Proceedings of the 52nd International Conference on Parallel Processing (ICPP '23). Association for Computing Machinery, New York, NY, USA, 142–152. https://doi.org/10.1145/3605573.3605653
+
